@@ -62,8 +62,8 @@ async function submit() {
         <div class="flex flex-col gap-1.5">
           <Label for="sn-script">Script</Label>
           <div class="flex overflow-hidden rounded-md border border-border-input bg-terminal-bg focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/40">
-            <pre aria-hidden="true" class="select-none border-r border-border px-2 py-2 text-right font-mono text-[13px] leading-5 text-muted">{{ lines }}</pre>
-            <Textarea id="sn-script" v-model="form.script" rows="6" spellcheck="false" class="min-h-0 flex-1 resize-y rounded-none border-0 bg-transparent px-2.5 py-2 font-mono text-[13px] leading-5 focus-visible:ring-0" />
+            <pre aria-hidden="true" class="select-none border-r border-border px-2 py-2 text-right font-mono text-sm leading-5 text-muted">{{ lines }}</pre>
+            <Textarea id="sn-script" v-model="form.script" rows="6" spellcheck="false" class="min-h-0 flex-1 resize-y rounded-none border-0 bg-transparent px-2.5 py-2 font-mono text-sm leading-5 focus-visible:ring-0" />
           </div>
           <p class="text-xs text-muted">Runs line by line in the session. Use the host's environment variables for values that change.</p>
         </div>

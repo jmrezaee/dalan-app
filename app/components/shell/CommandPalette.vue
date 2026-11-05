@@ -3,6 +3,7 @@
 import { ScrollText, ArrowDownUp, Code2, LayoutGrid, KeyRound, Waypoints, Lock, Plus, Server, Settings, ShieldCheck, SquareTerminal, Vault } from '@lucide/vue'
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator, CommandShortcut } from '@/components/ui/command'
 import type { HostSummary } from '~/types/bindings'
+const { label: shortcutLabel, fixed: shortcutFixed } = useShortcutLabel()
 
 const open = defineModel<boolean>('open', { required: true })
 const emit = defineEmits<{ action: [name: 'new-host' | 'new-tab' | 'local' | 'sftp' | 'keychain' | 'forwards' | 'snippets' | 'logs' | 'known-hosts' | 'settings' | 'lock' | 'vault'] }>()
@@ -24,7 +25,7 @@ const openTabs = computed(() => sessions.sessions.filter(s => s.kind === 'sessio
   <CommandDialog v-model:open="open" title="Command palette" description="Jump to a host, a tab or an action.">
     <CommandInput placeholder="Search hosts, tabs and actions" />
     <CommandList>
-      <CommandEmpty>No matches. Press ⌘N to add a host.</CommandEmpty>
+      <CommandEmpty>No matches. Press {{ shortcutLabel('new-host') }} to add a host.</CommandEmpty>
 
       <CommandGroup v-if="openTabs.length" heading="Tabs">
         <CommandItem v-for="s in openTabs" :key="s.key" :value="`tab ${s.label} ${s.address}`" @select="gotoTab(s.key)">
@@ -44,17 +45,17 @@ const openTabs = computed(() => sessions.sessions.filter(s => s.kind === 'sessio
 
       <CommandSeparator />
       <CommandGroup heading="Actions">
-        <CommandItem value="action new host add" @select="act('new-host')"><Plus />New host<CommandShortcut>⌘N</CommandShortcut></CommandItem>
-        <CommandItem value="action new tab" @select="act('new-tab')"><Plus />New tab<CommandShortcut>⌘T</CommandShortcut></CommandItem>
+        <CommandItem value="action new host add" @select="act('new-host')"><Plus />New host<CommandShortcut>{{ shortcutLabel('new-host') }}</CommandShortcut></CommandItem>
+        <CommandItem value="action new tab" @select="act('new-tab')"><Plus />New tab<CommandShortcut>{{ shortcutLabel('new-tab') }}</CommandShortcut></CommandItem>
         <CommandItem value="action local terminal shell this computer" @select="act('local')"><SquareTerminal />Open local terminal</CommandItem>
-        <CommandItem value="action vault hosts" @select="act('vault')"><Vault />Go to Hosts<CommandShortcut>⌘1</CommandShortcut></CommandItem>
+        <CommandItem value="action vault hosts" @select="act('vault')"><Vault />Go to Hosts<CommandShortcut>{{ shortcutFixed('Mod+1') }}</CommandShortcut></CommandItem>
         <CommandItem value="action sftp files transfer" @select="act('sftp')"><ArrowDownUp />Go to SFTP</CommandItem>
         <CommandItem value="action keychain keys identities" @select="act('keychain')"><KeyRound />Go to Keychain</CommandItem>
         <CommandItem value="action port forwarding tunnels" @select="act('forwards')"><Waypoints />Go to Port forwarding</CommandItem>
         <CommandItem value="action snippets scripts" @select="act('snippets')"><Code2 />Go to Snippets</CommandItem>
         <CommandItem value="action logs session history" @select="act('logs')"><ScrollText />Go to Logs</CommandItem>
         <CommandItem value="action known hosts fingerprints" @select="act('known-hosts')"><ShieldCheck />Go to Known hosts</CommandItem>
-        <CommandItem value="action settings preferences" @select="act('settings')"><Settings />Settings<CommandShortcut>⌘,</CommandShortcut></CommandItem>
+        <CommandItem value="action settings preferences" @select="act('settings')"><Settings />Settings<CommandShortcut>{{ shortcutLabel('settings') }}</CommandShortcut></CommandItem>
         <CommandItem value="action lock vault" @select="act('lock')"><Lock />Lock Dalan</CommandItem>
       </CommandGroup>
     </CommandList>

@@ -5,6 +5,7 @@ import type { Session } from '~/stores/sessions'
 import type { OverlayKind } from './StatusOverlay.vue'
 import { Input } from '@/components/ui/input'
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
+const { label: shortcutLabel } = useShortcutLabel()
 
 const props = defineProps<{ session: Session, active: boolean, embedded?: boolean }>()
 defineEmits<{ editHost: [hostId: string], newHost: [] }>()
@@ -60,8 +61,9 @@ const cancel = () => sessions.respond(props.session, false)
   <NewTab v-if="session.kind === 'new'" @new-host="$emit('newHost')" />
   <div v-else class="flex size-full">
     <div class="relative min-w-0 flex-1">
-    <TerminalView :session="session" :active="active" />
-    <IconButton v-if="session.status === 'ready' && !embedded" label="Snippets" shortcut="⌘." class="absolute right-3 top-2 z-10 bg-surface/70" :pressed="sessions.panelOpen" @click="sessions.panelOpen = !sessions.panelOpen"><PanelRight /></IconButton>
+    <!-- While a card asks something, the terminal behind it is hidden from screen readers and can't take focus. -->
+    <div class="size-full" :aria-hidden="overlay ? 'true' : undefined" :inert="!!overlay"><TerminalView :session="session" :active="active" /></div>
+    <IconButton v-if="session.status === 'ready' && !embedded" label="Snippets" :shortcut="shortcutLabel('side-panel')" class="absolute right-3 top-2 z-10 bg-surface/70" :pressed="sessions.panelOpen" @click="sessions.panelOpen = !sessions.panelOpen"><PanelRight /></IconButton>
     <StatusOverlay
       v-if="overlay"
       :kind="overlay"

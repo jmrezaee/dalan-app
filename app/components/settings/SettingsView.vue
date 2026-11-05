@@ -5,6 +5,7 @@ import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import { SHORTCUT_ACTIONS, defaultCombo, eventCombo, formatCombo } from '~/utils/shortcuts'
+const { label: shortcutLabel } = useShortcutLabel()
 
 const settings = useSettingsStore()
 const sections = ['Appearance', 'Terminal', 'Logs', 'AI', 'Shortcuts', 'Security', 'About'] as const
@@ -74,9 +75,9 @@ async function copyDiagnostics() {
 }
 
 const THEMES = [
-  { value: 'system', label: 'System', swatch: 'bg-gradient-to-r from-neutral-900 from-50% to-white to-50%' },
-  { value: 'dark', label: 'Dark', swatch: 'bg-neutral-900' },
-  { value: 'light', label: 'Light', swatch: 'bg-white' },
+  { value: 'system', label: 'System' },
+  { value: 'dark', label: 'Dark' },
+  { value: 'light', label: 'Light' },
 ] as const
 const LOCK_OPTIONS = [{ v: 0, l: 'Never' }, { v: 1, l: '1 minute' }, { v: 5, l: '5 minutes' }, { v: 15, l: '15 minutes' }, { v: 30, l: '30 minutes' }, { v: 60, l: '1 hour' }]
 const fixedShortcuts = [{ name: 'Vault', keys: ['Mod+1'] }, { name: 'SFTP', keys: ['Mod+2'] }, { name: 'Switch to tab 3 to 9', keys: ['Mod+3', 'Mod+9'] }]
@@ -138,7 +139,11 @@ const num = (v: string | number, fallback: number) => (Number.isFinite(Number(v)
                 :class="cn('w-[88px] rounded-lg border border-border p-1.5 text-center text-xs', settings.theme === t.value && 'border-accent ring-1 ring-accent')"
                 @click="settings.setTheme(t.value)"
               >
-                <span :class="cn('mb-1 block h-10 rounded border border-border', t.swatch)" />{{ t.label }}
+                <!-- The `dark` / `light` classes scope our colour variables, so each half shows its own theme's background. -->
+                <span class="mb-1 flex h-10 overflow-hidden rounded border border-border">
+                  <span v-if="t.value !== 'light'" class="dark flex-1 bg-bg" />
+                  <span v-if="t.value !== 'dark'" class="light flex-1 bg-bg" />
+                </span>{{ t.label }}
               </button>
             </div>
           </div>
@@ -169,7 +174,7 @@ const num = (v: string | number, fallback: number) => (Number.isFinite(Number(v)
             <Switch :model-value="settings.logsEnabled" aria-label="Keep session logs" @update:model-value="(v: boolean) => settings.setLogs(v)" />
           </div>
           <div class="row">
-            <span class="flex flex-1 flex-col">Remember typed commands<span class="text-xs text-muted">Fills the History tab in a terminal's side panel (⌘.), per server. Lines you edit with arrows or Tab, and lines typed at a password prompt, are skipped.</span></span>
+            <span class="flex flex-1 flex-col">Remember typed commands<span class="text-xs text-muted">Fills the History tab in a terminal's side panel ({{ shortcutLabel('side-panel') }}), per server. Lines you edit with arrows or Tab, and lines typed at a password prompt, are skipped.</span></span>
             <Switch :model-value="settings.historyEnabled" aria-label="Remember typed commands" @update:model-value="(v: boolean) => settings.setHistory(v)" />
           </div>
           <p class="pt-3 text-xs text-muted">Commands and logs are encrypted on this computer. Lines that carry an obvious secret (--password, TOKEN=, mysql -pSECRET) are not saved, but that is a guess, so a secret in an unusual spot can still be kept. Logs can hold anything shown on screen, so turn this on only if that's fine for your servers. Old logs stay readable after you change the master password.</p>

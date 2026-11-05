@@ -12,13 +12,13 @@ use crate::state::AppState;
 #[specta::specta]
 pub async fn import_preview(
     state: State<'_, AppState>,
-    kind: String,
+    kind: import::ImportKind,
     path: Option<String>,
 ) -> AppResult<ImportPreview> {
     state
         .with_db_session(move |c, s| {
-            let text = import::read_file(&kind, path.as_deref())?;
-            import::preview(c, &s.vault_id, &kind, &text)
+            let text = import::read_file(kind, path.as_deref())?;
+            import::preview(c, &s.vault_id, kind, &text)
         })
         .await
 }

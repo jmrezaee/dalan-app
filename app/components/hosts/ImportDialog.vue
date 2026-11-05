@@ -1,9 +1,8 @@
 <script setup lang="ts">
 // S25 / F10: import hosts from an OpenSSH config or a CSV. Pick a source, review the list, then import.
 // The webview only chooses a path; Rust reads the file and parses it.
-import { open as pickFile } from '@tauri-apps/plugin-dialog'
 import { FolderOpen, TriangleAlert } from '@lucide/vue'
-import type { ImportRow } from '~/types/bindings'
+import type { ImportKind, ImportRow } from '~/types/bindings'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
@@ -14,7 +13,7 @@ const open = defineModel<boolean>('open', { required: true })
 const hosts = useHostsStore()
 const api = useTauri()
 
-type Kind = 'ssh_config' | 'csv' | 'putty' | 'mobaxterm'
+type Kind = ImportKind
 const kind = ref<Kind>('ssh_config')
 const rows = ref<ImportRow[]>([])
 const fileWarnings = ref<string[]>([])
@@ -55,8 +54,8 @@ async function load(path: string | null) {
 
 async function choose() {
   try {
-    const p = await pickFile({ multiple: false, directory: false })
-    if (typeof p === 'string') await load(p)
+    const p = await useTauri().pickFile()
+    if (p) await load(p)
   }
   catch {
     error.value = 'Couldn\'t open the file picker.'

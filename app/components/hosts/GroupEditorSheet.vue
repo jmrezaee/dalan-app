@@ -4,6 +4,7 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import type { AgentConfig, EnvVar, ProxyChoice, GroupSummary, InheritedVar } from '~/types/bindings'
+const { fixed: shortcutFixed } = useShortcutLabel()
 
 const hosts = useHostsStore()
 const keychain = useKeychainStore()
@@ -202,7 +203,7 @@ async function submit() {
       </form>
 
       <div class="flex h-14 shrink-0 items-center justify-end gap-2 border-t border-border px-5">
-        <span class="mr-auto text-xs text-muted"><Kbd>⌘S</Kbd> to save</span>
+        <span class="mr-auto text-xs text-muted"><Kbd>{{ shortcutFixed('Mod+S') }}</Kbd> to save</span>
         <Button variant="secondary" @click="open = false">Cancel</Button>
         <Button :loading="busy" @click="submit">Save</Button>
       </div>

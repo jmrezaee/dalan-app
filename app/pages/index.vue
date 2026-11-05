@@ -73,8 +73,6 @@ function confirmClose() {
   if (closing.value) sessions.close(closing.value)
 }
 const closingCount = computed(() => (closing.value?.kind === 'workspace' ? closing.value.panes.length : 1))
-const statusDot = (s: Session) => (s.status === 'ready' ? 'unread' : s.status === 'error' ? 'error' : s.status === 'disconnected' ? 'idle' : 'waiting')
-const statusLabel = (s: Session) => ({ ready: 'Connected', error: 'Connection failed', disconnected: 'Disconnected', connecting: 'Connecting', authenticating: 'Signing in' })[s.status]
 
 
 
@@ -155,8 +153,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
         @close="requestClose(s)"
       >
         <template #leading>
-          <StatusDot v-if="s.kind === 'session'" :status="statusDot(s)" :label="statusLabel(s)" />
-          <LayoutGrid v-else-if="s.kind === 'workspace'" class="size-4 text-accent" aria-hidden="true" />
+          <StatusDot v-if="s.kind === 'session'" :status="paneDot(s)" :label="paneDotLabel(s, s.label)" />
+          <template v-else-if="s.kind === 'workspace'">
+            <LayoutGrid class="size-4 text-accent" aria-hidden="true" />
+            <StatusDot :status="workspaceDot(s.panes)" :label="`${s.label}: ${workspaceDot(s.panes) === 'idle' ? 'all quiet' : workspaceDot(s.panes) === 'waiting' ? 'a pane is waiting for input' : workspaceDot(s.panes) === 'error' ? 'a pane failed or disconnected' : 'new output'}`" />
+          </template>
         </template>
       </AppTab>
     </TabBar>

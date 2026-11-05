@@ -1,7 +1,6 @@
 <script setup lang="ts">
 // Attach an OpenSSH user certificate (id_ed25519-cert.pub) to a key: key and certificate become one item.
 // Paste the text, or choose the file; Rust reads the file and checks the certificate.
-import { open as pickFile } from '@tauri-apps/plugin-dialog'
 import { FolderOpen } from '@lucide/vue'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
@@ -26,8 +25,8 @@ watch(open, (o) => {
 
 async function choose() {
   try {
-    const p = await pickFile({ multiple: false, directory: false })
-    if (typeof p === 'string') {
+    const p = await useTauri().pickFile()
+    if (p) {
       path.value = p
       text.value = ''
     }

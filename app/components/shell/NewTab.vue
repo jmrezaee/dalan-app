@@ -66,7 +66,7 @@ defineExpose({ focus: () => input.value?.focus() })
           v-model="query"
           aria-label="Search hosts"
           placeholder="Type a host, address or tag"
-          class="h-11 w-full rounded-lg border border-border-input bg-bg pl-10 pr-3 text-[15px] outline-none placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent/40"
+          class="h-11 w-full rounded-lg border border-border-input bg-bg pl-10 pr-3 text-base outline-none placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent/40"
           @keydown="onKey"
         >
       </label>

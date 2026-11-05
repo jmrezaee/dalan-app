@@ -298,11 +298,21 @@ pub fn parse_csv(text: &str) -> AppResult<ImportPreview> {
 
 // ------------------------------------------------------------------ preview and apply
 
+/// What kind of file is being imported. Generated into `bindings.ts`, so the UI can't send a typo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportKind {
+    SshConfig,
+    Csv,
+    Putty,
+    Mobaxterm,
+}
+
 /// Reads a chosen file. `None` means the default `~/.ssh/config`.
-pub fn read_file(kind: &str, path: Option<&str>) -> AppResult<String> {
+pub fn read_file(kind: ImportKind, path: Option<&str>) -> AppResult<String> {
     let path = match path {
         Some(p) => std::path::PathBuf::from(p),
-        None if kind == "ssh_config" => {
+        None if kind == ImportKind::SshConfig => {
             let home = std::env::var("HOME")
                 .or_else(|_| std::env::var("USERPROFILE"))
                 .map_err(|_| AppError::not_found("Couldn't find your home folder."))?;
@@ -328,15 +338,14 @@ pub fn read_file(kind: &str, path: Option<&str>) -> AppResult<String> {
 pub fn preview(
     conn: &Connection,
     vault_id: &str,
-    kind: &str,
+    kind: ImportKind,
     text: &str,
 ) -> AppResult<ImportPreview> {
     let mut p = match kind {
-        "ssh_config" => parse_ssh_config(text),
-        "csv" => parse_csv(text)?,
-        "putty" => clients::parse_putty(text),
-        "mobaxterm" => clients::parse_mobaxterm(text),
-        _ => return Err(AppError::validation("Unknown import type.")),
+        ImportKind::SshConfig => parse_ssh_config(text),
+        ImportKind::Csv => parse_csv(text)?,
+        ImportKind::Putty => clients::parse_putty(text),
+        ImportKind::Mobaxterm => clients::parse_mobaxterm(text),
     };
     if p.rows.len() > MAX_ROWS {
         return Err(AppError::validation(format!(
@@ -541,7 +550,9 @@ mod tests {
         let mut c = open_in_memory().unwrap();
         let s = vault::create(&c, "correct-horse-staple", KdfParams::cheap()).unwrap();
         let text = "label,address,port,user,group,tags\nbastion,1.1.1.1,,ops,Prod,x\nweb,2.2.2.2,2200,,Prod,\n";
-        let mut rows = preview(&c, &s.vault_id, "csv", text).unwrap().rows;
+        let mut rows = preview(&c, &s.vault_id, ImportKind::Csv, text)
+            .unwrap()
+            .rows;
         rows[1].jump = vec!["bastion".into(), "ghost".into()];
         let r = apply(&mut c, &s, &rows, None).unwrap();
         assert_eq!((r.created, r.skipped), (2, 0));
@@ -552,7 +563,7 @@ mod tests {
         assert_eq!(web.jump_host_ids.len(), 1); // ghost dropped
         assert_eq!(web.group_id, Some(tree.groups[0].id.clone()));
         // Importing the same file again marks everything as a duplicate.
-        assert!(preview(&c, &s.vault_id, "csv", text)
+        assert!(preview(&c, &s.vault_id, ImportKind::Csv, text)
             .unwrap()
             .rows
             .iter()

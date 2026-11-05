@@ -112,7 +112,7 @@ export const commands = {
 	 *  `kind` is `ssh_config` or `csv`. `path` is a file chosen in the dialog; for `ssh_config`,
 	 *  `None` reads `~/.ssh/config`. Rust reads the file, the webview only knows the path.
 	 */
-	importPreview: (kind: string, path: string | null) => typedError<ImportPreview_Serialize, AppError>(__TAURI_INVOKE("import_preview", { kind, path })),
+	importPreview: (kind: ImportKind, path: string | null) => typedError<ImportPreview_Serialize, AppError>(__TAURI_INVOKE("import_preview", { kind, path })),
 	importApply: (rows: ImportRow_Deserialize[], groupId: string | null) => typedError<ImportResult, AppError>(__TAURI_INVOKE("import_apply", { rows, groupId })),
 	/**
 	 *  Opens an SFTP session on a host. The caller picks `open_id` so it can answer host-key and
@@ -678,6 +678,9 @@ export type ImportInput_Serialize = {
 	passphrase: string | null,
 	save_passphrase: boolean,
 };
+
+/**  What kind of file is being imported. Generated into `bindings.ts`, so the UI can't send a typo. */
+export type ImportKind = "ssh_config" | "csv" | "putty" | "mobaxterm";
 
 export type ImportPreview = ImportPreview_Serialize | ImportPreview_Deserialize;
 

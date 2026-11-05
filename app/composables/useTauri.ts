@@ -1,7 +1,8 @@
 // The only place that talks to Rust. Stores call these wrappers, never `invoke` directly.
 import { Channel } from '@tauri-apps/api/core'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { commands } from '~/types/bindings'
-import type { AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportRow, KeyUpdate, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
+import type { AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -72,6 +73,11 @@ export function useTauri() {
     },
     sftpRespond: (openId: string, promptId: string, answer: PromptAnswer) => unwrap(commands.sftpRespond(openId, promptId, answer)),
     sftpClose: (sftpId: string) => commands.sftpClose(sftpId),
+    /** Asks the OS to choose one file. Returns its path only; Rust reads the file. `null` when cancelled. */
+    pickFile: async (): Promise<string | null> => {
+      const p = await openDialog({ multiple: false, directory: false })
+      return typeof p === 'string' ? p : null
+    },
     fsHome: (endpoint: string) => unwrap(commands.fsHome(endpoint)),
     fsRealpath: (endpoint: string, path: string) => unwrap(commands.fsRealpath(endpoint, path)),
     fsList: (endpoint: string, path: string, showHidden: boolean) => unwrap(commands.fsList(endpoint, path, showHidden)),
@@ -118,7 +124,7 @@ export function useTauri() {
     envSet: (kind: 'host' | 'group', id: string, mode: string, vars: EnvVar[]) => unwrap(commands.envSet(kind, id, mode, vars)),
     terminalThemesList: () => unwrap(commands.terminalThemesList()),
     terminalThemeSet: (kind: 'host' | 'group', id: string, theme: string | null) => unwrap(commands.terminalThemeSet(kind, id, theme)),
-    importPreview: (kind: 'ssh_config' | 'csv' | 'putty' | 'mobaxterm', path: string | null) => unwrap(commands.importPreview(kind, path)),
+    importPreview: (kind: ImportKind, path: string | null) => unwrap(commands.importPreview(kind, path)),
     importApply: (rows: ImportRow[], groupId: string | null) => unwrap(commands.importApply(rows, groupId)),
     workspacesList: () => unwrap(commands.workspacesList()),
     workspaceSave: (input: TemplateInput) => unwrap(commands.workspaceSave(input)),

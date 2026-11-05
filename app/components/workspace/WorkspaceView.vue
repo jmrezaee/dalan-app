@@ -8,6 +8,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+const { label: shortcutLabel } = useShortcutLabel()
 
 const props = defineProps<{ ws: Session, active: boolean }>()
 const emit = defineEmits<{ editHost: [hostId: string], newHost: [] }>()
@@ -23,8 +24,8 @@ const gridStyle = computed(() => (props.ws.mode === 'split'
   ? { gridTemplateColumns: `repeat(${cols.value}, minmax(0, 1fr))`, gridAutoRows: 'minmax(0, 1fr)' }
   : { gridTemplateColumns: 'minmax(0, 1fr)', gridAutoRows: 'minmax(0, 1fr)' }))
 
-const dot = (p: Session) => (p.status === 'ready' ? 'unread' : p.status === 'error' ? 'error' : p.status === 'disconnected' ? 'idle' : 'waiting') as 'unread' | 'waiting' | 'error' | 'idle'
-const dotLabel = (p: Session) => ({ ready: 'Connected', error: 'Connection failed', disconnected: 'Disconnected', connecting: 'Connecting', authenticating: 'Signing in' })[p.status]
+const dot = paneDot
+const dotLabel = (p: Session) => paneDotLabel(p)
 const hint = (p: Session) => (p.prompt ? 'needs an answer' : p.status === 'ready' ? 'connected' : p.status === 'disconnected' ? 'disconnected' : p.status === 'error' ? 'failed' : 'connecting')
 
 const live = computed(() => props.ws.panes.filter(p => p.status === 'ready'))
@@ -60,7 +61,7 @@ function maximize(i: number) {
   <div class="flex size-full flex-col bg-terminal-bg">
     <div class="flex h-10 shrink-0 flex-wrap items-center gap-2 border-b border-border bg-terminal-bg px-3">
       <Segmented :model-value="ws.mode" label="Layout" class="w-44" :options="[{ value: 'split', label: 'Split' }, { value: 'focus', label: 'Focus' }]" @update:model-value="(v: string) => sessions.setMode(ws, v as 'split' | 'focus')" />
-      <Button size="sm" :variant="ws.broadcast ? 'outline' : 'secondary'" :aria-pressed="ws.broadcast" :class="ws.broadcast && 'border-warning/50 bg-warning/15 text-warning'" @click="sessions.toggleBroadcast(ws)"><Radio />Broadcast<Kbd>⌘B</Kbd></Button>
+      <Button size="sm" :variant="ws.broadcast ? 'outline' : 'secondary'" :aria-pressed="ws.broadcast" :class="ws.broadcast && 'border-warning/50 bg-warning/15 text-warning'" @click="sessions.toggleBroadcast(ws)"><Radio />Broadcast<Kbd>{{ shortcutLabel('broadcast') }}</Kbd></Button>
       <span class="truncate text-xs text-muted">{{ broadcastHint }}</span>
       <div class="ml-auto flex items-center gap-2">
         <DropdownMenu>
@@ -69,7 +70,7 @@ function maximize(i: number) {
             <DropdownMenuItem v-for="h in hosts.hosts" :key="h.id" @select="sessions.addPane(ws, h)">{{ h.label }}</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button size="sm" variant="secondary" @click="askSave"><Save />Save as template<Kbd>⌘S</Kbd></Button>
+        <Button size="sm" variant="secondary" @click="askSave"><Save />Save as template<Kbd>{{ shortcutLabel('save-template') }}</Kbd></Button>
       </div>
     </div>
 

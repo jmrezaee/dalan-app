@@ -1,6 +1,5 @@
 <script setup lang="ts">
 // S06 (import). Paste the key, or pick a file: the dialog returns only a path and Rust reads it.
-import { open as pickFile } from '@tauri-apps/plugin-dialog'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
@@ -25,8 +24,8 @@ watch(open, (o) => {
 
 async function choose() {
   try {
-    const p = await pickFile({ multiple: false, directory: false })
-    if (typeof p === 'string') {
+    const p = await useTauri().pickFile()
+    if (p) {
       form.path = p
       form.pem = ''
       if (!form.label) form.label = p.split(/[\\/]/).pop() ?? ''

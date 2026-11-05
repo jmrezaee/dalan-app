@@ -113,7 +113,7 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
     - **SFTP and lock:** re-check after connecting, pending questions cancelled on lock.
     - **Commands:** `tags_list`, `tag_delete` (right-click a tag in the sidebar), `recent_connections` (feeds New Tab, written by `mark_connected`), `fs_realpath`, `snippets_move`, orphan-secret sweep at unlock. `fs_realpath` and `snippets_move` have no UI yet.
   - **Still to check:** keyboard-interactive against a real PAM/2FA container; the tag delete menu and New Tab recents in the window.
-- [ ] **P18 UI fixes (audit "Must fix" 5, "Should fix" 14 and "Spec gaps"):**
+- [~] **P18 UI fixes (audit "Must fix" 5, "Should fix" 14 and "Spec gaps"):**
   1. **Tab status dots:**
      - Track unread output per session; "waiting" when a prompt is pending; red for error or disconnected.
      - Give workspace tabs a combined dot.
@@ -141,6 +141,9 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
       - Move the three direct dialog-plugin calls into `useTauri.ts`.
       - Use the generated `TunnelState` in `RuleCard`.
       - Make the import `kind` a Rust enum, so it lands in `bindings.ts`.
+  - **Part 1 built (2026-11-05): items 1 to 5 and 11.** Tab dots from `app/utils/sessionDot.ts` (waiting > failed > unread > quiet; workspace tabs get a combined dot; unread is set when output arrives while the tab isn't showing and cleared when you open it). Shortcut labels come from `useShortcutLabel()` (user's bindings, Ctrl off macOS; no ⌘ left in templates). S24 first-run copy word for word (the duplicate warning box removed). `scrim` token (dark and light) used by the four overlays; `text-[13px]`/`[15px]` replaced; theme swatches use the real theme scopes. `RuleCard` focusable (Enter toggles, double-click toggles, pencil edits) and uses `TunnelState`; the terminal is `inert` and `aria-hidden` while an overlay shows. File picking goes through `useTauri().pickFile()`; import `kind` is the generated `ImportKind` enum.
+  - **Resume at part 2:** items 6 (SFTP states, virtual lists, F2, ⌘C/⌘V), 7 (tab bar), 8 (workspace splits), 9 (3-step tunnel wizard), 10 (settings gaps).
+  - **For Mehrdad to see (not run in the window yet):** tab dots (output in a background tab turns green, a password question turns yellow, a dropped connection turns red), shortcut labels after rebinding one in Settings, the light-theme swatches, tabbing to a port-forward card and pressing Enter. The dots row in `features.csv` stays `no` until then.
 - [ ] **P19 Tests:**
   - **Fake backend:** commit a Tauri-command mock, the fake Rust backend used in the browser checks, as a test fixture.
   - **End to end:** add Playwright tests for F01, F11 and F12 (overlay state machine), tab mounting (xterm survives tab switches), the shortcut dispatcher, and the import preview.

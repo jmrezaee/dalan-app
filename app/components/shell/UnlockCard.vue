@@ -44,7 +44,7 @@ const barTone = (i: number) => (i >= (props.strength ?? 0) ? 'bg-surface-hover' 
     <DalanMark class="size-10" />
     <div>
       <h1 class="text-2xl">{{ mode === 'create' ? 'Set up Dalan' : 'Unlock Dalan' }}</h1>
-      <p v-if="mode === 'create'" class="mt-1.5 text-muted">Choose a master password. It encrypts your keys and passwords on this computer.</p>
+      <p v-if="mode === 'create'" class="mt-1.5 text-muted">Choose a master password. It encrypts your keys and passwords on this computer. There's no way to recover it, so keep it somewhere safe.</p>
     </div>
     <div class="flex flex-col gap-1.5">
       <Label for="mp">Master password</Label>
@@ -59,7 +59,6 @@ const barTone = (i: number) => (i >= (props.strength ?? 0) ? 'bg-surface-hover' 
     </div>
     <p v-if="error" class="-mt-2 text-xs text-danger" role="alert">{{ error }}</p>
     <p v-if="capsLock || caps" class="flex items-center gap-1.5 text-xs text-warning"><TriangleAlert class="size-3.5" />Caps Lock is on</p>
-    <p v-if="mode === 'create'" class="rounded-md bg-warning/10 px-3 py-2.5 text-xs text-warning">There's no way to recover this password. Keep it in your password manager.</p>
     <Button size="lg" type="submit" :loading="loading" :disabled="!!cooldown">
       {{ cooldown ? `Try again in ${cooldown}s` : mode === 'create' ? 'Create vault' : 'Unlock' }}
     </Button>

@@ -4,6 +4,7 @@ import { CornerDownLeft, Copy, Play, Sparkles, Trash2, X } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import type { HistoryEntry } from '~/types/bindings'
 import { cn } from '@/lib/utils'
+const { label: shortcutLabel } = useShortcutLabel()
 
 const snippets = useSnippetsStore()
 const sessions = useSessionsStore()
@@ -90,7 +91,7 @@ async function clearHistory() {
           {{ t.l }}
         </button>
       </div>
-      <IconButton label="Close side panel" shortcut="⌘." size="xs" class="ml-auto" @click="sessions.panelOpen = false"><X /></IconButton>
+      <IconButton label="Close side panel" :shortcut="shortcutLabel('side-panel')" size="xs" class="ml-auto" @click="sessions.panelOpen = false"><X /></IconButton>
     </div>
     <div v-if="tab !== 'ai'" class="p-2"><SearchInput v-model="query" class="w-full" :placeholder="tab === 'snippets' ? 'Find a snippet' : 'Find a command'" :result-count="tab === 'snippets' ? matches.length : history.length" /></div>
 

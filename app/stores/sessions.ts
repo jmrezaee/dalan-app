@@ -25,6 +25,8 @@ export interface Session {
   parent: string
   /** Typed into the shell once it is ready (run-a-snippet-on-hosts). */
   autorun: string
+  /** Output arrived while the tab was not showing (the tab dot turns green until you look). */
+  unread: boolean
   // ---- workspace tabs only (S19)
   panes: Session[]
   mode: 'split' | 'focus'
@@ -94,7 +96,18 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
   }
 
+  /** Is this session on screen right now (its own tab, or a pane of the open workspace)? */
+  const isShowing = (s: Session) => activeKey.value === s.key || (!!s.parent && activeKey.value === s.parent)
+  // Looking at a tab reads it.
+  watch(activeKey, (k) => {
+    for (const s of sessions.value) {
+      if (s.key === k) s.unread = false
+      for (const p of s.panes ?? []) if (s.key === k) p.unread = false
+    }
+  })
+
   function onData(sess: Session, bytes: Uint8Array) {
+    if (!isShowing(sess)) sess.unread = true
     const w = writers.get(sess.key)
     if (w) w(bytes)
     else pending.set(sess.key, [...(pending.get(sess.key) ?? []), bytes])
@@ -129,6 +142,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     hop: '',
     parent: '',
     autorun: '',
+    unread: false,
     panes: [],
     mode: 'split',
     focus: 0,

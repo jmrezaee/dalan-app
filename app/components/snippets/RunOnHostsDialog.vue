@@ -54,7 +54,7 @@ async function run() {
       <DialogHeader class="gap-2.5 p-5 pb-3">
         <DialogTitle>Run "{{ snippet?.label }}" on…</DialogTitle>
         <DialogDescription class="sr-only">Choose the servers to run this snippet on.</DialogDescription>
-        <pre class="rounded-md border border-border bg-terminal-bg px-3 py-2.5 font-mono text-[13px] leading-[18px] text-terminal-fg">{{ snippet?.script }}</pre>
+        <pre class="rounded-md border border-border bg-terminal-bg px-3 py-2.5 font-mono text-sm leading-[18px] text-terminal-fg">{{ snippet?.script }}</pre>
         <Input v-model="query" aria-label="Filter hosts" placeholder="Filter hosts" autocomplete="off" />
       </DialogHeader>
       <div class="max-h-[360px] overflow-auto border-y border-border px-2.5">
