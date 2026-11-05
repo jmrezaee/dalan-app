@@ -70,6 +70,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::session::session_respond,
             commands::session::session_close,
             commands::session::session_reconnect,
+            commands::session::session_reconnect_with,
             commands::session::known_hosts_list,
             commands::session::known_host_delete,
             commands::session::key_export_to_host,

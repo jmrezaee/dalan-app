@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
 import { toast } from 'vue-sonner'
-import type { HostSummary, PromptKind, SessionEvent } from '~/types/bindings'
+import type { AuthMethod, HostSummary, PromptKind, SessionEvent } from '~/types/bindings'
 import { CommandError, useTauri } from '~/composables/useTauri'
+import { retryDelayMs } from '~/utils/reconnect'
 
 export type SessionStatus = 'connecting' | 'authenticating' | 'ready' | 'disconnected' | 'error'
 
@@ -21,6 +22,10 @@ export interface Session {
   disconnectedAt: Date | null
   /** Jump hosts this connection goes through, e.g. `bastion`. */
   hop: string
+  /** Plain-language progress lines of the current connection attempt ("Show details"). */
+  steps: string[]
+  /** Sign-in methods the server accepts, for "Try another way" after a failure. */
+  authMethods: AuthMethod[]
   /** Key of the workspace this pane belongs to (`''` for a normal tab). */
   parent: string
   /** Typed into the shell once it is ready (run-a-snippet-on-hosts). */
@@ -65,19 +70,68 @@ export const useSessionsStore = defineStore('sessions', () => {
     sess.autorun = ''
   }
 
+  // ---- Automatic reconnect (Settings, off by default): wait 2, 4, 8, 16, 30 s, then stop.
+  const retries = new Map<string, { attempts: number, timer?: ReturnType<typeof setTimeout> }>()
+  function clearRetry(key: string) {
+    const r = retries.get(key)
+    if (r?.timer) clearTimeout(r.timer)
+    retries.delete(key)
+  }
+  function scheduleRetry(sess: Session) {
+    if (!useSettingsStore().terminal.auto_reconnect || !sess.id) return
+    const r = retries.get(sess.key) ?? { attempts: 0 }
+    const wait = retryDelayMs(r.attempts)
+    if (wait === null) {
+      clearRetry(sess.key)
+      toast.error(`Couldn't reconnect to ${sess.label}. Use Reconnect when the server is back.`)
+      return
+    }
+    r.attempts++
+    r.timer = setTimeout(() => {
+      if (sess.status === 'disconnected' || sess.status === 'error') void reconnect(sess)
+    }, wait)
+    retries.set(sess.key, r)
+  }
+
+  /** Sessions whose connection dropped (tabs and workspace panes). */
+  const dropped = computed(() => sessions.value.flatMap(s => (s.kind === 'workspace' ? s.panes : [s])).filter(s => s.kind === 'session' && s.status === 'disconnected'))
+  const dismissedDrops = ref<Set<string>>(new Set())
+  /** Two or more drops at once get one card ("Reconnect all") on top of each tab's own message. */
+  const droppedCard = computed(() => {
+    const open = dropped.value.filter(s => !dismissedDrops.value.has(s.key))
+    return open.length >= 2 ? open : []
+  })
+  function dismissDropped() {
+    dismissedDrops.value = new Set([...dismissedDrops.value, ...dropped.value.map(s => s.key)])
+  }
+  async function reconnectAll() {
+    const list = [...dropped.value]
+    for (const s of list) {
+      clearRetry(s.key)
+      await reconnect(s)
+    }
+  }
+
   function onEvent(sess: Session, e: SessionEvent) {
     switch (e.type) {
       case 'state':
         sess.error = null
+        if (e.state === 'connecting') sess.steps = [] // a new attempt starts a new log
+        if (e.state === 'connecting') sess.authMethods = []
         if (e.state === 'connecting' || e.state === 'authenticating' || e.state === 'ready') {
           sess.status = e.state
           // The connection may have saved things (last connected, detected OS, a remembered password): reload the cards.
           if (e.state === 'ready' && sess.hostId) setTimeout(() => useHostsStore().refresh(), 1500)
-          if (e.state === 'ready') runAutorun(sess)
+          if (e.state === 'ready') {
+            clearRetry(sess.key)
+            dismissedDrops.value.delete(sess.key)
+            runAutorun(sess)
+          }
         }
         else if (e.state === 'disconnected') {
           sess.status = 'disconnected'
           sess.disconnectedAt = new Date()
+          scheduleRetry(sess)
         }
         else if (e.state === 'closed') close(sess)
         break
@@ -87,9 +141,19 @@ export const useSessionsStore = defineStore('sessions', () => {
       case 'error':
         sess.status = 'error'
         sess.error = { code: e.code, message: e.message }
+        // The server is unreachable during an automatic retry: keep trying. A wrong password or a changed key stops here.
+        if (e.code === 'host_unreachable' && retries.has(sess.key)) scheduleRetry(sess)
+        else clearRetry(sess.key)
         break
       case 'hop':
         sess.hop = e.via.join(' → ')
+        break
+      case 'auth_methods':
+        sess.authMethods = e.methods
+        break
+      case 'step':
+        sess.steps.push(e.text)
+        if (sess.steps.length > 80) sess.steps.shift()
         break
       case 'exit':
         break
@@ -140,6 +204,8 @@ export const useSessionsStore = defineStore('sessions', () => {
     error: null,
     disconnectedAt: null,
     hop: '',
+    steps: [],
+    authMethods: [],
     parent: '',
     autorun: '',
     unread: false,
@@ -269,6 +335,18 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
   }
 
+  async function reconnectWith(sess: Session, method: AuthMethod) {
+    sess.status = 'connecting'
+    sess.error = null
+    try {
+      await api.sessionReconnectWith(sess.id, method)
+    }
+    catch (e) {
+      sess.status = 'error'
+      sess.error = { code: 'internal', message: e instanceof Error ? e.message : 'Could not reconnect.' }
+    }
+  }
+
   const workspaceOf = (sess: Session) => sessions.value.find(s => s.key === sess.parent)
 
   /** Keystrokes from a terminal. In a broadcasting workspace they go to every live pane, not just this one. */
@@ -318,6 +396,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   }
 
   function dropSession(p: Session) {
+    clearRetry(p.key)
     if (p.id) api.sessionClose(p.id)
     writers.delete(p.key)
     pending.delete(p.key)
@@ -359,11 +438,12 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   /** Vault locked: Rust already closed every session, so just forget them. */
   function clear() {
+    for (const k of [...retries.keys()]) clearRetry(k)
     sessions.value = []
     activeKey.value = null
     writers.clear()
     pending.clear()
   }
 
-  return { sessions, activeKey, active, activeSession, panelOpen, open, openLocal, openNewTab, openWorkspace, addPane, closePane, focusPane, setMode, toggleMode, toggleBroadcast, input, activateNth, cycle, rename, moveTab, mergeTabs, attach, detach, write, resize, ack, respond, reconnect, close, clear }
+  return { sessions, activeKey, active, activeSession, panelOpen, open, openLocal, openNewTab, openWorkspace, addPane, closePane, focusPane, setMode, toggleMode, toggleBroadcast, input, activateNth, cycle, rename, moveTab, mergeTabs, attach, detach, write, resize, ack, respond, reconnect, reconnectWith, close, clear, dropped, droppedCard, dismissDropped, reconnectAll }
 })

@@ -50,6 +50,8 @@ export const commands = {
 	sessionRespond: (sessionId: string, promptId: string, answer: PromptAnswer_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("session_respond", { sessionId, promptId, answer })),
 	sessionClose: (sessionId: string) => __TAURI_INVOKE<void>("session_close", { sessionId }),
 	sessionReconnect: (sessionId: string) => typedError<null, AppError>(__TAURI_INVOKE("session_reconnect", { sessionId })),
+	/**  F11 with a choice: reconnect and sign in with only the chosen method. */
+	sessionReconnectWith: (sessionId: string, method: AuthMethod) => typedError<null, AppError>(__TAURI_INVOKE("session_reconnect_with", { sessionId, method })),
 	knownHostsList: () => typedError<KnownHost_Serialize[], AppError>(__TAURI_INVOKE("known_hosts_list")),
 	knownHostDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("known_host_delete", { id })),
 	/**
@@ -234,6 +236,9 @@ export type AppInfo = {
 	data_dir: string,
 	platform: string,
 };
+
+/**  A sign-in method the user picked after a failure ("Try another way"). */
+export type AuthMethod = "password" | "key" | "keyboard_interactive";
 
 /**  Sent shortly before an idle auto-lock so the UI can warn. */
 export type AutoLockWarning = {
@@ -1029,10 +1034,24 @@ export type SerialConfig = {
 export type SessionEvent = SessionEvent_Serialize | SessionEvent_Deserialize;
 
 export type SessionEvent_Deserialize = { type: "state"; state: SessionState } | { type: "prompt"; prompt_id: string; kind: PromptKind } | { type: "error"; code: ErrorCode; message: string } | { type: "exit"; status?: number | null } | 
+/**  The sign-in methods the server accepts, so a failed sign-in can offer another way. */
+{ type: "auth_methods"; methods: AuthMethod[] } | 
+/**
+ *  One plain-language line of progress ("Connecting to ...", "Server key matches ..."). The UI shows
+ *  them under "Show details". They never carry passwords, passphrases or key text.
+ */
+{ type: "step"; text: string } | 
 /**  The jump hosts this connection goes through, in order ("via bastion"). */
 { type: "hop"; via: string[] };
 
 export type SessionEvent_Serialize = { type: "state"; state: SessionState } | { type: "prompt"; prompt_id: string; kind: PromptKind } | { type: "error"; code: ErrorCode; message: string } | { type: "exit"; status: number | null } | 
+/**  The sign-in methods the server accepts, so a failed sign-in can offer another way. */
+{ type: "auth_methods"; methods: AuthMethod[] } | 
+/**
+ *  One plain-language line of progress ("Connecting to ...", "Server key matches ..."). The UI shows
+ *  them under "Show details". They never carry passwords, passphrases or key text.
+ */
+{ type: "step"; text: string } | 
 /**  The jump hosts this connection goes through, in order ("via bastion"). */
 { type: "hop"; via: string[] };
 

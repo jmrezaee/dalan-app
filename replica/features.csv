@@ -75,3 +75,7 @@ AWS / DigitalOcean / Azure host sync,integrations,could,yes,skip,possible via of
 Mobile apps (iOS Android),platform,could,yes,skip,desktop only
 Termius brand icon theme names and copy,brand,could,yes,skip,owned assets; make your own with /replica-brand
 Keyboard-interactive sign-in (2FA / PAM),hosts,should,yes,partial,P17; tested against an in-process server only
+Connection step log with copy details,terminal,should,yes,partial,P21; waits for hand check
+Connect once (trust without saving),terminal,should,yes,partial,P21; waits for hand check
+Dropped sessions card and optional auto reconnect,terminal,should,yes,partial,P21; waits for hand check
+Try another sign-in method after a failure,terminal,should,yes,partial,P21; waits for hand check

@@ -83,6 +83,15 @@ pub enum SessionEvent {
     Exit {
         status: Option<u32>,
     },
+    /// The sign-in methods the server accepts, so a failed sign-in can offer another way.
+    AuthMethods {
+        methods: Vec<AuthMethod>,
+    },
+    /// One plain-language line of progress ("Connecting to ...", "Server key matches ..."). The UI shows
+    /// them under "Show details". They never carry passwords, passphrases or key text.
+    Step {
+        text: String,
+    },
     /// The jump hosts this connection goes through, in order ("via bastion").
     Hop {
         via: Vec<String>,
@@ -126,9 +135,20 @@ pub enum Cmd {
 
 const PROMPT_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// A sign-in method the user picked after a failure ("Try another way").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthMethod {
+    Password,
+    Key,
+    KeyboardInteractive,
+}
+
 /// Prompts waiting for an answer, by id.
 pub struct Prompts {
     pending: Mutex<HashMap<String, oneshot::Sender<PromptAnswer>>>,
+    /// Set by "Try another way": the next sign-in uses only this method, once.
+    forced_method: Mutex<Option<AuthMethod>>,
     /// False for background work (tunnel autostart): nobody is there to answer, so `ask` says no at once.
     interactive: bool,
 }
@@ -137,6 +157,7 @@ impl Default for Prompts {
     fn default() -> Self {
         Prompts {
             pending: Mutex::default(),
+            forced_method: Mutex::default(),
             interactive: true,
         }
     }
@@ -146,8 +167,20 @@ impl Prompts {
     pub fn non_interactive() -> Self {
         Prompts {
             pending: Mutex::default(),
+            forced_method: Mutex::default(),
             interactive: false,
         }
+    }
+
+    pub fn force_method(&self, m: Option<AuthMethod>) {
+        if let Ok(mut f) = self.forced_method.lock() {
+            *f = m;
+        }
+    }
+
+    /// The method picked for this attempt, if any. Taking it clears it, so a later reconnect is automatic again.
+    pub fn take_forced_method(&self) -> Option<AuthMethod> {
+        self.forced_method.lock().ok().and_then(|mut f| f.take())
     }
 
     /// Emits the prompt and waits. `None` = cancelled, timed out, or the session ended.
@@ -357,6 +390,18 @@ impl SessionManager {
         }
         Self::spawn(store, e);
         Ok(())
+    }
+
+    /// "Try another way": reconnect, signing in with only `method` this time.
+    pub fn reconnect_with(&self, store: Store, id: &str, method: AuthMethod) -> AppResult<()> {
+        {
+            let map = self.lock()?;
+            let e = map
+                .get(id)
+                .ok_or_else(|| AppError::not_found("That session is closed."))?;
+            e.prompts.force_method(Some(method));
+        }
+        self.reconnect(store, id)
     }
 
     pub fn send(&self, id: &str, cmd: Cmd) -> AppResult<()> {

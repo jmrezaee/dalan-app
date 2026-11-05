@@ -181,7 +181,11 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
   - Make the first draft release once he has.
 
   - **Done (2026-11-06):** `features.csv` split and corrected (SSH config import yes; keys and known_hosts import, SecureCRT no; PuTTY and MobaXterm partial: parsers tested on samples only). Stale "arrives in P2 / P7" comments removed. `/design` is dropped from production builds (a `pages:extend` hook; checked: the showcase isn't in `.output`). `.git/audit.bundle` deleted. `replica/launch/release-setup.md` lists what Mehrdad must create.
-  - **Not done, needs Mehrdad:** the GitHub repo, the updater key pair and secrets, then the first draft release (nothing was pushed or tagged).
+  - **Not done, needs Mehrdad:** the GitHub repo, the updater key pair and secrets, then the first draft release (nothing was pushed or tagged).- [~] **P21 Connection experience (S18, F01, F11, F12):** built, waiting for Mehrdad's hand check.
+  - **Built (2026-11-06):** step log on the connection card (`SessionEvent::Step`, "Show details" / "Copy details", opens by itself on failure, never holds a secret); "Connect once" on the first-connection question (also fixes inline "Trust and connect" in `PromptPanel` to save the key); one "N connections dropped" card with Reconnect all; optional "Reconnect automatically" setting (2, 4, 8, 16, 30 s, stops on a wrong password or changed key); "Try another way" chips after a failed sign-in, limited to the methods the server accepts (`AuthMethods` event, `session_reconnect_with`).
+  - **Tests:** Rust (steps carry no secret, connect once saves nothing, methods listed and a chosen method is the only one tried), Vitest (retry schedule, dropped card, chooser), e2e (step log, Connect once, chooser).
+  - **Hand checks:** (1) wrong host/port: the log opens and says where it stopped, Copy details puts plain text on the clipboard. (2) Connect once on test server a, then check `known_hosts` has no new row and it asks again. (3) Open two or more sessions on server a, `docker restart` it: one card, Reconnect all works. (4) Settings > Terminal > Reconnect automatically on, restart the container: tabs come back by themselves. (5) Wrong password on server a: "Try another way" lists only what it accepts.
+
 ## Backlog (not scheduled; Mehrdad picks from here after P20)
 
 - Touch ID / Windows Hello unlock (M4 item 5).

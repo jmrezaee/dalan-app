@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 use tokio::time::{interval, timeout, MissedTickBehavior};
 use zeroize::Zeroizing;
 
-use super::{Cmd, PromptKind, Prompts, SessionEvent, SessionIo, SessionState};
+use super::{AuthMethod, Cmd, PromptKind, Prompts, SessionEvent, SessionIo, SessionState};
 use crate::error::ErrorCode;
 use crate::hosts;
 use crate::keys;
@@ -135,6 +135,12 @@ impl Handler for Client {
             .await;
         // Remember whether this is a replacement of a changed key (the match below consumes `check`).
         let replacing = matches!(check, Ok(Check::Changed { .. }));
+        match &check {
+            Ok(Check::Known) => step(&self.io, format!("The server's {key_type} key matches the saved one.")),
+            Ok(Check::Unknown) => step(&self.io, format!("First time seeing this server ({key_type} {fingerprint}). Asking you.")),
+            Ok(Check::Changed { .. }) => step(&self.io, format!("The server's key is not the saved one (now {key_type} {fingerprint}). Blocked until you decide.")),
+            Err(_) => {}
+        }
         let kind = match check {
             Ok(Check::Known) => return Ok(true),
             Ok(Check::Unknown) => PromptKind::HostKeyNew {
@@ -159,6 +165,10 @@ impl Handler for Client {
         }
         // "Trust once": connect now, save nothing.
         if !answer.remember {
+            step(
+                &self.io,
+                "Trusting the key for this connection only. Nothing saved.",
+            );
             return Ok(true);
         }
         let (pattern, kt) = (self.pattern.clone(), key_type);
@@ -173,10 +183,27 @@ impl Handler for Client {
             })
             .await;
         match saved {
-            Ok(()) => Ok(true),
+            Ok(()) => {
+                step(&self.io, "The server's key was saved to your known hosts.");
+                Ok(true)
+            }
             Err(e) => self.reject(Rejected::Failed(e.message)),
         }
     }
+}
+
+/// A line for the connection details. Plain text, no secrets.
+fn step(io: &SessionIo, text: impl Into<String>) {
+    (io.event)(SessionEvent::Step { text: text.into() });
+}
+
+/// "publickey, password" from the server's list of sign-in methods.
+fn method_names(m: &russh::MethodSet) -> String {
+    m.iter()
+        .map(<&'static str>::from)
+        .filter(|n| *n != "none")
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn emit_state(io: &SessionIo, state: SessionState) {
@@ -350,6 +377,19 @@ pub async fn connect_authenticated(
             );
         };
         let pattern = known_hosts::pattern(&info.address, info.port);
+        match hops.last() {
+            Some(_) => step(
+                io,
+                format!(
+                    "Opening a tunnel through {} to {pattern}.",
+                    plan[i - 1].label
+                ),
+            ),
+            None if info.proxy.is_some() => {
+                step(io, format!("Connecting to {pattern} through the proxy."))
+            }
+            None => step(io, format!("Connecting to {pattern}.")),
+        }
 
         let handle = match hops.last() {
             // Later hops ride a direct-tcpip channel opened on the previous hop.
@@ -413,6 +453,7 @@ pub async fn connect_authenticated(
                     }
                 };
                 let _ = tcp.set_nodelay(true);
+                step(io, "Connected. Negotiating encryption.");
                 handshake(
                     tcp,
                     store,
@@ -576,10 +617,29 @@ async fn authenticate(
     user: &str,
     host_id: &str,
 ) -> bool {
+    step(io, format!("Signing in as {user}."));
+    // "Try another way": the user picked one method for this attempt.
+    let forced = prompts.take_forced_method();
     let mut rejected_key = None;
-    if let Some(key_id) = &info.key_id {
+    if forced == Some(AuthMethod::Key) && info.key_id.is_none() {
+        emit_error(
+            io,
+            ErrorCode::AuthFailed,
+            format!("{} has no saved key to try.", info.label),
+        );
+        return false;
+    }
+    if let Some(key_id) = info
+        .key_id
+        .as_ref()
+        .filter(|_| matches!(forced, None | Some(AuthMethod::Key)))
+    {
+        step(io, "Trying the host's saved key.");
         match try_key(handle, store, io, prompts, key_id, user).await {
-            KeyResult::Accepted => return true,
+            KeyResult::Accepted => {
+                step(io, "Signed in with the saved key.");
+                return true;
+            }
             KeyResult::Rejected(label) => rejected_key = Some(label),
             KeyResult::Stop => return false,
         }
@@ -593,8 +653,38 @@ async fn authenticate(
         }) => Some(remaining_methods),
         Err(_) => None, // let the real attempt below report the broken connection
     };
+    if let Some(m) = &offered {
+        step(io, format!("The server accepts: {}.", method_names(m)));
+        let mut methods = Vec::new();
+        for (kind, method) in [
+            (MethodKind::Password, AuthMethod::Password),
+            (MethodKind::PublicKey, AuthMethod::Key),
+            (
+                MethodKind::KeyboardInteractive,
+                AuthMethod::KeyboardInteractive,
+            ),
+        ] {
+            if m.contains(&kind) {
+                methods.push(method);
+            }
+        }
+        (io.event)(SessionEvent::AuthMethods { methods });
+    }
     let can = |k: MethodKind| offered.as_ref().map_or(true, |m| m.contains(&k));
-    if !can(MethodKind::Password) && can(MethodKind::KeyboardInteractive) {
+    if forced == Some(AuthMethod::Key) {
+        // The key was tried above and refused; nothing else was asked for.
+        if let Some(label) = rejected_key {
+            emit_error(
+                io,
+                ErrorCode::AuthFailed,
+                format!("{} rejected the key \"{label}\".", info.label),
+            );
+        }
+        return false;
+    }
+    if forced == Some(AuthMethod::KeyboardInteractive)
+        || (forced.is_none() && !can(MethodKind::Password) && can(MethodKind::KeyboardInteractive))
+    {
         return keyboard_interactive(handle, io, prompts, info, user).await;
     }
     let password: Zeroizing<String> = match (&info.password, &rejected_key) {
@@ -627,8 +717,12 @@ async fn authenticate(
             pw
         }
     };
+    step(io, "Trying the password.");
     match handle.authenticate_password(user, password.as_str()).await {
-        Ok(r) if r.success() => true,
+        Ok(r) if r.success() => {
+            step(io, "Signed in.");
+            true
+        }
         // The password was right but the server wants a second step (or offers keyboard-interactive
         // as the other way in): carry on with its questions.
         Ok(client::AuthResult::Failure {
@@ -665,6 +759,10 @@ async fn keyboard_interactive(
     user: &str,
 ) -> bool {
     use client::KeyboardInteractiveAuthResponse as R;
+    step(
+        io,
+        "Trying keyboard-interactive (the server asks its own questions).",
+    );
     let lost = |io: &Arc<SessionIo>, e: russh::Error| {
         emit_error(
             io,
@@ -683,7 +781,10 @@ async fn keyboard_interactive(
     // A server that keeps asking forever is not worth following.
     for _ in 0..8 {
         match reply {
-            R::Success => return true,
+            R::Success => {
+                step(io, "Signed in.");
+                return true;
+            }
             R::Failure { .. } => {
                 emit_error(
                     io,
@@ -857,6 +958,7 @@ pub async fn run(
             "The server refused to start a shell.",
         );
     }
+    step(&io, "Shell started.");
     emit_state(&io, SessionState::Ready);
     // The host's startup snippet runs as if typed. A failure to send is not worth ending the session over.
     if let Some(script) = &conn.startup_script {

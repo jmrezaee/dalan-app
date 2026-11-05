@@ -59,6 +59,24 @@ describe('unlock and the connection overlay (F01, F11, F12)', () => {
     await page.close()
   })
 
+  it('F01: a failed sign-in shows the step log, offers another way, and Connect once answers without saving', async () => {
+    const page = await openApp(browser, url, { unlocked: true })
+    await page.getByText('web-1').dblclick()
+    const [id] = await sessionIds(page)
+    await fakeEvent(page, id!, { type: 'prompt', prompt_id: 'p2', kind: { type: 'host_key_new', host: 'web-1', key_type: 'ssh-ed25519', fingerprint: 'SHA256:abc' } })
+    await page.getByRole('button', { name: 'Connect once' }).click()
+    expect(await page.evaluate(() => (window as any).__fake.state.responses)).toMatchObject([{ prompt: 'p2', answer: { accept: true, remember: false } }])
+    await fakeEvent(page, id!, { type: 'step', text: 'Signing in as me.' })
+    await fakeEvent(page, id!, { type: 'step', text: 'The server accepts: password, keyboard-interactive.' })
+    await fakeEvent(page, id!, { type: 'auth_methods', methods: ['password', 'keyboard_interactive'] })
+    await fakeEvent(page, id!, { type: 'error', code: 'auth_failed', message: 'web-1 rejected the password.' })
+    await seen(page.getByRole('heading', { name: 'Sign-in failed' }))
+    await seen(page.getByText('The server accepts: password, keyboard-interactive.'))
+    await page.getByRole('button', { name: 'Verification code' }).click()
+    expect(await page.evaluate(() => (window as any).__fake.state.calls as string[])).toContain(`reconnect:${id}:keyboard_interactive`)
+    await page.close()
+  })
+
   it('F12: a changed key blocks; Close is the default and replacing needs the typed name', async () => {
     const page = await openApp(browser, url, { unlocked: true })
     await page.getByText('web-1').dblclick()

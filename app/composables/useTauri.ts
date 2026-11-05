@@ -2,7 +2,7 @@
 import { Channel } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { commands } from '~/types/bindings'
-import type { AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
+import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -65,6 +65,8 @@ export function useTauri() {
     sessionRespond: (id: string, promptId: string, answer: PromptAnswer) => unwrap(commands.sessionRespond(id, promptId, answer)),
     sessionClose: (id: string) => commands.sessionClose(id),
     sessionReconnect: (id: string) => unwrap(commands.sessionReconnect(id)),
+    /** "Try another way": reconnect and sign in with only this method. */
+    sessionReconnectWith: (id: string, method: AuthMethod) => unwrap(commands.sessionReconnectWith(id, method)),
     /** The caller picks `openId` so it can answer host-key and password questions while this runs. */
     sftpOpen: (openId: string, hostId: string, onEvent: (e: SessionEvent) => void) => {
       const events = new Channel<SessionEvent>()

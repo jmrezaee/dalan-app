@@ -1761,3 +1761,91 @@ async fn locking_the_vault_ends_live_sessions_and_every_guarded_call_refuses() {
     assert_eq!(err.code, ErrorCode::Locked);
     assert!(h.state.sftp.fs("no-such-endpoint").is_err());
 }
+
+#[tokio::test]
+async fn the_connection_reports_plain_steps_and_never_a_secret() {
+    let h = harness(Some("right-pw")).await;
+    let mut s = start(&h);
+    let mut steps: Vec<String> = Vec::new();
+    loop {
+        match s.next().await {
+            SessionEvent::Step { text } => steps.push(text),
+            SessionEvent::Prompt { prompt_id, .. } => s.answer(&prompt_id, true, None, true),
+            SessionEvent::State {
+                state: SessionState::Ready,
+            } => break,
+            _ => {}
+        }
+    }
+    let all = steps.join("\n");
+    for expected in [
+        "Connecting to",
+        "First time seeing this server",
+        "Signing in as test",
+        "Trying the password",
+        "Signed in",
+        "Shell started",
+    ] {
+        assert!(all.contains(expected), "missing \"{expected}\" in:\n{all}");
+    }
+    assert!(
+        !all.contains("right-pw"),
+        "a password leaked into the steps"
+    );
+    s.cmds.send(Cmd::Close).unwrap();
+}
+
+#[tokio::test]
+async fn connect_once_signs_in_and_saves_nothing_so_the_next_connect_asks_again() {
+    let h = harness(Some("right-pw")).await;
+    let mut s = start(&h);
+    let (id, kind) = s.expect_prompt().await;
+    assert!(matches!(kind, PromptKind::HostKeyNew { .. }));
+    s.answer(&id, true, None, false); // "Connect once"
+    s.until(is_state(SessionState::Ready)).await;
+    s.cmds.send(Cmd::Close).unwrap();
+    assert!(
+        saved_keys(&h).await.is_empty(),
+        "trust-once must not save the key"
+    );
+
+    let mut s = start(&h);
+    let (_, kind) = s.expect_prompt().await;
+    assert!(
+        matches!(kind, PromptKind::HostKeyNew { .. }),
+        "the next connect asks again"
+    );
+    s.cmds.send(Cmd::Close).unwrap();
+}
+
+#[tokio::test]
+async fn a_failed_sign_in_lists_what_the_server_accepts_and_a_chosen_method_is_the_only_one_tried()
+{
+    // The server only speaks keyboard-interactive: that is the one way to offer.
+    let h = harness_with(None, |s| s.kbd_code = Some("123456".into())).await;
+    let mut s = start(&h);
+    let (id, _) = s.expect_prompt().await;
+    s.answer(&id, true, None, true); // trust the host key
+    match s
+        .until(|e| matches!(e, SessionEvent::AuthMethods { .. }))
+        .await
+    {
+        SessionEvent::AuthMethods { methods } => {
+            assert_eq!(methods, vec![crate::ssh::AuthMethod::KeyboardInteractive])
+        }
+        _ => unreachable!(),
+    }
+    s.cmds.send(Cmd::Close).unwrap();
+
+    // Choosing "key" for a host with no saved key says so, and asks for nothing else.
+    // (The task has not run yet on this single-threaded test runtime, so the choice lands first.)
+    let mut s = start(&h);
+    s.prompts.force_method(Some(crate::ssh::AuthMethod::Key));
+    match s.until(|e| matches!(e, SessionEvent::Error { .. })).await {
+        SessionEvent::Error { code, message } => {
+            assert_eq!(code, ErrorCode::AuthFailed);
+            assert!(message.contains("no saved key"), "{message}");
+        }
+        _ => unreachable!(),
+    }
+}

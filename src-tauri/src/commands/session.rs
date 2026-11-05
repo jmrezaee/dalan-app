@@ -166,6 +166,20 @@ pub fn session_reconnect(state: State<'_, AppState>, session_id: String) -> AppR
     state.sessions.reconnect(state.store(), &session_id)
 }
 
+/// F11 with a choice: reconnect and sign in with only the chosen method.
+#[tauri::command]
+#[specta::specta]
+pub fn session_reconnect_with(
+    state: State<'_, AppState>,
+    session_id: String,
+    method: crate::ssh::AuthMethod,
+) -> AppResult<()> {
+    state.require_unlocked()?;
+    state
+        .sessions
+        .reconnect_with(state.store(), &session_id, method)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn known_hosts_list(state: State<'_, AppState>) -> AppResult<Vec<KnownHost>> {

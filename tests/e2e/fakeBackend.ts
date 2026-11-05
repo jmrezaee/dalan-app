@@ -71,6 +71,7 @@ function backend(initial: { hosts: FakeHost[], unlocked: boolean }) {
     session_write: (a) => { state.written.push({ id: a.sessionId, text: new TextDecoder().decode(new Uint8Array(a.data ?? [])) }); return null },
     session_respond: (a) => { state.responses.push({ id: a.sessionId, prompt: a.promptId, answer: a.answer }); return null },
     session_reconnect: (a) => { state.calls.push(`reconnect:${a.sessionId}`); return null },
+    session_reconnect_with: (a) => { state.calls.push(`reconnect:${a.sessionId}:${a.method}`); return null },
     session_close: (a) => { state.sessions.delete(a.sessionId); return null },
     session_resize: () => null,
     session_ack: (a) => { state.calls.push(`ack:${a.bytes}`); return null },

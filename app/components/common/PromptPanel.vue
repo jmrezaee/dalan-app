@@ -11,8 +11,8 @@ const emit = defineEmits<{ reply: [accept: boolean, text: string | null, remembe
 const text = ref('')
 const remember = ref(false)
 const secret = computed(() => props.kind.type === 'password' || props.kind.type === 'passphrase')
-function reply(accept: boolean) {
-  emit('reply', accept, text.value || null, remember.value)
+function reply(accept: boolean, save = remember.value) {
+  emit('reply', accept, text.value || null, save)
   text.value = ''
 }
 </script>
@@ -23,7 +23,7 @@ function reply(accept: boolean) {
       <span class="flex items-center gap-2 text-sm text-warning"><ShieldAlert class="size-4" />First time connecting to {{ kind.host || host }}</span>
       <span class="text-muted">Check that this fingerprint matches the server:</span>
       <code class="break-all rounded bg-bg px-2 py-1 font-mono">{{ kind.fingerprint }}</code>
-      <div class="flex justify-end gap-2"><Button type="button" size="sm" variant="secondary" @click="reply(false)">Cancel</Button><Button type="button" size="sm" @click="reply(true)">Trust and connect</Button></div>
+      <div class="flex justify-end gap-2"><Button type="button" size="sm" variant="secondary" @click="reply(false)">Cancel</Button><Button type="button" size="sm" variant="secondary" @click="reply(true, false)">Connect once</Button><Button type="button" size="sm" @click="reply(true, true)">Trust and connect</Button></div>
     </template>
     <template v-else-if="kind.type === 'host_key_changed'">
       <span class="flex items-center gap-2 text-sm text-danger"><ShieldAlert class="size-4" />This server's identity changed</span>

@@ -16,9 +16,11 @@ export interface TerminalSettings {
   font_family: string
   /** Theme for servers that have none of their own; empty = the app's light or dark default. */
   default_theme: string
+  /** Reconnect by itself after a drop (2, 4, 8, 16, 30 s, then stop). Off until switched on. */
+  auto_reconnect: boolean
 }
 
-const TERMINAL_DEFAULTS: TerminalSettings = { font_size: 14, cursor: 'block', cursor_blink: true, scrollback: 10000, copy_on_select: false, font_family: '', default_theme: '' }
+const TERMINAL_DEFAULTS: TerminalSettings = { font_size: 14, cursor: 'block', cursor_blink: true, scrollback: 10000, copy_on_select: false, font_family: '', default_theme: '', auto_reconnect: false }
 const clamp = (n: unknown, lo: number, hi: number, fallback: number) => (typeof n === 'number' && Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n))) : fallback)
 
 /** S23. Loaded from Rust after unlock, saved back on change. Terminals read `terminal` live. */
@@ -54,6 +56,7 @@ export const useSettingsStore = defineStore('settings', () => {
     terminal.copy_on_select = v.copy_on_select ?? TERMINAL_DEFAULTS.copy_on_select
     terminal.font_family = typeof v.font_family === 'string' ? v.font_family.slice(0, 80) : ''
     terminal.default_theme = typeof v.default_theme === 'string' ? v.default_theme : ''
+    terminal.auto_reconnect = v.auto_reconnect === true
   }
 
   async function load() {

@@ -240,6 +240,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
     </div>
 
     <CommandPalette v-model:open="paletteOpen" @action="onPaletteAction" />
+    <DroppedSessionsCard />
 
     <AlertDialog v-model:open="closeOpen">
       <AlertDialogContent>
