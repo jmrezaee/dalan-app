@@ -85,6 +85,15 @@ export function useTauri() {
     },
     editUpload: (editId: string, force: boolean) => unwrap(commands.editUpload(editId, force)),
     editClose: (editId: string) => commands.editClose(editId),
+    logsList: () => unwrap(commands.logsList()),
+    logBookmark: (id: string, bookmarked: boolean, comment: string | null) => unwrap(commands.logBookmark(id, bookmarked, comment)),
+    logDelete: (id: string) => unwrap(commands.logDelete(id)),
+    /** Sends the log's decrypted bytes to `onData` in order; resolves when all have been sent. */
+    logReplay: (id: string, onData: (b: Uint8Array) => void) => {
+      const data = new Channel<ArrayBuffer>()
+      data.onmessage = m => onData(new Uint8Array(m))
+      return unwrap(commands.logReplay(id, data as unknown as Channel<RawBytes>))
+    },
     agentGet: (kind: 'host' | 'group', id: string) => unwrap(commands.agentGet(kind, id)),
     agentSet: (kind: 'host' | 'group', id: string, choice: AgentChoice) => unwrap(commands.agentSet(kind, id, choice)),
     proxyGet: (kind: 'host' | 'group', id: string) => unwrap(commands.proxyGet(kind, id)),

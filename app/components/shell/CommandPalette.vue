@@ -1,11 +1,11 @@
 <script setup lang="ts">
 // S17: jump to a host, a tab or an action. Built on the shadcn Command (Reka listbox) dialog.
-import { ArrowDownUp, Code2, LayoutGrid, KeyRound, Waypoints, Lock, Plus, Server, Settings, ShieldCheck, SquareTerminal, Vault } from '@lucide/vue'
+import { ScrollText, ArrowDownUp, Code2, LayoutGrid, KeyRound, Waypoints, Lock, Plus, Server, Settings, ShieldCheck, SquareTerminal, Vault } from '@lucide/vue'
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator, CommandShortcut } from '@/components/ui/command'
 import type { HostSummary } from '~/types/bindings'
 
 const open = defineModel<boolean>('open', { required: true })
-const emit = defineEmits<{ action: [name: 'new-host' | 'new-tab' | 'local' | 'sftp' | 'keychain' | 'forwards' | 'snippets' | 'known-hosts' | 'settings' | 'lock' | 'vault'] }>()
+const emit = defineEmits<{ action: [name: 'new-host' | 'new-tab' | 'local' | 'sftp' | 'keychain' | 'forwards' | 'snippets' | 'logs' | 'known-hosts' | 'settings' | 'lock' | 'vault'] }>()
 const hosts = useHostsStore()
 const sessions = useSessionsStore()
 const templates = useWorkspacesStore()
@@ -52,6 +52,7 @@ const openTabs = computed(() => sessions.sessions.filter(s => s.kind === 'sessio
         <CommandItem value="action keychain keys identities" @select="act('keychain')"><KeyRound />Go to Keychain</CommandItem>
         <CommandItem value="action port forwarding tunnels" @select="act('forwards')"><Waypoints />Go to Port forwarding</CommandItem>
         <CommandItem value="action snippets scripts" @select="act('snippets')"><Code2 />Go to Snippets</CommandItem>
+        <CommandItem value="action logs session history" @select="act('logs')"><ScrollText />Go to Logs</CommandItem>
         <CommandItem value="action known hosts fingerprints" @select="act('known-hosts')"><ShieldCheck />Go to Known hosts</CommandItem>
         <CommandItem value="action settings preferences" @select="act('settings')"><Settings />Settings<CommandShortcut>⌘,</CommandShortcut></CommandItem>
         <CommandItem value="action lock vault" @select="act('lock')"><Lock />Lock Dalan</CommandItem>

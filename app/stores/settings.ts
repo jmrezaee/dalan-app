@@ -24,6 +24,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const terminal = reactive<TerminalSettings>({ ...TERMINAL_DEFAULTS })
   const autoLockMinutes = ref(15)
   const loaded = ref(false)
+  /** Keep a log of each session (S15). Off until chosen. */
+  const logsEnabled = ref(false)
 
   /** Light or dark right now (resolves "system"). */
   const resolvedTheme = computed(() => (colorMode.value === 'light' ? 'light' : 'dark'))
@@ -46,6 +48,7 @@ export const useSettingsStore = defineStore('settings', () => {
       applyTerminal(parse('terminal') as Partial<TerminalSettings>)
       const sec = parse('security')
       if (typeof sec.auto_lock_minutes === 'number') autoLockMinutes.value = sec.auto_lock_minutes
+      logsEnabled.value = parse('logs').enabled === true
       loaded.value = true
     }
     catch {
@@ -77,5 +80,10 @@ export const useSettingsStore = defineStore('settings', () => {
     save('security', { auto_lock_minutes: minutes })
   }
 
-  return { theme, terminal, autoLockMinutes, loaded, resolvedTheme, load, setTheme, setTerminal, setAutoLock }
+  function setLogs(enabled: boolean) {
+    logsEnabled.value = enabled
+    save('logs', { enabled })
+  }
+
+  return { logsEnabled, setLogs, theme, terminal, autoLockMinutes, loaded, resolvedTheme, load, setTheme, setTerminal, setAutoLock }
 })

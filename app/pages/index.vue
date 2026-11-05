@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // S02 Hosts. The full app shell (tabs, all vault sections) arrives in P7; until then this page
 // carries a small Hosts-only sidebar so the layout already matches the canvas.
-import { ArrowDownUp, Code2, LayoutGrid, KeyRound, Lock, Server, Settings, ShieldCheck, Vault, Waypoints } from '@lucide/vue'
+import { ScrollText, ArrowDownUp, Code2, LayoutGrid, KeyRound, Lock, Server, Settings, ShieldCheck, Vault, Waypoints } from '@lucide/vue'
 import { buttonVariants } from '@/components/ui/button'
 import type { Session } from '~/stores/sessions'
 
@@ -10,12 +10,13 @@ const hosts = useHostsStore()
 const sessions = useSessionsStore()
 const keychain = useKeychainStore()
 const snippetsStore = useSnippetsStore()
+const logsStore = useLogsStore()
 const forwardsStore = useForwardsStore()
 const sftpStore = useSftpStore()
 const workspaces = useWorkspacesStore()
 const workspaceView = ref<{ askSave: () => void }[] | null>(null)
 const settings = useSettingsStore()
-const section = ref<'hosts' | 'keychain' | 'forwards' | 'snippets' | 'known-hosts' | 'settings'>('hosts')
+const section = ref<'hosts' | 'keychain' | 'forwards' | 'snippets' | 'logs' | 'known-hosts' | 'settings'>('hosts')
 const paletteOpen = ref(false)
 const knownHosts = ref<{ refresh: () => void } | null>(null)
 onMounted(() => {
@@ -34,6 +35,7 @@ onBeforeUnmount(() => {
   forwardsStore.clear()
   sftpStore.clear()
   workspaces.clear()
+  logsStore.clear()
   sessions.clear()
 })
 
@@ -42,6 +44,7 @@ const nav = computed(() => [
   { id: 'keychain', label: 'Keychain', icon: KeyRound, count: keychain.keys.length + keychain.identities.length },
   { id: 'forwards', label: 'Port forwarding', icon: Waypoints, count: forwardsStore.rules.length },
   { id: 'snippets', label: 'Snippets', icon: Code2, count: snippetsStore.snippets.length },
+  { id: 'logs', label: 'Logs', icon: ScrollText },
   { id: 'known-hosts', label: 'Known hosts', icon: ShieldCheck },
 ])
 
@@ -188,6 +191,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
           <KeychainView v-else-if="section === 'keychain'" />
           <ForwardsView v-else-if="section === 'forwards'" />
           <SnippetsView v-else-if="section === 'snippets'" />
+          <LogsView v-else-if="section === 'logs'" @settings="go('settings')" />
           <SettingsView v-else-if="section === 'settings'" />
           <HostsView v-else />
         </main>

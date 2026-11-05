@@ -49,7 +49,7 @@ Import hosts from CSV,import,should,yes,yes,source 2
 Terminal themes per host/group,terminal,should,yes,yes,S20
 Command history side panel,terminal,should,yes,no,S20
 Local terminal tab,terminal,should,yes,yes,S23 local terminal path
-Session logs (last per host + bookmarks + comment),logs,should,yes,no,S15 source 6; paid in Termius
+Session logs (last per host + bookmarks + comment),logs,should,yes,yes,S15 source 6; paid in Termius
 SSH certificates (key + cert as one item),keychain,could,yes,no,source 7
 FIDO2 hardware keys (sk-ed25519),keychain,could,yes,no,source 7; needs OpenSSH 8.4+ server
 Terminal autocomplete (history paths snippets),terminal,could,yes,no,needs shell integration; Termius disables for some routers

@@ -59,6 +59,11 @@ export const commands = {
 	 */
 	editUpload: (editId: string, force: boolean) => typedError<EditUpload, AppError>(__TAURI_INVOKE("edit_upload", { editId, force })),
 	editClose: (editId: string) => __TAURI_INVOKE<void>("edit_close", { editId }),
+	logsList: () => typedError<LogSummary_Serialize[], AppError>(__TAURI_INVOKE("logs_list")),
+	logBookmark: (id: string, bookmarked: boolean, comment: string | null) => typedError<null, AppError>(__TAURI_INVOKE("log_bookmark", { id, bookmarked, comment })),
+	logDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("log_delete", { id })),
+	/**  Sends a log's bytes, decrypted, in order, over `data` (like live terminal output). */
+	logReplay: (id: string, data: Channel<RawBytes>) => typedError<null, AppError>(__TAURI_INVOKE("log_replay", { id, data })),
 	/**  `kind` is `host` or `group`. */
 	agentGet: (kind: string, id: string) => typedError<AgentConfig_Serialize, AppError>(__TAURI_INVOKE("agent_get", { kind, id })),
 	agentSet: (kind: string, id: string, choice: AgentChoice) => typedError<null, AppError>(__TAURI_INVOKE("agent_set", { kind, id, choice })),
@@ -790,6 +795,32 @@ export type LockReason =
 "manual" | 
 /**  Idle for longer than the auto-lock setting. */
 "idle";
+
+export type LogSummary = LogSummary_Serialize | LogSummary_Deserialize;
+
+export type LogSummary_Deserialize = {
+	id: string,
+	host_id?: string | null,
+	/**  `None` for the local terminal. */
+	host_label?: string | null,
+	started_at: number | null,
+	ended_at?: number | null,
+	size_bytes: number | null,
+	bookmarked: boolean,
+	comment?: string | null,
+};
+
+export type LogSummary_Serialize = {
+	id: string,
+	host_id: string | null,
+	/**  `None` for the local terminal. */
+	host_label: string | null,
+	started_at: number | null,
+	ended_at: number | null,
+	size_bytes: number | null,
+	bookmarked: boolean,
+	comment: string | null,
+};
 
 export type PackageSummary = {
 	id: string,

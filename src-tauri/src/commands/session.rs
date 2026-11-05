@@ -2,13 +2,46 @@
 
 use serde::Serialize;
 use specta::Type;
+use std::sync::Arc;
 use tauri::ipc::Channel;
-use tauri::State;
 
+use tauri::{AppHandle, State};
+
+use crate::commands::logs::logs_dir;
 use crate::error::AppResult;
 use crate::known_hosts::{self, KnownHost};
-use crate::ssh::{Cmd, Job, PromptAnswer, RawBytes, SessionEvent, SessionIo};
+use crate::logs;
+use crate::ssh::{Cmd, Job, PromptAnswer, RawBytes, SessionEvent, SessionIo, SessionState};
 use crate::state::AppState;
+
+/// Wires a session to the UI channels, copying output into a log when one is recording.
+fn tapped_io(
+    tap: Option<Arc<logs::LogTap>>,
+    events: Channel<SessionEvent>,
+    data: Channel<RawBytes>,
+) -> SessionIo {
+    let tap_events = tap.clone();
+    SessionIo {
+        event: Box::new(move |e| {
+            if let (
+                Some(t),
+                SessionEvent::State {
+                    state: SessionState::Disconnected | SessionState::Closed,
+                },
+            ) = (&tap_events, &e)
+            {
+                t.ended();
+            }
+            let _ = events.send(e);
+        }),
+        data: Box::new(move |b| {
+            if let Some(t) = &tap {
+                t.data(&b);
+            }
+            let _ = data.send(RawBytes(b));
+        }),
+    }
+}
 
 #[derive(Serialize, Type)]
 pub struct SessionOpened {
@@ -19,6 +52,7 @@ pub struct SessionOpened {
 #[tauri::command]
 #[specta::specta]
 pub async fn session_open(
+    app: AppHandle,
     state: State<'_, AppState>,
     host_id: String,
     cols: u32,
@@ -27,14 +61,8 @@ pub async fn session_open(
     data: Channel<RawBytes>,
 ) -> AppResult<SessionOpened> {
     state.require_unlocked()?;
-    let io = SessionIo {
-        event: Box::new(move |e| {
-            let _ = events.send(e);
-        }),
-        data: Box::new(move |b| {
-            let _ = data.send(RawBytes(b));
-        }),
-    };
+    let tap = logs::LogTap::start(&state.store(), logs_dir(&app)?, Some(host_id.clone())).await;
+    let io = tapped_io(tap, events, data);
     let session_id = state
         .sessions
         .open(state.store(), host_id, Job::Shell, cols, rows, io)?;
@@ -45,6 +73,7 @@ pub async fn session_open(
 #[tauri::command]
 #[specta::specta]
 pub async fn local_session_open(
+    app: AppHandle,
     state: State<'_, AppState>,
     cols: u32,
     rows: u32,
@@ -52,14 +81,8 @@ pub async fn local_session_open(
     data: Channel<RawBytes>,
 ) -> AppResult<SessionOpened> {
     state.require_unlocked()?;
-    let io = SessionIo {
-        event: Box::new(move |e| {
-            let _ = events.send(e);
-        }),
-        data: Box::new(move |b| {
-            let _ = data.send(RawBytes(b));
-        }),
-    };
+    let tap = logs::LogTap::start(&state.store(), logs_dir(&app)?, None).await;
+    let io = tapped_io(tap, events, data);
     let session_id =
         state
             .sessions

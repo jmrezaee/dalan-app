@@ -62,6 +62,10 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sftp::edit_open,
             commands::sftp::edit_upload,
             commands::sftp::edit_close,
+            commands::logs::logs_list,
+            commands::logs::log_bookmark,
+            commands::logs::log_delete,
+            commands::logs::log_replay,
             commands::agent::agent_get,
             commands::agent::agent_set,
             commands::proxy::proxy_get,
@@ -138,6 +142,11 @@ pub fn run() {
             // Edited-file copies from a previous run are stale: nothing is watching them any more.
             let _ = std::fs::remove_dir_all(dir.join("edit-tmp"));
             let conn = db::open(&dir.join("vault.db"))?;
+            // Logs a previous run never got to close (quit mid-session) count as ended when they started.
+            let _ = conn.execute(
+                "UPDATE session_logs SET ended_at = started_at WHERE ended_at IS NULL",
+                [],
+            );
             app.manage(AppState::new(conn));
             vault::spawn_auto_lock(app.handle().clone());
             Ok(())

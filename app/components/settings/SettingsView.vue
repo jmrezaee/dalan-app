@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils'
 
 const settings = useSettingsStore()
-const sections = ['Appearance', 'Terminal', 'Shortcuts', 'Security'] as const
+const sections = ['Appearance', 'Terminal', 'Logs', 'Shortcuts', 'Security'] as const
 const section = ref<typeof sections[number]>('Appearance')
 const changeOpen = ref(false)
 
@@ -78,6 +78,14 @@ const num = (v: string | number, fallback: number) => (Number.isFinite(Number(v)
           </div>
           <div class="row"><span class="flex flex-1 flex-col">Copy on select<span class="text-xs text-muted">Copies whatever you highlight in a terminal.</span></span><Switch :model-value="settings.terminal.copy_on_select" @update:model-value="(v: boolean) => settings.setTerminal({ copy_on_select: v })" /></div>
           <p class="pt-3 text-xs text-muted">Changes apply to open terminals straight away.</p>
+        </template>
+
+        <template v-else-if="section === 'Logs'">
+          <div class="row">
+            <span class="flex flex-1 flex-col">Keep a log of each session<span class="text-xs text-muted">Saves what the terminal printed, encrypted with your master password. Each server keeps its latest log; bookmark one to keep it. Applies to sessions you open from now on.</span></span>
+            <Switch :model-value="settings.logsEnabled" aria-label="Keep session logs" @update:model-value="(v: boolean) => settings.setLogs(v)" />
+          </div>
+          <p class="pt-3 text-xs text-muted">Logs can hold anything shown on screen, so turn this on only if that's fine for your servers. After you change the master password, older logs can no longer be opened (you can still delete them).</p>
         </template>
 
         <template v-else-if="section === 'Shortcuts'">
