@@ -23,6 +23,12 @@ Write down every step that does not do what is expected. Don't fix anything your
    ```
 
    The first build can take a few minutes. A window called **Dalan** opens.
+
+   If port 4000 is taken (for example by another Docker container), run it on 4001 instead, without changing any file:
+
+   ```bash
+   pnpm tauri dev --config '{"build":{"devUrl":"http://127.0.0.1:4001","beforeDevCommand":"pnpm dev --port 4001"}}'
+   ```
 4. Servers, for reference:
 
    | name | address | user | sign-in |
@@ -34,6 +40,14 @@ Write down every step that does not do what is expected. Don't fix anything your
 ## Part A. M1 gate: F01, F11, F12 (about 15 minutes)
 
 ### A1. First run (S24)
+
+If you have run Dalan on this Mac before, a vault already exists and you will see the **unlock** screen instead of "create". For a clean test, quit Dalan and move the old data aside (nothing is deleted):
+
+```bash
+mv ~/Library/Application\ Support/app.dalan.desktop ~/Library/Application\ Support/app.dalan.desktop.bak
+```
+
+Then start the app again. (To go back later: quit, delete the new folder and move the `.bak` one back.)
 
 - [ ] **A1.1** The window shows the "create a master password" screen. **Expected:** it says the password can't be recovered (note the exact sentence), has a strength meter, and the create button is disabled until the password has at least 8 characters.
 - [ ] **A1.2** Create the vault with a password you'll remember (for example `smoke-test-1`). **Expected:** the Hosts screen opens with the empty state "No servers yet".
