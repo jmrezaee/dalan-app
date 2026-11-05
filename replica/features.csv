@@ -53,7 +53,7 @@ Session logs (last per host + bookmarks + comment),logs,should,yes,yes,S15 sourc
 SSH certificates (key + cert as one item),keychain,could,yes,no,source 7
 FIDO2 hardware keys (sk-ed25519),keychain,could,yes,no,source 7; needs OpenSSH 8.4+ server
 Terminal autocomplete (history paths snippets),terminal,could,yes,no,needs shell integration; Termius disables for some routers
-Find in terminal,terminal,could,unknown,no,not documented; xterm search addon
+Find in terminal,terminal,could,unknown,yes,not documented; xterm search addon
 Customisable keyboard shortcuts,settings,could,yes,no,S23
 Import PuTTY / MobaXterm / SecureCRT,import,could,yes,no,source 2
 Mosh,protocols,could,yes,no,needs mosh client binary; not logged by Termius
