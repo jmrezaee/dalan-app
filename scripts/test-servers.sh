@@ -30,7 +30,8 @@ running() { [ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null || true
 
 wait_sshd() { # container
   for _ in $(seq 1 60); do
-    if docker exec "$1" sh -c 'test -f /config/sshd/sshd_config' >/dev/null 2>&1 && docker logs "$1" 2>&1 | grep -q "Server listening\|done."; then return 0; fi
+    # Ready = the config exists and the sshd listener process is running.
+    if docker exec "$1" sh -c 'test -f /config/sshd/sshd_config && ps aux | grep -q "[s]shd.pam -D"' >/dev/null 2>&1; then return 0; fi
     sleep 1
   done
   echo "Warning: $1 didn't report ready in 60 s (check: docker logs $1)" >&2
@@ -72,7 +73,7 @@ up() {
   # a is the jump host and the tunnel server: forwarding on, remote forwards allowed on all interfaces.
   set_conf "$(name_of a)" 's/^#?AllowTcpForwarding.*/AllowTcpForwarding yes/' 'AllowTcpForwarding yes' 'AllowTcpForwarding'
   set_conf "$(name_of a)" 's/^#?GatewayPorts.*/GatewayPorts clientspecified/' 'GatewayPorts clientspecified' 'GatewayPorts'
-  docker restart "$(name_of a)" >/dev/null
+  docker restart -t 2 "$(name_of a)" >/dev/null
   wait_sshd "$(name_of a)"
   echo
   echo "Servers are up. Add these hosts in Dalan:"
@@ -94,7 +95,7 @@ status() {
     if running "$c"; then
       echo "[$k] $c: running"
       docker exec "$c" sh -c 'for f in /config/ssh_host_keys/*.pub; do ssh-keygen -lf "$f" 2>/dev/null; done' || true
-      docker exec "$c" sh -c "grep -E '^(HostKey|AllowTcpForwarding|GatewayPorts|KexAlgorithms|Ciphers)' /config/sshd/sshd_config" 2>/dev/null | sed 's/^/    /' || true
+      docker exec "$c" sh -c "grep -E '^(HostKeyAlgorithms|AllowTcpForwarding|GatewayPorts|Ciphers)' /config/sshd/sshd_config" 2>/dev/null | sed 's/^/    /' || true
     else
       echo "[$k] $c: not running"
     fi
@@ -105,34 +106,49 @@ rekey() { # a|b|c  mode
   local c; c="$(c_of "${1:-}")"; local mode="${2:-new}"
   running "$c" || { echo "$c isn't running. Run: $0 up" >&2; exit 1; }
   case "$mode" in
-    new) # delete every host key; the image makes fresh ones (all types) on start
-      docker exec "$c" sh -c 'rm -f /config/ssh_host_keys/ssh_host_*'
-      docker restart "$c" >/dev/null ;;
+    new) # replace every host key with a fresh one (the image only makes keys on its very first start)
+      docker exec "$c" sh -c 'cd /config/ssh_host_keys && rm -f ssh_host_* \
+        && ssh-keygen -q -N "" -t ed25519 -f ssh_host_ed25519_key \
+        && ssh-keygen -q -N "" -t ecdsa -b 256 -f ssh_host_ecdsa_key \
+        && ssh-keygen -q -N "" -t rsa -b 3072 -f ssh_host_rsa_key \
+        && chmod 600 ssh_host_*_key && chmod 644 ssh_host_*.pub'
+      docker restart -t 2 "$c" >/dev/null ;;
     only-ed25519|only-ecdsa|only-rsa)
-      local t="${mode#only-}"
-      # Keep every HostKey line but comment out all except the chosen type, so the server presents just that one.
-      docker exec "$c" sh -c "sed -i -E 's/^#?(HostKey .*)/#\\1/; s/^#(HostKey .*ssh_host_${t}_key)\$/\\1/' /config/sshd/sshd_config"
-      docker restart "$c" >/dev/null ;;
+      # The image passes every host key to sshd on the command line, so limit what sshd *offers* instead:
+      # HostKeyAlgorithms makes the server present just that key type.
+      local algs
+      case "$mode" in
+        only-ed25519) algs="ssh-ed25519" ;;
+        only-ecdsa) algs="ecdsa-sha2-nistp256" ;;
+        only-rsa) algs="rsa-sha2-512,rsa-sha2-256" ;;
+      esac
+      set_conf "$c" "s/^#?HostKeyAlgorithms.*/HostKeyAlgorithms $algs/" "HostKeyAlgorithms $algs" 'HostKeyAlgorithms'
+      docker restart -t 2 "$c" >/dev/null ;;
     restore)
-      docker exec "$c" sh -c "sed -i -E 's/^#(HostKey .*)/\\1/' /config/sshd/sshd_config"
-      docker restart "$c" >/dev/null ;;
+      docker exec "$c" sh -c "sed -i -E '/^HostKeyAlgorithms /d' /config/sshd/sshd_config"
+      docker restart -t 2 "$c" >/dev/null ;;
     *) echo "Unknown mode: $mode" >&2; exit 1 ;;
   esac
   wait_sshd "$c"
-  echo "Done. Host keys now presented by $c:"
-  docker exec "$c" sh -c "grep -E '^HostKey' /config/sshd/sshd_config" | sed 's/^/    /' || true
+  local port; port="$(docker port "$c" 2222 2>/dev/null | head -1 | sed 's/.*://')"
+  if [ -n "$port" ] && command -v ssh-keyscan >/dev/null; then
+    echo "Host key now presented by $c (port $port):"
+    ssh-keyscan -p "$port" 127.0.0.1 2>/dev/null | ssh-keygen -lf - 2>/dev/null | sed 's/^/    /'
+  else
+    echo "Done. $c restarted (it has no published port, so no fingerprint is shown)."
+  fi
 }
 
 kex_break() { # a|b|c  (optional) only offer a cipher Dalan doesn't speak, so the handshake fails
   local c; c="$(c_of "${1:-}")"
   set_conf "$c" 's/^#?Ciphers.*/Ciphers aes128-cbc/' 'Ciphers aes128-cbc' 'Ciphers'
-  docker restart "$c" >/dev/null; wait_sshd "$c"
+  docker restart -t 2 "$c" >/dev/null; wait_sshd "$c"
   echo "$c now offers only aes128-cbc. If Dalan still connects, it supports that cipher; skip the KEX step."
 }
 kex_restore() {
   local c; c="$(c_of "${1:-}")"
   docker exec "$c" sh -c "sed -i -E '/^Ciphers aes128-cbc/d' /config/sshd/sshd_config"
-  docker restart "$c" >/dev/null; wait_sshd "$c"; echo "$c is back to its default ciphers."
+  docker restart -t 2 "$c" >/dev/null; wait_sshd "$c"; echo "$c is back to its default ciphers."
 }
 
 case "${1:-}" in

@@ -14,7 +14,7 @@ Write down every step that does not do what is expected. Don't fix anything your
    scripts/test-servers.sh status
    ```
 
-   You should see three servers running (`a`, `b`, `c`) and host-key fingerprints for each.
+   You should see three servers running (`a`, `b`, `c`) and host-key fingerprints for each. Restarting a server takes a few seconds.
 3. Start the app (Node 24.12.0):
 
    ```bash
@@ -65,7 +65,7 @@ Run these in a Terminal when asked.
 - [ ] **A4.2** Press Close. **Expected:** the tab does not connect. Open **Known hosts** (left sidebar): the saved key for `127.0.0.1:2222` is still the old one.
 - [ ] **A4.3** Open `pw` again, press "Replace saved key…". **Expected:** a confirmation that asks you to type the host name; the confirm button stays disabled until you type it correctly.
 - [ ] **A4.4** Type the name, confirm. **Expected:** it connects; Known hosts shows the new fingerprint.
-- [ ] **A4.5 Key-type switch.** Trust is now on the new key. Run `scripts/test-servers.sh rekey a only-ecdsa`, then open `pw`. **Expected:** the same blocking "identity changed" warning (the server presents a different key type than the one saved). **The audit says this will instead show the normal "first time" prompt; please say which you see, and do NOT click Trust if it is the first-time prompt.**
+- [ ] **A4.5 Key-type switch.** Trust is now on the new key. Run `scripts/test-servers.sh rekey a only-ecdsa`, then open `pw`. **Expected:** the same blocking "identity changed" warning (the server now presents an ECDSA key where an Ed25519 one was saved; `status` shows it). **The audit says this will instead show the normal "first time" prompt; please say which you see, and do NOT click Trust if it is the first-time prompt.**
 - [ ] **A4.6** Put it back: `scripts/test-servers.sh rekey a restore`, then if needed replace the saved key again (A4.3) or delete the row in Known hosts and trust the key.
 
 **Stop here if you are short on time and send the report so far.**
