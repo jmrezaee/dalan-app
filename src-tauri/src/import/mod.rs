@@ -6,6 +6,8 @@
 //!
 //! The webview only picks a file path; Rust reads the file (hard rule 2).
 
+mod clients;
+
 use std::collections::{HashMap, HashSet};
 
 use rusqlite::{params, Connection};
@@ -315,8 +317,11 @@ pub fn read_file(kind: &str, path: Option<&str>) -> AppResult<String> {
             "That file is too big to be a host list.",
         ));
     }
-    std::fs::read_to_string(&path)
-        .map_err(|_| AppError::validation("That file isn't text we can read."))
+    let bytes = std::fs::read(&path)
+        .map_err(|_| AppError::not_found(format!("Couldn't open {}.", path.display())))?;
+    // PuTTY's `.reg` exports are UTF-16, so every kind goes through the same decoder.
+    clients::decode_text(&bytes)
+        .ok_or_else(|| AppError::validation("That file isn't text we can read."))
 }
 
 /// Parses `text` and marks rows that already exist in the vault.
@@ -329,6 +334,8 @@ pub fn preview(
     let mut p = match kind {
         "ssh_config" => parse_ssh_config(text),
         "csv" => parse_csv(text)?,
+        "putty" => clients::parse_putty(text),
+        "mobaxterm" => clients::parse_mobaxterm(text),
         _ => return Err(AppError::validation("Unknown import type.")),
     };
     if p.rows.len() > MAX_ROWS {

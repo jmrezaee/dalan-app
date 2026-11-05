@@ -14,7 +14,7 @@ const open = defineModel<boolean>('open', { required: true })
 const hosts = useHostsStore()
 const api = useTauri()
 
-type Kind = 'ssh_config' | 'csv'
+type Kind = 'ssh_config' | 'csv' | 'putty' | 'mobaxterm'
 const kind = ref<Kind>('ssh_config')
 const rows = ref<ImportRow[]>([])
 const fileWarnings = ref<string[]>([])
@@ -95,12 +95,12 @@ async function submit() {
     <DialogContent class="sm:max-w-[640px]">
       <DialogHeader>
         <DialogTitle>Import hosts</DialogTitle>
-        <DialogDescription>Bring over servers from your SSH config or a spreadsheet. You'll review the list first.</DialogDescription>
+        <DialogDescription>Bring over servers from your SSH config, a spreadsheet, PuTTY or MobaXterm. You'll review the list first.</DialogDescription>
       </DialogHeader>
 
       <div role="radiogroup" aria-label="Source" class="flex w-fit overflow-hidden rounded-md border border-border text-sm">
         <button
-          v-for="o in [{ v: 'ssh_config', t: 'SSH config' }, { v: 'csv', t: 'CSV file' }] as const"
+          v-for="o in [{ v: 'ssh_config', t: 'SSH config' }, { v: 'csv', t: 'CSV file' }, { v: 'putty', t: 'PuTTY' }, { v: 'mobaxterm', t: 'MobaXterm' }] as const"
           :key="o.v"
           type="button"
           role="radio"
@@ -120,6 +120,14 @@ async function submit() {
             <Button :loading="busy" @click="load(null)">Read ~/.ssh/config</Button>
             <Button variant="secondary" :disabled="busy" @click="choose"><FolderOpen />Choose file…</Button>
           </div>
+        </template>
+        <template v-else-if="kind === 'putty'">
+          <p class="text-sm text-muted">Choose a <span class="font-mono text-xs">.reg</span> export of your PuTTY sessions (in regedit, export <span class="font-mono text-xs">HKEY_CURRENT_USER\Software\SimonTatham\PuTTY\Sessions</span>), or a session file from <span class="font-mono text-xs">~/.putty/sessions</span>. Only SSH sessions come across; key files and passwords don't.</p>
+          <div><Button :loading="busy" @click="choose"><FolderOpen />Choose PuTTY file…</Button></div>
+        </template>
+        <template v-else-if="kind === 'mobaxterm'">
+          <p class="text-sm text-muted">Choose a MobaXterm export (Settings, Configuration, then Export, giving a <span class="font-mono text-xs">.mobaconf</span> file). SSH bookmarks come across with their folders; other session types and passwords don't.</p>
+          <div><Button :loading="busy" @click="choose"><FolderOpen />Choose MobaXterm file…</Button></div>
         </template>
         <template v-else>
           <p class="text-sm text-muted">
