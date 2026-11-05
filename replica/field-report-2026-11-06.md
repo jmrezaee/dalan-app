@@ -179,3 +179,42 @@ Right-click menus, drag and drop, typing-based flows (key generation, snippet ru
 | 21 | Reopening the side panel on its last tab | S | |
 | 22 | A live badge on host cards for connected hosts | S | Dalan shows the dot on tabs only. |
 | 23 | An Actions menu on each SFTP pane as the keyboard- and click-reachable twin of the context menu | S | Dalan has right-click and F2 but no visible button. |
+
+## 11. Part 3: events triggered from the shell while watching
+
+The shell was used to cause server-side events (write to the session's terminal, restart the container, rekey it) while the reference app was on screen. Typing into the app is still impossible; this is the way around it.
+
+### Terminal behaviour
+- Output written by the server appeared at once, with 16 ANSI colours and bold, reverse and underline rendered correctly. The terminal fills the tab, no padding.
+- **Background activity:** a session tab that received output while another tab was in front got a small **green dot on its icon** (unread output), the same idea as Dalan's tab dots.
+
+### Connection drop and automatic reconnect
+- When the server restarted, a **small card appeared at the bottom-left** of the window: it counted the dropped sessions ("2 sessions are disconnected"), said it was initiating reconnection, with a spinner, and offered **Reconnect (Enter)** and **Close terminals**. The tab icons showed a spinner.
+- **About six seconds later both sessions were back in the same tabs** and the old scrollback was kept above a new login banner. No click was needed (an "autoreconnect" setting exists and is on).
+- One card covers all dropped sessions at once rather than one overlay per tab.
+
+### Changed host key
+- After the server was rekeyed and restarted, the auto-reconnect stopped at the key check and showed a full-tab screen: a **red heading that the fingerprint for the address has changed**, a line about a possible security breach, and **only the new fingerprint** (the old one was not shown). The progress track stopped at the middle stage.
+- Buttons: **Replace** (primary blue, first), **Add as new** (secondary) and **Cancel** (red, right). The dangerous choice is the most prominent and no name has to be typed to confirm.
+- A second tab to the same host showed the same screen (one per tab), and a small orange dot marked the waiting tab.
+- **Compare with Dalan:** Dalan shows both fingerprints, makes Close the default and requires typing the host name to replace. That is stronger and should stay; the worthwhile idea is only the single combined card for several dropped sessions (row 24 below).
+
+### Host and key management
+- **Host Details panel** (opened from a pencil on the card): vault, address, label, group, tags, port, credentials. It showed a **suggestion that two hosts reuse the same credentials, with a link to merge them into an identity**. Menu: Connect, Add Telnet, Duplicate, **Remove** (a confirmation names the host being removed).
+- **Edit Key panel shows the full private key text in the clear**, with the public key and certificate boxes and an "Export to host" button; menu: Export to host, Collaborate, Remove (confirmation says "delete 1 key"). Showing key material in the interface contradicts Dalan's rule that secrets never reach the UI. Do not copy.
+- **OS detection:** after a first connect the host card's icon changed from a generic server to the detected OS (Alpine for the test containers).
+- **Known Hosts:** entries are tiles with no visible delete (no hover button; selection only highlights). Removal presumably needs a right-click, which this look could not do. A single "Add and continue" earlier added `[127.0.0.1]:2223` here. **Import side effect:** importing from `~/.ssh` with the Hosts group unticked still added all the user's known_hosts entries (13 extra tiles) to this list, so "untick what you don't want" did not apply to known hosts.
+
+### Gaps and ideas added
+| # | Gap | Effort | Notes |
+|---|-----|--------|-------|
+| 24 | One bottom-left card for all dropped sessions, with Reconnect all and Close all | S-M | Dalan has an overlay per tab; a workspace of 10 panes would benefit. |
+| 25 | A visible unread dot on background tabs is confirmed as the expected pattern | n/a | Already built (P18). |
+| 26 | "These hosts reuse the same credentials: make an identity" suggestion | S-M | Dalan has identities (P8); the nudge is new. |
+| 27 | Auto-reconnect that resumes in the same tab with scrollback kept | S | Dalan already reconnects on request and keeps scrollback; consider an opt-in automatic retry with backoff. |
+
+### Still not seen
+Workspaces and split panes (no way to multi-select from this access level), the password and passphrase prompts, wrong-password error, right-click menus, drag and drop, key generation and snippet running (all need typing, right-click or drag).
+
+### Cleanup state after this look
+Removed from the reference app: the three test hosts and the four imported copies of the throwaway key. **Left behind (could not be removed with clicks):** 13 added entries in Known Hosts (`[127.0.0.1]:2223` and 12 from the user's own known_hosts file); a "sessions" history row in Logs for the test connections. The temporary `~/.ssh/config` and `~/.ssh/dalan_test_key` were deleted; the test server's host keys were restored.
