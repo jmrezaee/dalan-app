@@ -56,6 +56,13 @@ export const useSessionsStore = defineStore('sessions', () => {
   /** The session keystrokes and snippets go to: the tab itself, or a workspace's focused pane. */
   const activeSession = computed(() => (active.value?.kind === 'workspace' ? (active.value.panes[active.value.focus] ?? null) : active.value))
 
+  /** Types the pending snippet once the shell is ready AND the session id is known (the ready event can beat the open call's answer). */
+  function runAutorun(sess: Session) {
+    if (!sess.autorun || !sess.id || sess.status !== 'ready') return
+    write(sess, new TextEncoder().encode(`${sess.autorun.replace(/\s+$/, '')}\n`))
+    sess.autorun = ''
+  }
+
   function onEvent(sess: Session, e: SessionEvent) {
     switch (e.type) {
       case 'state':
@@ -64,10 +71,7 @@ export const useSessionsStore = defineStore('sessions', () => {
           sess.status = e.state
           // The connection may have saved things (last connected, detected OS, a remembered password): reload the cards.
           if (e.state === 'ready' && sess.hostId) setTimeout(() => useHostsStore().refresh(), 1500)
-          if (e.state === 'ready' && sess.autorun) {
-            write(sess, new TextEncoder().encode(`${sess.autorun.replace(/\s+$/, '')}\n`))
-            sess.autorun = ''
-          }
+          if (e.state === 'ready') runAutorun(sess)
         }
         else if (e.state === 'disconnected') {
           sess.status = 'disconnected'
@@ -103,6 +107,7 @@ export const useSessionsStore = defineStore('sessions', () => {
         ? await api.sessionOpen(sess.hostId, 80, 24, e => onEvent(sess, e), b => onData(sess, b))
         : await api.localSessionOpen(80, 24, e => onEvent(sess, e), b => onData(sess, b))
       sess.id = session_id
+      runAutorun(sess)
     }
     catch (e) {
       sess.status = 'error'

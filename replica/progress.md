@@ -85,7 +85,7 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
   5. **Owner-only files:** create the app data folder, `logs/` and `edit-tmp/` as 0700, and `vault.db` and log files as 0600 (Unix).
   6. **Single instance:** add `tauri-plugin-single-instance`, so a second launch focuses the first window.
   - **Built (2026-11-05):** all six items. Changed key now needs the typed host name checked in Rust (`ssh/client.rs`); the UI sends it. "Trust" sends `remember: true`; `false` trusts once. Owner-only modes via `src/perms.rs` (app dir and logs 0700, `vault.db*`, log files and edit copies 0600). Single-instance plugin added (stack addition, desktop only). CSP set (`style-src` keeps `unsafe-inline` for Vue/Reka style attributes; dev CSP allows the Vite websocket). Rust tests added for each.
-  - **Still to check by hand (dev + release build):** unlock, open a terminal, SFTP and a tunnel under the CSP (only the unlock screen was seen); launch a second copy and see the first window come forward; `ls -l` the data dir. Then mark `[x]`.
+  - **Checked by Claude in the real window (second run, see `smoke-results-2026-11-05.md`):** unlock, terminals, SFTP and workspaces under the CSP; file modes; second binary launch exits. Still for you: `open -n` second copy (did not exit), a plain double-click while running, a tunnel under the CSP. Then mark `[x]`.
 - [ ] **P17 Robustness fixes (audit "Should fix" 7, 9, 11, 12, 13, 15):**
   1. **Command history:**
      - Encrypt it with the vault key, re-encrypting it with everything else on a master password change.

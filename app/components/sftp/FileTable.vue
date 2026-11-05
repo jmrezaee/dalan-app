@@ -32,6 +32,12 @@ function select(e: FsEntry, ev: MouseEvent | KeyboardEvent) {
   else emit('update:selected', [e.name])
 }
 
+// The row's handler runs first and lets the event bubble up to the pane's ContextMenu (which opens the menu and
+// cancels the browser's own). Here we only handle clicks on empty space, so the row's choice isn't overwritten.
+function onBlankContext(ev: MouseEvent) {
+  if (!(ev.target as HTMLElement).closest('tr[role=row]')) emit('context', null, ev)
+}
+
 function start(ev: DragEvent, e: FsEntry) {
   const names = props.selected.includes(e.name) ? props.selected : [e.name]
   emit('update:selected', names)
@@ -44,7 +50,7 @@ const arrow = (by: Pane['sort']['by']) => (props.sort.by === by ? (props.sort.de
 </script>
 
 <template>
-  <div :class="cn('flex-1 overflow-auto', dropTarget && 'ring-2 ring-inset ring-accent')" @contextmenu.prevent="emit('context', null, $event)">
+  <div :class="cn('flex-1 overflow-auto', dropTarget && 'ring-2 ring-inset ring-accent')" @contextmenu="onBlankContext">
     <table class="w-full border-collapse text-sm" role="grid">
       <thead>
         <tr class="sticky top-0 bg-bg text-left text-xs font-medium text-muted">
@@ -62,14 +68,14 @@ const arrow = (by: Pane['sort']['by']) => (props.sort.by === by ? (props.sort.de
           tabindex="0"
           draggable="true"
           :aria-selected="selected.includes(e.name)"
-          :class="cn('h-7 cursor-default whitespace-nowrap outline-none', selected.includes(e.name) ? 'bg-accent/15' : 'hover:bg-surface-hover')"
+          :class="cn('h-7 cursor-default select-none whitespace-nowrap outline-none [-webkit-user-drag:element]', selected.includes(e.name) ? 'bg-accent/15' : 'hover:bg-surface-hover')"
           @click="select(e, $event)"
           @dblclick="emit('open', e)"
           @keydown.enter="emit('open', e)"
           @keydown.space.prevent="select(e, $event)"
           @dragstart="start($event, e)"
           @dragend="emit('dragend')"
-          @contextmenu.prevent.stop="(select(e, $event), emit('context', e, $event))"
+          @contextmenu="(select(e, $event), emit('context', e, $event))"
         >
           <td class="px-2.5">
             <span class="inline-flex items-center gap-2">

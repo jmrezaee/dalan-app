@@ -11,7 +11,7 @@
   },
   "app": {
     "windows": [
-      { "title": "Dalan", "width": 1200, "height": 780, "minWidth": 800, "minHeight": 520 }
+      { "title": "Dalan", "width": 1200, "height": 780, "minWidth": 800, "minHeight": 520, "dragDropEnabled": false }
     ],
     "security": {
       "csp": {

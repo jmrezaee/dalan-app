@@ -36,3 +36,30 @@ Run against a debug bundle of Dalan (`pnpm tauri build --debug --bundles app`, s
 ## Could not be checked by automation (please check by hand)
 - SFTP: drag-and-drop between panes, the right-click menu (rename, permissions, delete, Edit in default app) and transfers. A synthetic drag did not start a drag in the web view and right-click on rows showed no menu; this may be an automation limit or a real bug (`FileTable.vue` stops the `contextmenu` event on rows, which would also stop the pane's menu opening).
 - Workspaces, snippets, groups and inheritance, Keychain Generate and Install, New Tab screen, SOCKS and remote tunnels, unreachable and auth-failed overlays, keyboard-interactive, and everything in P12/P14 not named above (env vars, proxy, agent, certificates, themes, Telnet, serial, Mosh, AI).
+
+
+# Second run, 2026-11-05 night (Claude, real window, fresh test vault; the real vault was backed up, moved aside and restored byte for byte)
+
+## Passed in the real window
+- **Keychain:** Generate (Ed25519), Install on a server (host-key question, password question, "Key added (folder 700, file 600)", linked to the host), then a key login with no password question.
+- **S18 overlays:** auth failed ("Sign-in failed", Edit host opens the editor), unreachable ("Can't reach 127.0.0.1:2299", Retry).
+- **Groups and inheritance (F04):** nested groups, "from Production / from Web" hints, group card counts, breadcrumb, connect using the group's user, password and port.
+- **SFTP:** right-click menu (after fix), Rename, Permissions (600 shows as `-rw-------`), Delete with confirmation, New folder, Copy to other pane, conflict row (Skip / Keep both / Replace) with `index (copy).html`, Edit in default app (TextEdit opened, local save detected, Upload wrote the new content to the server).
+- **Snippets and workspaces:** create a snippet, Run on hosts (3 panes, the unreachable one shows its own failure), broadcast (⌘B skips the dead pane and says so), Save as template, reopen from New tab.
+- **P16 in the window:** unlock, terminals, SFTP, workspaces all work under the strict CSP; the data folder is 0700 and `vault.db*`, log and edit copies are 0600; a second launch of the binary exits and the first keeps running.
+
+## Bugs found and fixed
+1. **SFTP right-click menu never opened** (`FileTable.vue` stopped the `contextmenu` event on rows, so the pane's menu never saw it). Rows now let it bubble; blank-space clicks still clear the target.
+2. **No toast was ever visible:** `vue-sonner` v2 needs `import 'vue-sonner/style.css'`. Without it "Saved", "Uploaded", errors and the "was saved / Upload" prompt were invisible. Imported in `Sonner.vue`.
+3. **Run snippet on hosts typed nothing:** the shell's `ready` event can arrive before `session_open` returns the session id, so the first write was dropped and the snippet forgotten. The store now waits for both (`runAutorun`).
+4. **Possible fix, not verified:** `dragDropEnabled: false` on the window, plus `select-none` and `-webkit-user-drag: element` on file rows, so HTML5 drag and drop can start in WKWebView.
+
+## Still not checked
+- **Drag and drop** (SFTP rows between panes, host card onto a group). A scripted mouse drag does not start a drag in the web view, with or without the fixes above. It needs a human hand.
+- Big-file transfer cancel (C2.5), SOCKS/remote tunnels, B1.4 slow connect, keyboard-interactive, P12/P14 extras (Telnet, serial, Mosh, AI, themes).
+- `open -n` (a forced second copy through LaunchServices) did not make the second copy exit and no socket file appeared. Starting the binary twice from a shell works. A normal double-click on the icon reuses the running app on macOS, so this may be harmless; please try it.
+
+## Small things noticed
+- The "Saved." toast sits on top of the editor sheet's Save/Cancel footer.
+- After an upload the remote file list still shows the old size until refreshed.
+- The first click after the window regains focus is sometimes swallowed.
