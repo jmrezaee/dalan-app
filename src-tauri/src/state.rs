@@ -21,6 +21,50 @@ struct Attempts {
     cooldown_until: Option<Instant>,
 }
 
+/// Clones of the two `Arc`s inside `AppState`. Lock order is always db first, then session,
+/// so two callers can't deadlock.
+#[derive(Clone)]
+pub struct Store {
+    db: Arc<Mutex<Connection>>,
+    session: Arc<Mutex<Option<VaultSession>>>,
+}
+
+impl Store {
+    pub async fn with_db_session<T, F>(&self, f: F) -> AppResult<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection, &VaultSession) -> AppResult<T> + Send + 'static,
+    {
+        let (db, session) = (Arc::clone(&self.db), Arc::clone(&self.session));
+        tokio::task::spawn_blocking(move || {
+            let mut conn = db
+                .lock()
+                .map_err(|_| AppError::internal("database lock poisoned"))?;
+            let guard = session
+                .lock()
+                .map_err(|_| AppError::internal("vault lock poisoned"))?;
+            f(&mut conn, guard.as_ref().ok_or_else(AppError::locked)?)
+        })
+        .await?
+    }
+
+    /// DB only (no secrets), e.g. known_hosts lookups that only need the vault id.
+    pub async fn with_db<T, F>(&self, f: F) -> AppResult<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> AppResult<T> + Send + 'static,
+    {
+        let db = Arc::clone(&self.db);
+        tokio::task::spawn_blocking(move || {
+            let mut conn = db
+                .lock()
+                .map_err(|_| AppError::internal("database lock poisoned"))?;
+            f(&mut conn)
+        })
+        .await?
+    }
+}
+
 pub struct AppState {
     // Arc so a clone can move into spawn_blocking ('static). Mutex because rusqlite
     // connections are not Sync: one writer at a time, as architecture.md decides.
@@ -33,6 +77,8 @@ pub struct AppState {
     last_activity: AtomicI64,
     /// True once the "locking soon" warning went out for the current idle stretch.
     pub warned: AtomicBool,
+    /// Live SSH sessions (P4). Closed when the vault locks.
+    pub sessions: crate::ssh::SessionManager,
 }
 
 impl AppState {
@@ -43,6 +89,7 @@ impl AppState {
             attempts: Mutex::new(Attempts::default()),
             last_activity: AtomicI64::new(now_ms()),
             warned: AtomicBool::new(false),
+            sessions: crate::ssh::SessionManager::default(),
         }
     }
 
@@ -63,21 +110,22 @@ impl AppState {
     }
 
     /// Like `with_db`, but also hands the unlocked vault session to `f` (for commands that
-    /// read or write secrets). Fails with `locked` if the vault is locked. Lock order is
-    /// always db first, then session, so two callers can't deadlock.
+    /// read or write secrets). Fails with `locked` if the vault is locked.
     pub async fn with_db_session<T, F>(&self, f: F) -> AppResult<T>
     where
         T: Send + 'static,
         F: FnOnce(&mut Connection, &VaultSession) -> AppResult<T> + Send + 'static,
     {
-        let session = Arc::clone(&self.session);
-        self.with_db(move |conn| {
-            let guard = session
-                .lock()
-                .map_err(|_| AppError::internal("vault lock poisoned"))?;
-            f(conn, guard.as_ref().ok_or_else(AppError::locked)?)
-        })
-        .await
+        self.store().with_db_session(f).await
+    }
+
+    /// A cheap, cloneable handle to the database and vault session, for background tasks
+    /// (SSH sessions) that outlive a single command and cannot borrow `AppState`.
+    pub fn store(&self) -> Store {
+        Store {
+            db: Arc::clone(&self.db),
+            session: Arc::clone(&self.session),
+        }
     }
 
     pub fn is_unlocked(&self) -> bool {
@@ -85,8 +133,12 @@ impl AppState {
     }
 
     pub fn set_session(&self, s: Option<VaultSession>) {
+        let locking = s.is_none();
         if let Ok(mut guard) = self.session.lock() {
             *guard = s; // the old value (if any) is dropped here and its key zeroized
+        }
+        if locking {
+            self.sessions.close_all(); // locking ends every live session
         }
         self.touch();
     }

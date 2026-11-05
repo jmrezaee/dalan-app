@@ -5,6 +5,7 @@ pub mod events;
 pub mod hosts;
 pub mod import;
 pub mod keys;
+pub mod known_hosts;
 pub mod logs;
 pub mod pty;
 pub mod sftp;
@@ -33,6 +34,15 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::hosts::host_get,
             commands::hosts::host_save,
             commands::hosts::host_delete,
+            commands::session::session_open,
+            commands::session::session_write,
+            commands::session::session_resize,
+            commands::session::session_ack,
+            commands::session::session_respond,
+            commands::session::session_close,
+            commands::session::session_reconnect,
+            commands::session::known_hosts_list,
+            commands::session::known_host_delete,
         ])
         .events(collect_events![
             events::VaultLocked,

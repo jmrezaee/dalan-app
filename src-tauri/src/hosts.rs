@@ -215,6 +215,80 @@ pub fn delete(conn: &mut Connection, s: &VaultSession, id: &str) -> AppResult<()
     Ok(())
 }
 
+/// Everything a connection needs. The password is decrypted here, in Rust, and wiped on drop.
+pub struct ConnectInfo {
+    pub label: String,
+    pub address: String,
+    pub port: u16,
+    pub username: Option<String>,
+    pub password: Option<zeroize::Zeroizing<String>>,
+}
+
+pub fn connect_info(conn: &Connection, s: &VaultSession, host_id: &str) -> AppResult<ConnectInfo> {
+    let (label, address, port, username, secret_id): (String, String, Option<i64>, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT h.label, h.address, p.ssh_port, p.username, p.password_secret_id FROM hosts h JOIN connection_profiles p ON p.id = h.profile_id WHERE h.id = ?1 AND h.vault_id = ?2",
+            params![host_id, s.vault_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .optional()?
+        .ok_or_else(|| AppError::not_found("That host no longer exists."))?;
+    let password = match secret_id {
+        Some(id) => {
+            let bytes = secrets::get(conn, s, &id)?;
+            Some(zeroize::Zeroizing::new(
+                String::from_utf8_lossy(&bytes).into_owned(),
+            ))
+        }
+        None => None,
+    };
+    Ok(ConnectInfo {
+        label,
+        address,
+        port: port.map_or(DEFAULT_PORT, |p| p as u16),
+        username,
+        password,
+    })
+}
+
+/// "Remember" on the password prompt: stores the password for this host's profile.
+pub fn save_password(
+    conn: &mut Connection,
+    s: &VaultSession,
+    host_id: &str,
+    password: &str,
+) -> AppResult<()> {
+    let tx = conn.transaction()?;
+    let (profile_id, old): (String, Option<String>) = tx
+        .query_row(
+            "SELECT h.profile_id, p.password_secret_id FROM hosts h JOIN connection_profiles p ON p.id = h.profile_id WHERE h.id = ?1 AND h.vault_id = ?2",
+            params![host_id, s.vault_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?
+        .ok_or_else(|| AppError::not_found("That host no longer exists."))?;
+    match old {
+        Some(id) => secrets::replace(&tx, s, &id, password.as_bytes())?,
+        None => {
+            let id = secrets::put(&tx, s, SecretKind::Password, password.as_bytes())?;
+            tx.execute(
+                "UPDATE connection_profiles SET password_secret_id = ?1, updated_at = ?2 WHERE id = ?3",
+                params![id, now_ms(), profile_id],
+            )?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn mark_connected(conn: &Connection, vault_id: &str, host_id: &str) -> AppResult<()> {
+    conn.execute(
+        "UPDATE hosts SET last_connected_at = ?1 WHERE id = ?2 AND vault_id = ?3",
+        params![now_ms(), host_id, vault_id],
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

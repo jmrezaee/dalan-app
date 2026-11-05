@@ -2,4 +2,5 @@
 
 pub mod app;
 pub mod hosts;
+pub mod session;
 pub mod vault;

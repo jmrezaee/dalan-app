@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // S18. Copy is from replica/brand.md. The overlay is role=alertdialog when it needs an answer.
-import { CircleAlert, LoaderCircle, PlugZap, ShieldAlert, Unplug } from '@lucide/vue'
+import { CircleAlert, KeyRound, LoaderCircle, PlugZap, ShieldAlert, Unplug } from '@lucide/vue'
 
-export type OverlayKind = 'connecting' | 'host-key-new' | 'host-key-changed' | 'auth-failed' | 'unreachable' | 'disconnected'
+export type OverlayKind = 'connecting' | 'password' | 'host-key-new' | 'host-key-changed' | 'auth-failed' | 'unreachable' | 'disconnected'
 const props = defineProps<{
   kind: OverlayKind
   host: string
@@ -11,10 +11,23 @@ const props = defineProps<{
   fingerprint?: string
   oldFingerprint?: string
   reason?: string
+  user?: string
   time?: string
 }>()
-defineEmits<{ cancel: []; trust: []; close: []; replace: []; edit: []; retry: []; reconnect: [] }>()
+const emit = defineEmits<{ cancel: []; submit: [password: string, remember: boolean]; trust: []; close: []; replace: []; edit: []; retry: []; reconnect: [] }>()
 const needsAnswer = computed(() => props.kind !== 'connecting')
+const password = ref('')
+const remember = ref(false)
+// The password field is inside a PasswordInput wrapper, so focus it by id when the card appears.
+function focusPassword() {
+  if (props.kind === 'password') nextTick(() => document.getElementById('session-password')?.focus())
+}
+onMounted(focusPassword)
+watch(() => props.kind, focusPassword)
+function submit() {
+  emit('submit', password.value, remember.value)
+  password.value = ''
+}
 </script>
 
 <template>
@@ -29,6 +42,15 @@ const needsAnswer = computed(() => props.kind !== 'connecting')
         <p v-if="hop" class="font-mono text-xs text-muted">via {{ hop }}</p>
         <div class="flex justify-end"><Button variant="secondary" @click="$emit('cancel')">Cancel</Button></div>
       </template>
+
+      <form v-else-if="kind === 'password'" class="flex flex-col gap-3" @submit.prevent="submit">
+        <KeyRound class="size-6 text-accent" aria-hidden="true" />
+        <h2 class="text-lg">Password for {{ host }}</h2>
+        <p v-if="user" class="text-muted">Signing in as <span class="font-mono">{{ user }}</span>.</p>
+        <PasswordInput id="session-password" v-model="password" />
+        <label class="flex items-center gap-2 text-sm"><Checkbox v-model="remember" />Remember it on this computer</label>
+        <div class="flex justify-end gap-2"><Button type="button" variant="secondary" @click="$emit('cancel')">Cancel</Button><Button type="submit">Continue</Button></div>
+      </form>
 
       <template v-else-if="kind === 'host-key-new'">
         <ShieldAlert class="size-6 text-warning" aria-hidden="true" />

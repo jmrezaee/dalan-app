@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // S02/S16. Spec: HostCard. Selection and focus are conveyed by ring + text, not colour alone.
-import { Ellipsis, LoaderCircle, Pencil, Trash2 } from '@lucide/vue'
+import { Ellipsis, LoaderCircle, Pencil, Plug, Trash2 } from '@lucide/vue'
 import { cn } from '@/lib/utils'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 
@@ -57,6 +57,7 @@ defineEmits<{ open: []; select: []; edit: []; delete: [] }>()
         <IconButton label="Host actions" size="xs" class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100" @click.stop><Ellipsis /></IconButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
+        <DropdownMenuItem @select="$emit('open')"><Plug />Connect</DropdownMenuItem>
         <DropdownMenuItem @select="$emit('edit')"><Pencil />Edit</DropdownMenuItem>
         <DropdownMenuItem class="text-danger" @select="$emit('delete')"><Trash2 />Delete</DropdownMenuItem>
       </DropdownMenuContent>

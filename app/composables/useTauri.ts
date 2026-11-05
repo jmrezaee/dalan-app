@@ -1,6 +1,7 @@
 // The only place that talks to Rust. Stores call these wrappers, never `invoke` directly.
+import { Channel } from '@tauri-apps/api/core'
 import { commands } from '~/types/bindings'
-import type { AppError, HostInput } from '~/types/bindings'
+import type { AppError, HostInput, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -32,5 +33,21 @@ export function useTauri() {
     hostGet: (id: string) => unwrap(commands.hostGet(id)),
     hostSave: (input: HostInput) => unwrap(commands.hostSave(input)),
     hostDelete: (id: string) => unwrap(commands.hostDelete(id)),
+    /** Terminal output arrives as raw bytes on its own channel (an ArrayBuffer, not JSON). */
+    sessionOpen: (hostId: string, cols: number, rows: number, onEvent: (e: SessionEvent) => void, onData: (b: Uint8Array) => void) => {
+      const events = new Channel<SessionEvent>()
+      events.onmessage = onEvent
+      const data = new Channel<ArrayBuffer>()
+      data.onmessage = m => onData(new Uint8Array(m))
+      return unwrap(commands.sessionOpen(hostId, cols, rows, events as never, data as unknown as Channel<RawBytes>))
+    },
+    sessionWrite: (id: string, bytes: Uint8Array) => unwrap(commands.sessionWrite(id, Array.from(bytes))),
+    sessionResize: (id: string, cols: number, rows: number) => unwrap(commands.sessionResize(id, cols, rows)),
+    sessionAck: (id: string, bytes: number) => unwrap(commands.sessionAck(id, bytes)),
+    sessionRespond: (id: string, promptId: string, answer: PromptAnswer) => unwrap(commands.sessionRespond(id, promptId, answer)),
+    sessionClose: (id: string) => commands.sessionClose(id),
+    sessionReconnect: (id: string) => unwrap(commands.sessionReconnect(id)),
+    knownHostsList: () => unwrap(commands.knownHostsList()),
+    knownHostDelete: (id: string) => unwrap(commands.knownHostDelete(id)),
   }
 }

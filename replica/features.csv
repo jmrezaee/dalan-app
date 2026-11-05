@@ -14,12 +14,12 @@ Save passphrase toggle (else prompt each connect),keychain,must,yes,no,source 7
 Identities (username + password or key) linked to hosts and groups,keychain,must,yes,no,S07
 Export public key to host authorized_keys,keychain,must,yes,no,S08 F02
 SSH connect with password key or identity,terminal,must,yes,no,S18
-Known hosts trust-on-first-use prompt,terminal,must,yes,no,S18 S14
-Host key changed blocking warning,terminal,must,yes,no,F12
-Known hosts list with delete,vault,must,yes,no,S14
-xterm.js terminal with resize copy paste scrollback,terminal,must,yes,no,S18
-Disconnected overlay with Reconnect,terminal,must,yes,no,F11
-Clear errors for unreachable / auth failed / KEX failed,terminal,must,yes,no,source 13
+Known hosts trust-on-first-use prompt,terminal,must,yes,yes,S18 S14
+Host key changed blocking warning,terminal,must,yes,yes,F12
+Known hosts list with delete,vault,must,yes,yes,S14
+xterm.js terminal with resize copy paste scrollback,terminal,must,yes,yes,S18
+Disconnected overlay with Reconnect,terminal,must,yes,yes,F11
+Clear errors for unreachable / auth failed / KEX failed,terminal,must,yes,yes,source 13
 Multiple session tabs (Cmd+T new tab),terminal,must,yes,no,S16
 New Tab screen with recent connections and search,terminal,must,yes,no,S16
 Command palette over hosts and tabs (Cmd+K),shell,must,yes,no,S17 F03
