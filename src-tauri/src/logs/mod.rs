@@ -68,11 +68,10 @@ pub struct Recorder {
 
 impl Recorder {
     pub fn create(dir: &Path, id: &str, key: Key) -> std::io::Result<Self> {
-        std::fs::create_dir_all(dir)?;
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(file_path(dir, id))?;
+        crate::perms::private_dir(dir)?;
+        let path = file_path(dir, id);
+        let file = OpenOptions::new().create(true).append(true).open(&path)?;
+        crate::perms::private_file(&path)?;
         Ok(Recorder {
             id: id.into(),
             file,

@@ -427,7 +427,7 @@ async fn first_connect_trusts_the_key_then_runs_a_shell_and_remembers_it() {
         saved_keys(&h).await.is_empty(),
         "nothing is saved before the user says yes"
     );
-    s.answer(&id, true, None, false);
+    s.answer(&id, true, None, true);
     s.until(is_state(SessionState::Ready)).await;
     assert_eq!(saved_keys(&h).await.len(), 1);
 
@@ -508,9 +508,16 @@ async fn changed_key_blocks_and_only_an_explicit_replace_continues() {
         "cancel must leave the saved key alone"
     );
 
+    // A bare "yes" without the typed host name is not enough, even if the UI were bypassed.
     let mut s = start(&h);
     let (id, _) = s.expect_prompt().await;
-    s.answer(&id, true, None, false); // Replace saved key
+    s.answer(&id, true, None, true);
+    s.until(is_state(SessionState::Closed)).await;
+    assert_eq!(saved_keys(&h).await[0].fingerprint, "SHA256:old");
+
+    let mut s = start(&h);
+    let (id, _) = s.expect_prompt().await;
+    s.answer(&id, true, Some("test-box"), true); // Replace saved key
     s.until(is_state(SessionState::Ready)).await;
     assert_eq!(saved_keys(&h).await[0].fingerprint, new_fingerprint);
 }
@@ -520,7 +527,7 @@ async fn wrong_saved_password_reports_auth_failed() {
     let h = harness(Some("wrong-pw")).await;
     let mut s = start(&h);
     let (id, _) = s.expect_prompt().await;
-    s.answer(&id, true, None, false);
+    s.answer(&id, true, None, true);
     match s.until(|e| matches!(e, SessionEvent::Error { .. })).await {
         SessionEvent::Error { code, message } => {
             assert_eq!(code, ErrorCode::AuthFailed);
@@ -535,7 +542,7 @@ async fn no_saved_password_prompts_and_remember_saves_it() {
     let h = harness(None).await;
     let mut s = start(&h);
     let (id, _) = s.expect_prompt().await;
-    s.answer(&id, true, None, false);
+    s.answer(&id, true, None, true);
     let (id, kind) = s.expect_prompt().await;
     assert!(matches!(kind, PromptKind::Password { .. }));
     s.answer(&id, true, Some("right-pw"), true);
@@ -626,7 +633,7 @@ async fn docker_openssh_server_runs_a_real_shell() {
     let mut s = start(&h);
     let (id, kind) = s.expect_prompt().await;
     assert!(matches!(kind, PromptKind::HostKeyNew { .. }));
-    s.answer(&id, true, None, false);
+    s.answer(&id, true, None, true);
     s.until(is_state(SessionState::Ready)).await;
     s.cmds
         .send(Cmd::Write(b"echo dalan-$((40+2))\n".to_vec()))
@@ -672,7 +679,7 @@ async fn give_host_a_key(
 async fn trusted(h: &Harness) -> Running {
     let mut s = start(h);
     let (id, _) = s.expect_prompt().await;
-    s.answer(&id, true, None, false);
+    s.answer(&id, true, None, true);
     s
 }
 
@@ -845,7 +852,7 @@ async fn mosh_starts_the_server_over_ssh_then_runs_the_local_client() {
 
     let mut s = start_mosh(&h);
     let (id, _) = s.expect_prompt().await; // the SSH bootstrap asks about the host key as usual
-    s.answer(&id, true, None, false);
+    s.answer(&id, true, None, true);
     s.until(is_state(SessionState::Ready)).await;
     s.until(is_state(SessionState::Disconnected)).await; // the fake client exits at once
     let mut shown = Vec::new();
@@ -1064,7 +1071,7 @@ async fn export_installs_the_public_key_and_links_it_to_the_host() {
                     PromptAnswer {
                         accept: true,
                         text: None,
-                        remember: false,
+                        remember: true,
                     },
                 )
                 .unwrap(),
@@ -1205,7 +1212,7 @@ async fn docker_f02_install_key_then_connect_key_only() {
                     PromptAnswer {
                         accept: true,
                         text: None,
-                        remember: false,
+                        remember: true,
                     },
                 )
                 .unwrap(),
@@ -1314,10 +1321,10 @@ async fn connects_through_a_jump_host_with_a_prompt_per_hop() {
     }
     let (id, kind) = s.expect_prompt().await;
     assert!(matches!(kind, PromptKind::HostKeyNew { ref host, .. } if host == "bastion"));
-    s.answer(&id, true, None, false);
+    s.answer(&id, true, None, true);
     let (id, kind) = s.expect_prompt().await;
     assert!(matches!(kind, PromptKind::HostKeyNew { ref host, .. } if host == "test-box"));
-    s.answer(&id, true, None, false);
+    s.answer(&id, true, None, true);
     s.until(is_state(SessionState::Ready)).await;
     s.cmds.send(Cmd::Write(b"hi\n".to_vec())).unwrap();
     assert!(s.read_until("echo: hi").await.contains("echo: hi"));
@@ -1403,7 +1410,7 @@ async fn trusted_chain(h: &Harness, n: usize) -> Running {
     let mut s = start(h);
     for _ in 0..n {
         let (id, _) = s.expect_prompt().await;
-        s.answer(&id, true, None, false);
+        s.answer(&id, true, None, true);
     }
     s
 }

@@ -85,11 +85,12 @@ impl EditManager {
         let dir = tmp_root.join(&id);
         let io =
             |e: std::io::Error| AppError::internal(format!("Couldn't save a temporary copy: {e}"));
-        tokio::fs::create_dir_all(&dir).await.map_err(io)?;
+        crate::perms::private_dir(&dir).map_err(io)?;
         let local = dir.join(&name);
         let download = async {
             let mut r = fs.open_read(remote_path).await?;
             let mut f = tokio::fs::File::create(&local).await.map_err(io)?;
+            crate::perms::private_file(&local).map_err(io)?;
             tokio::io::copy(&mut r, &mut f).await.map_err(io)?;
             AppResult::Ok(())
         };

@@ -76,6 +76,38 @@ pub fn get(conn: &Connection) -> AiConfig {
     }
 }
 
+/// Parses and normalises the service address. `https` is fine anywhere; plain `http` only for this
+/// computer (`localhost`, 127.0.0.0/8, `::1`), because the key travels there. Parsing it, rather than
+/// checking a prefix, is what stops `http://localhost.evil.com` and `http://127.0.0.1.nip.io`.
+pub fn check_base(raw: &str) -> AppResult<String> {
+    let bad = || {
+        AppError::validation(
+            "The address must be an https:// address (http only works for this computer).",
+        )
+    };
+    let u = url::Url::parse(raw.trim()).map_err(|_| bad())?;
+    if raw.len() > 200
+        || !u.username().is_empty()
+        || u.password().is_some()
+        || u.query().is_some()
+        || u.fragment().is_some()
+    {
+        return Err(bad());
+    }
+    let loopback = match u.host() {
+        Some(url::Host::Domain(d)) => d.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => return Err(bad()),
+    };
+    match u.scheme() {
+        "https" => {}
+        "http" if loopback => {}
+        _ => return Err(bad()),
+    }
+    Ok(u.as_str().trim_end_matches('/').to_string())
+}
+
 pub fn save(
     conn: &mut Connection,
     vault: &VaultSession,
@@ -87,18 +119,24 @@ pub fn save(
             "Enter a model name, like the ones in your provider's docs.",
         ));
     }
-    let base = input.base_url.trim().trim_end_matches('/');
-    // A key travels to this address, so it must be https (plain http only for this computer).
-    let local = base.starts_with("http://localhost") || base.starts_with("http://127.0.0.1");
-    if !(base.starts_with("https://") || local)
-        || base.len() > 200
-        || base.chars().any(char::is_whitespace)
-    {
+    let base = check_base(&input.base_url)?;
+    let mut stored = load(conn);
+    // The key is sent to this address, so pointing it somewhere else must not carry the saved key along:
+    // whoever changes the address has to hand over the key again.
+    let current = stored
+        .base_url
+        .clone()
+        .unwrap_or_else(|| DEFAULT_BASE.into());
+    let new_key = input
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|k| !k.is_empty());
+    if base != current && stored.key_secret_id.is_some() && !new_key && !input.clear_key {
         return Err(AppError::validation(
-            "The address must start with https://.",
+            "You changed the service address, so enter your API key again. It is only ever sent to that address.",
         ));
     }
-    let mut stored = load(conn);
     let tx = conn.transaction()?;
     if input.clear_key {
         if let Some(id) = stored.key_secret_id.take() {
@@ -207,6 +245,8 @@ pub async fn suggest(r: &Ready, request: &str, os: Option<&str>) -> AppResult<Su
     });
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
+        // Never follow redirects: the key header would travel to wherever the server points.
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| AppError::internal(e.to_string()))?;
     let resp = client
@@ -217,12 +257,23 @@ pub async fn suggest(r: &Ready, request: &str, os: Option<&str>) -> AppResult<Su
         .send()
         .await
         .map_err(|e| {
+            // Include the underlying causes ("connection refused", "certificate ..."), not just "error sending request".
+            let e = e.without_url();
+            let mut why = e.to_string();
+            let mut src = std::error::Error::source(&e);
+            while let Some(s) = src {
+                why = format!("{why}: {s}");
+                src = s.source();
+            }
             AppError::new(
                 ErrorCode::HostUnreachable,
-                format!("Couldn't reach the AI service: {}", e.without_url()),
+                format!("Couldn't reach the AI service: {why}"),
             )
         })?;
     let status = resp.status();
+    if status.is_redirection() {
+        return Err(AppError::internal("The AI service redirected the request, which Dalan won't follow. Check the service address."));
+    }
     let json: serde_json::Value = resp.json().await.unwrap_or_default();
     if status.as_u16() == 401 || status.as_u16() == 403 {
         return Err(AppError::new(
@@ -389,5 +440,115 @@ mod tests {
         let err = suggest(&r, "anything", None).await.unwrap_err();
         assert_eq!(err.code, ErrorCode::AuthFailed);
         assert!(suggest(&r, "   ", None).await.is_err());
+    }
+
+    #[test]
+    fn address_must_be_https_or_loopback_and_is_parsed_not_prefix_matched() {
+        for ok in [
+            "https://api.anthropic.com",
+            "https://gateway.example.com/prefix/",
+            "http://localhost:8080",
+            "http://127.0.0.1:9000",
+            "http://127.5.5.5",
+            "http://[::1]:3000",
+            "HTTP://LOCALHOST",
+        ] {
+            assert!(check_base(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "http://localhost.evil.com",
+            "http://127.0.0.1.nip.io",
+            "http://localhostx",
+            "http://evil.com",
+            "http://example.com@127.0.0.1", // userinfo trick: still not allowed to carry credentials
+            "https://user:pw@api.example.com",
+            "https://api.example.com/?x=1",
+            "ftp://localhost",
+            "javascript:alert(1)",
+            "api.anthropic.com",
+            "",
+            "https://",
+        ] {
+            assert!(check_base(bad).is_err(), "{bad}");
+        }
+        assert_eq!(
+            check_base("https://api.anthropic.com/").unwrap(),
+            "https://api.anthropic.com"
+        );
+    }
+
+    #[test]
+    fn changing_the_address_needs_the_key_again() {
+        let mut c = open_in_memory().unwrap();
+        let s = vault::create(&c, "correct-horse-staple", KdfParams::cheap()).unwrap();
+        let input = |base: &str, key: Option<&str>| AiSettings {
+            model: "m".into(),
+            base_url: base.into(),
+            api_key: key.map(String::from),
+            clear_key: false,
+        };
+        save(&mut c, &s, &input("https://a.example.com", Some("sk-1"))).unwrap();
+        // Same address, no key given: fine (model edits etc.).
+        save(&mut c, &s, &input("https://a.example.com/", None)).unwrap();
+        // A different address without the key: refused, and nothing changed.
+        let err = save(&mut c, &s, &input("https://b.example.com", None)).unwrap_err();
+        assert!(err.message.contains("enter your API key again"));
+        assert_eq!(get(&c).base_url, "https://a.example.com");
+        // With the key it goes through and the new key replaces the old.
+        save(&mut c, &s, &input("https://b.example.com", Some("sk-2"))).unwrap();
+        assert_eq!(&*ready(&c, &s).unwrap().key, "sk-2");
+        assert_eq!(get(&c).base_url, "https://b.example.com");
+    }
+
+    #[tokio::test]
+    async fn a_redirect_is_not_followed_and_the_key_stays_home() {
+        // Server A answers 302 to server B. B must never see a request (or the key).
+        let b = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let b_url = format!("http://{}/steal", b.local_addr().unwrap());
+        let b_hit = Arc::new(Mutex::new(false));
+        let bh = Arc::clone(&b_hit);
+        tokio::spawn(async move {
+            if b.accept().await.is_ok() {
+                *bh.lock().unwrap() = true;
+            }
+        });
+        let a = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", a.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (mut c, _) = a.accept().await.unwrap();
+            // Read the whole request first: answering and closing with unread bytes would reset the connection.
+            let mut buf = vec![0u8; 16384];
+            let mut n = 0;
+            loop {
+                n += c.read(&mut buf[n..]).await.unwrap();
+                let text = String::from_utf8_lossy(&buf[..n]).into_owned();
+                if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                    let len: usize = head
+                        .lines()
+                        .find_map(|h| {
+                            h.to_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|v| v.trim().parse().unwrap())
+                        })
+                        .unwrap_or(0);
+                    if body.len() >= len {
+                        break;
+                    }
+                }
+            }
+            let resp = format!(
+                "HTTP/1.1 302 Found\r\nlocation: {b_url}\r\ncontent-type: text/plain\r\ncontent-length: 5\r\nconnection: close\r\n\r\nmoved"
+            );
+            c.write_all(resp.as_bytes()).await.unwrap();
+        });
+        let r = Ready {
+            key: zeroize::Zeroizing::new("sk-secret".into()),
+            model: "m".into(),
+            base,
+        };
+        let err = suggest(&r, "anything", None).await.unwrap_err();
+        assert!(err.message.contains("redirected"), "{}", err.message);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!*b_hit.lock().unwrap());
     }
 }

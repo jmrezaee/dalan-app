@@ -37,6 +37,10 @@ tauri-plugin-updater = "2"
 tauri-specta = { version = "=2.0.0-rc.26", features = ["derive", "typescript"] }
 thiserror = "2.0.21"
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "sync", "time", "net", "fs", "io-util"] }
+url = "2"
 uuid = { version = "1.20.0", features = ["v7"] }
 zeroize = "1.8.2"
 
+# One Dalan at a time: a second launch focuses the first window instead (desktop only).
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2"

@@ -150,8 +150,16 @@ impl Handler for Client {
             },
             Err(e) => return self.reject(Rejected::Failed(e.message)),
         };
-        if self.prompts.ask(&self.io, kind).await.is_none() {
+        let Some(answer) = self.prompts.ask(&self.io, kind).await else {
             return self.reject(Rejected::ByUser);
+        };
+        // Replacing a changed key needs the host name typed (F12). Checked here, not only in the UI.
+        if replacing && answer.text.as_deref().map(str::trim) != Some(self.label.as_str()) {
+            return self.reject(Rejected::ByUser);
+        }
+        // "Trust once": connect now, save nothing.
+        if !answer.remember {
+            return Ok(true);
         }
         let (pattern, kt) = (self.pattern.clone(), key_type);
         let saved = self

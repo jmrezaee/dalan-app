@@ -15,6 +15,7 @@ pub mod known_hosts;
 pub mod logs;
 pub mod mosh;
 pub mod osdetect;
+mod perms;
 pub mod proxy;
 pub mod pty;
 pub mod serial;
@@ -151,8 +152,17 @@ pub fn run() {
         eprintln!("Couldn't refresh app/types/bindings.ts: {e}");
     }
 
-    tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
+    let app = tauri::Builder::default();
+    // Must be the first plugin. A second launch (a double-click on the icon) shows the running window instead.
+    #[cfg(desktop)]
+    let app = app.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = w.unminimize();
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+    }));
+    app.plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_log::Builder::default().build())
@@ -160,10 +170,13 @@ pub fn run() {
         .setup(move |app| {
             builder.mount_events(app);
             let dir = app.path().app_data_dir()?;
-            std::fs::create_dir_all(&dir)?;
+            perms::private_dir(&dir)?;
             // Edited-file copies from a previous run are stale: nothing is watching them any more.
             let _ = std::fs::remove_dir_all(dir.join("edit-tmp"));
             let conn = db::open(&dir.join("vault.db"))?;
+            for f in ["vault.db", "vault.db-wal", "vault.db-shm"] {
+                let _ = perms::private_file(&dir.join(f));
+            }
             // Logs a previous run never got to close (quit mid-session) count as ended when they started.
             let _ = conn.execute(
                 "UPDATE session_logs SET ended_at = started_at WHERE ended_at IS NULL",

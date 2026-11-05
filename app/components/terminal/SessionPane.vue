@@ -44,8 +44,8 @@ const typed = ref('')
 const canReplace = computed(() => typed.value.trim() === promptHost.value)
 function confirmReplace() {
   replaceOpen.value = false
+  sessions.respond(props.session, true, typed.value.trim(), true)
   typed.value = ''
-  sessions.respond(props.session, true)
 }
 // Cancel on any prompt answers "no"; closing the tab while a prompt is open ends the session.
 const cancel = () => sessions.respond(props.session, false)
@@ -71,7 +71,7 @@ const cancel = () => sessions.respond(props.session, false)
       :time="time"
       @cancel="session.prompt ? cancel() : sessions.close(session)"
       @submit="(pw, remember) => sessions.respond(session, true, pw, remember)"
-      @trust="sessions.respond(session, true)"
+      @trust="sessions.respond(session, true, undefined, true)"
       @close="session.prompt ? cancel() : sessions.close(session)"
       @replace="replaceOpen = true"
       @edit="$emit('editHost', session.hostId)"
