@@ -518,6 +518,8 @@ export type HostSummary_Deserialize = {
 	inherited: Inherited_Deserialize,
 	/**  Epoch ms. Fits a JS number safely, so it is exported as `number` rather than bigint. */
 	last_connected_at?: number | null,
+	/**  Detected after the first connect: `ubuntu`, `debian`, `macos`, `linux`, ... or `unknown`. */
+	os_hint?: string | null,
 };
 
 /**  What the list needs to draw a card. No secret, only `has_password` flags. */
@@ -551,6 +553,8 @@ export type HostSummary_Serialize = {
 	inherited: Inherited_Serialize,
 	/**  Epoch ms. Fits a JS number safely, so it is exported as `number` rather than bigint. */
 	last_connected_at: number | null,
+	/**  Detected after the first connect: `ubuntu`, `debian`, `macos`, `linux`, ... or `unknown`. */
+	os_hint: string | null,
 };
 
 export type HostsTree = HostsTree_Serialize | HostsTree_Deserialize;

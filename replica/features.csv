@@ -59,7 +59,7 @@ Import PuTTY / MobaXterm / SecureCRT,import,could,yes,no,source 2
 Mosh,protocols,could,yes,no,needs mosh client binary; not logged by Termius
 Telnet,protocols,could,yes,no,plaintext warning
 Serial connections,protocols,could,yes,no,baud data bits stop bits parity flow control
-Auto-detect remote OS icon,hosts,could,yes,no,uses an exec channel; make it toggleable
+Auto-detect remote OS icon,hosts,could,yes,yes,uses an exec channel; make it toggleable
 App lock with Touch ID / Windows Hello,security,could,yes,no,
 Own self-hosted encrypted sync between devices,sync,could,yes,no,Termius's own sync service is skip; this would be your own
 AI command generation with your own API key,terminal,could,yes,no,Termius AI itself is skip

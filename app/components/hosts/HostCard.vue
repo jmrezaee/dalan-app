@@ -10,6 +10,8 @@ defineProps<{
   address: string
   port?: number
   osLetter?: string
+  /** Tooltip for the badge, e.g. `Ubuntu`. */
+  osName?: string
   tags?: string[]
   selected?: boolean
   connecting?: boolean
@@ -41,7 +43,7 @@ defineEmits<{ open: []; select: []; edit: []; delete: []; dragstart: [event: Dra
     @dblclick="$emit('open')"
     @keydown.enter="$emit('open')"
   >
-    <div class="relative grid size-8 shrink-0 place-items-center rounded-md bg-surface-hover text-2xs font-semibold">
+    <div class="relative grid size-8 shrink-0 place-items-center rounded-md bg-surface-hover text-2xs font-semibold" :title="osName">
       <LoaderCircle v-if="connecting" class="size-4 animate-spin text-accent" aria-label="Connecting" />
       <template v-else>{{ osLetter ?? 'S' }}</template>
       <span v-if="connected" class="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-success ring-2 ring-surface" title="Connected" />

@@ -2,6 +2,7 @@
 // S02: groups first, then the hosts in the group you are in. Search and tag filters look at every host.
 import { ChevronRight, Download, FolderPlus, LayoutGrid, List, Plus, Server } from '@lucide/vue'
 import type { GroupSummary, HostSummary } from '~/types/bindings'
+import { osLetter, osName } from '~/utils/os'
 import { buttonVariants } from '@/components/ui/button'
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
 
@@ -148,6 +149,8 @@ const nothingHere = computed(() => hosts.loaded && !empty.value && !hosts.childG
             :address="h.address"
             :port="h.effective_port"
             :tags="h.tags"
+            :os-letter="osLetter(h.os_hint)"
+            :os-name="osName(h.os_hint)"
             :list="hosts.view === 'list'"
             :selected="selected === h.id"
             :dragging="dragging === h.id"

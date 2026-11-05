@@ -3,6 +3,7 @@
 import { LayoutGrid, Plus, Search, SquareTerminal } from '@lucide/vue'
 import { Checkbox } from '@/components/ui/checkbox'
 import type { HostSummary } from '~/types/bindings'
+import { osLetter, osName } from '~/utils/os'
 import { cn } from '@/lib/utils'
 
 const emit = defineEmits<{ newHost: [] }>()
@@ -86,7 +87,7 @@ defineExpose({ focus: () => input.value?.focus() })
           @click="sessions.open(h)"
         >
           <Checkbox :model-value="checked.includes(h.id)" :aria-label="`Select ${h.label} for a workspace`" :class="checked.length ? '' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'" @click.stop @update:model-value="toggle(h.id)" />
-          <span class="grid size-7 shrink-0 place-items-center rounded-md bg-surface-hover text-2xs font-semibold">S</span>
+          <span class="grid size-7 shrink-0 place-items-center rounded-md bg-surface-hover text-2xs font-semibold" :title="osName(h.os_hint)">{{ osLetter(h.os_hint) ?? 'S' }}</span>
           <span class="flex min-w-0 flex-col">
             <span class="truncate font-medium">{{ h.label }}</span>
             <span class="truncate font-mono text-xs text-muted"><template v-if="h.effective_username">{{ h.effective_username }}@</template>{{ h.address }}<template v-if="h.effective_port !== 22">:{{ h.effective_port }}</template></span>

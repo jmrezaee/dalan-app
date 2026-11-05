@@ -133,6 +133,7 @@ const num = (v: string | number, fallback: number) => (Number.isFinite(Number(v)
             <div class="w-32"><NumberInput :model-value="settings.terminal.scrollback" :min="500" :max="100000" @update:model-value="(v: string | number) => settings.setTerminal({ scrollback: num(v, 10000) })" /></div>
           </div>
           <div class="row"><span class="flex flex-1 flex-col">Copy on select<span class="text-xs text-muted">Copies whatever you highlight in a terminal.</span></span><Switch :model-value="settings.terminal.copy_on_select" @update:model-value="(v: boolean) => settings.setTerminal({ copy_on_select: v })" /></div>
+          <div class="row"><span class="flex flex-1 flex-col">Detect server OS<span class="text-xs text-muted">On the first connect to a server, runs <span class="font-mono">uname</span> once to show its OS on the host card. Nothing else is read.</span></span><Switch :model-value="settings.detectOs" aria-label="Detect server OS" @update:model-value="(v: boolean) => settings.setDetectOs(v)" /></div>
           <p class="pt-3 text-xs text-muted">Changes apply to open terminals straight away.</p>
         </template>
 

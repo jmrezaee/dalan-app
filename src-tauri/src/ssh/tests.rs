@@ -26,6 +26,8 @@ pub(crate) struct TestServer {
     /// Sign-ins that came in as an OpenSSH certificate (for the accepted key).
     pub(crate) cert_logins: Arc<std::sync::Mutex<u32>>,
     pub(crate) execs: Arc<std::sync::Mutex<Vec<String>>>,
+    /// What the server prints for a `uname` command (the OS-detection probe).
+    pub(crate) uname_reply: Arc<std::sync::Mutex<Option<String>>>,
     /// Targets this server was asked to forward to (direct-tcpip), i.e. hops made through it.
     pub(crate) forwards: Arc<std::sync::Mutex<Vec<String>>>,
     /// Channels that carry forwarded traffic: their data belongs to the tunnel, not to our echo shell.
@@ -151,6 +153,11 @@ impl server::Handler for TestServer {
             .unwrap()
             .push(String::from_utf8_lossy(data).into_owned());
         s.channel_success(c)?;
+        if data.starts_with(b"uname") {
+            if let Some(reply) = self.uname_reply.lock().unwrap().clone() {
+                s.data(c, reply.into_bytes())?;
+            }
+        }
         s.exit_status_request(c, 0)?;
         s.close(c)?;
         Ok(())
@@ -672,6 +679,52 @@ pub(crate) fn sign_user_cert(
     b.cert_type(cert_type).unwrap();
     b.valid_principal("test").unwrap();
     b.sign(&ca).unwrap().to_openssh().unwrap()
+}
+
+async fn os_hint(h: &Harness) -> Option<String> {
+    let hid = h.host_id.clone();
+    h.state
+        .store()
+        .with_db_session(move |c, s| Ok(hosts::get(c, &s.vault_id, &hid)?.os_hint))
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn os_is_detected_on_the_first_connect_only_and_can_be_switched_off() {
+    let h = harness(Some("right-pw")).await;
+    *h.server.uname_reply.lock().unwrap() = Some("Linux\nubuntu\n".into());
+    let mut s = trusted(&h).await;
+    s.until(is_state(SessionState::Ready)).await;
+    s.cmds.send(Cmd::Close).unwrap();
+    assert_eq!(os_hint(&h).await.as_deref(), Some("ubuntu"));
+    let probes = || {
+        h.server
+            .execs
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| e.starts_with("uname"))
+            .count()
+    };
+    assert_eq!(probes(), 1);
+    // Second connect: already known, nothing more is run on the server.
+    let mut s = start(&h);
+    s.until(is_state(SessionState::Ready)).await;
+    s.cmds.send(Cmd::Close).unwrap();
+    assert_eq!(probes(), 1);
+
+    // Switched off in Settings: a new host is never probed.
+    let h2 = harness(Some("right-pw")).await;
+    h2.state
+        .with_db(|c| crate::settings::set(c, "hosts", r#"{"detect_os":false}"#))
+        .await
+        .unwrap();
+    let mut s = trusted(&h2).await;
+    s.until(is_state(SessionState::Ready)).await;
+    s.cmds.send(Cmd::Close).unwrap();
+    assert!(h2.server.execs.lock().unwrap().is_empty());
+    assert_eq!(os_hint(&h2).await, None);
 }
 
 #[tokio::test]

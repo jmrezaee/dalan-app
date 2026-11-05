@@ -584,6 +584,35 @@ async fn authenticate(
     }
 }
 
+/// Runs the OS-detection command on its own channel. Slow or silent servers give `unknown`
+/// after a short wait, so a connect is never held up for long.
+async fn detect_os(handle: &client::Handle<Client>) -> String {
+    let ask = async {
+        let mut ch = handle.channel_open_session().await.ok()?;
+        ch.exec(true, crate::osdetect::COMMAND).await.ok()?;
+        let mut out = Vec::new();
+        while let Some(msg) = ch.wait().await {
+            match msg {
+                ChannelMsg::Data { data } => {
+                    out.extend_from_slice(&data);
+                    if out.len() > 4096 {
+                        break;
+                    }
+                }
+                ChannelMsg::Close => break,
+                _ => {}
+            }
+        }
+        let _ = ch.close().await;
+        crate::osdetect::parse_os(&String::from_utf8_lossy(&out))
+    };
+    timeout(Duration::from_secs(3), ask)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| crate::osdetect::UNKNOWN.to_string())
+}
+
 pub async fn run(
     store: Store,
     io: Arc<SessionIo>,
@@ -594,6 +623,20 @@ pub async fn run(
     let Some(conn) = connect_authenticated(&store, &io, &prompts, &p.host_id, None).await else {
         return;
     };
+
+    // First connect to this host: ask which OS it is, once (Settings can switch this off).
+    let hid = p.host_id.clone();
+    if store
+        .with_db_session(move |c, s| Ok(crate::osdetect::needed(c, &s.vault_id, &hid)))
+        .await
+        .unwrap_or(false)
+    {
+        let hint = detect_os(&conn.handle).await;
+        let hid = p.host_id.clone();
+        let _ = store
+            .with_db_session(move |c, s| crate::osdetect::set(c, &s.vault_id, &hid, &hint))
+            .await;
+    }
 
     // 4. PTY + shell.
     let handle = &conn.handle;

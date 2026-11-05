@@ -27,6 +27,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const loaded = ref(false)
   /** Keep a log of each session (S15). Off until chosen. */
   const logsEnabled = ref(false)
+  /** Ask a server which OS it runs, once, for its icon. On unless switched off. */
+  const detectOs = ref(true)
   /** Shortcuts the user changed: action id -> combo (see utils/shortcuts). */
   const shortcutOverrides = ref<Record<string, string>>({})
   const combos = computed(() => effectiveCombos(shortcutOverrides.value))
@@ -55,6 +57,7 @@ export const useSettingsStore = defineStore('settings', () => {
       const sec = parse('security')
       if (typeof sec.auto_lock_minutes === 'number') autoLockMinutes.value = sec.auto_lock_minutes
       logsEnabled.value = parse('logs').enabled === true
+      detectOs.value = parse('hosts').detect_os !== false
       const ov = parse('shortcuts').overrides
       shortcutOverrides.value = ov && typeof ov === 'object' ? Object.fromEntries(Object.entries(ov).filter(([id, c]) => SHORTCUT_ACTIONS.some(a => a.id === id) && typeof c === 'string')) as Record<string, string> : {}
       historyEnabled.value = parse('history').enabled === true
@@ -103,6 +106,11 @@ export const useSettingsStore = defineStore('settings', () => {
     return null
   }
 
+  function setDetectOs(on: boolean) {
+    detectOs.value = on
+    save('hosts', { detect_os: on })
+  }
+
   function setLogs(enabled: boolean) {
     logsEnabled.value = enabled
     save('logs', { enabled })
@@ -113,5 +121,5 @@ export const useSettingsStore = defineStore('settings', () => {
     save('history', { enabled })
   }
 
-  return { shortcutOverrides, combos, setShortcut, logsEnabled, setLogs, historyEnabled, setHistory, theme, terminal, autoLockMinutes, loaded, resolvedTheme, load, setTheme, setTerminal, setAutoLock }
+  return { detectOs, setDetectOs, shortcutOverrides, combos, setShortcut, logsEnabled, setLogs, historyEnabled, setHistory, theme, terminal, autoLockMinutes, loaded, resolvedTheme, load, setTheme, setTerminal, setAutoLock }
 })

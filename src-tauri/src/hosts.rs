@@ -51,6 +51,8 @@ pub struct HostSummary {
     /// Epoch ms. Fits a JS number safely, so it is exported as `number` rather than bigint.
     #[specta(type = Option<f64>)]
     pub last_connected_at: Option<i64>,
+    /// Detected after the first connect: `ubuntu`, `debian`, `macos`, `linux`, ... or `unknown`.
+    pub os_hint: Option<String>,
 }
 
 #[derive(Debug, Serialize, Type)]
@@ -98,11 +100,12 @@ struct HostRow {
     profile_id: String,
     chain_mode: Option<String>,
     startup_snippet_id: Option<String>,
+    os_hint: Option<String>,
     /// Filled in by `with_jumps` (a separate query).
     jump_host_ids: Vec<String>,
 }
 
-const SELECT_HOST: &str = "SELECT h.id, h.label, h.address, p.ssh_port, p.username, p.password_secret_id IS NOT NULL, h.group_id, h.last_connected_at, p.key_id, p.identity_id, p.password_secret_id, h.profile_id, p.chain_mode, p.startup_snippet_id
+const SELECT_HOST: &str = "SELECT h.id, h.label, h.address, p.ssh_port, p.username, p.password_secret_id IS NOT NULL, h.group_id, h.last_connected_at, p.key_id, p.identity_id, p.password_secret_id, h.profile_id, p.chain_mode, p.startup_snippet_id, h.os_hint
      FROM hosts h JOIN connection_profiles p ON p.id = h.profile_id";
 
 fn row_to_host(r: &rusqlite::Row) -> rusqlite::Result<HostRow> {
@@ -121,6 +124,7 @@ fn row_to_host(r: &rusqlite::Row) -> rusqlite::Result<HostRow> {
         profile_id: r.get(11)?,
         chain_mode: r.get(12)?,
         startup_snippet_id: r.get(13)?,
+        os_hint: r.get(14)?,
         jump_host_ids: Vec::new(),
     })
 }
@@ -182,6 +186,7 @@ fn summarize(h: HostRow, tags: Vec<String>, groups: &GroupMap, ids: &IdentityMap
         group_id: h.group_id,
         tags,
         last_connected_at: h.last_connected_at,
+        os_hint: h.os_hint,
     }
 }
 

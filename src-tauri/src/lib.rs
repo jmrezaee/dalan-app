@@ -12,6 +12,7 @@ pub mod import;
 pub mod keys;
 pub mod known_hosts;
 pub mod logs;
+pub mod osdetect;
 pub mod proxy;
 pub mod pty;
 pub mod settings;
