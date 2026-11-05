@@ -193,6 +193,8 @@ pub enum Job {
     Local,
     /// A Telnet connection (unencrypted) to the host's address and port.
     Telnet,
+    /// A serial device (the host's address is its path).
+    Serial,
     /// S08: install a public key in `authorized_keys`.
     Export {
         key_id: String,
@@ -262,6 +264,22 @@ impl SessionManager {
                             )
                             .await
                         }
+                        Err(e) => (io.event)(SessionEvent::Error {
+                            code: e.code,
+                            message: e.message,
+                        }),
+                    }
+                }
+                Job::Serial => {
+                    let hid = params.host_id.clone();
+                    let loaded = store
+                        .with_db_session(move |c, s| {
+                            let info = crate::hosts::connect_info(c, s, &hid)?;
+                            Ok((info.address, crate::serial::get(c, &s.vault_id, &hid)?))
+                        })
+                        .await;
+                    match loaded {
+                        Ok((path, cfg)) => crate::serial::run(Arc::clone(&io), path, cfg, rx).await,
                         Err(e) => (io.event)(SessionEvent::Error {
                             code: e.code,
                             message: e.message,

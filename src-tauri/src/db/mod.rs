@@ -11,9 +11,14 @@ use crate::error::AppResult;
 
 const MIGRATION_0001: &str = include_str!("../../../replica/schema.sql");
 const MIGRATION_0002: &str = include_str!("../../migrations/0002_protocol.sql");
+const MIGRATION_0003: &str = include_str!("../../migrations/0003_serial.sql");
 
 fn migrations() -> Migrations<'static> {
-    Migrations::new(vec![M::up(MIGRATION_0001), M::up(MIGRATION_0002)])
+    Migrations::new(vec![
+        M::up(MIGRATION_0001),
+        M::up(MIGRATION_0002),
+        M::up(MIGRATION_0003),
+    ])
 }
 
 /// Time is stored as UTC epoch milliseconds everywhere.
@@ -62,7 +67,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(tables, 21);
+        assert_eq!(tables, 22); // 21 from 0001 + serial_settings
         let fk: i64 = conn
             .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
             .unwrap();

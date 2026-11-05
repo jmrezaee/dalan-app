@@ -15,6 +15,7 @@ pub mod logs;
 pub mod osdetect;
 pub mod proxy;
 pub mod pty;
+pub mod serial;
 pub mod settings;
 pub mod sftp;
 pub mod snippets;
@@ -47,6 +48,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::hosts::host_save,
             commands::hosts::host_delete,
             commands::hosts::host_set_protocol,
+            commands::serial::serial_get,
+            commands::serial::serial_set,
+            commands::serial::serial_ports,
             commands::hosts::group_save,
             commands::hosts::group_delete,
             commands::hosts::hosts_move,

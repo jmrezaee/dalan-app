@@ -1,7 +1,7 @@
 // The only place that talks to Rust. Stores call these wrappers, never `invoke` directly.
 import { Channel } from '@tauri-apps/api/core'
 import { commands } from '~/types/bindings'
-import type { AgentChoice, AppError, ProxyChoice, EnvVar, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportRow, KeyUpdate, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
+import type { SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportRow, KeyUpdate, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -32,6 +32,9 @@ export function useTauri() {
     hostsTree: () => unwrap(commands.hostsTree()),
     hostGet: (id: string) => unwrap(commands.hostGet(id)),
     hostSave: (input: HostInput) => unwrap(commands.hostSave(input)),
+    serialGet: (hostId: string) => unwrap(commands.serialGet(hostId)),
+    serialSet: (hostId: string, config: SerialConfig) => unwrap(commands.serialSet(hostId, config)),
+    serialPorts: () => unwrap(commands.serialPorts()),
     hostSetProtocol: (id: string, protocol: string) => unwrap(commands.hostSetProtocol(id, protocol)),
     hostDelete: (id: string) => unwrap(commands.hostDelete(id)),
     groupSave: (input: GroupInput) => unwrap(commands.groupSave(input)),

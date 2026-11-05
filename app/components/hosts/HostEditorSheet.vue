@@ -4,7 +4,7 @@
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
-import type { AgentConfig, EnvVar, ProxyChoice, HostSummary, InheritedVar } from '~/types/bindings'
+import type { SerialConfig, AgentConfig, EnvVar, ProxyChoice, HostSummary, InheritedVar } from '~/types/bindings'
 
 const hosts = useHostsStore()
 const keychain = useKeychainStore()
@@ -21,6 +21,8 @@ const host = computed(() => (hosts.editing && hosts.editing !== 'new' ? hosts.ed
 
 const api = useTauri()
 /** Variables from the groups above, and whether this item's own were loaded (so a failed load can't wipe them on save). */
+const serialPorts = ref<string[]>([])
+watch(() => form.protocol, async (p) => { if (p === 'serial' && !serialPorts.value.length) serialPorts.value = await api.serialPorts().catch(() => []) })
 const envInherited = ref<InheritedVar[]>([])
 const agentInfo = ref<AgentConfig | null>(null)
 const proxyInherited = ref<{ inherited: string | null, inherited_from: string | null } | null>(null)
@@ -46,7 +48,7 @@ async function loadEnv(id: string) {
   }
 }
 
-const blank = () => ({ label: '', address: '', port: '' as number | string, username: '', password: '', group_id: hosts.currentGroupId as string | null, tags: [] as string[], identity_id: null as string | null, key_id: null as string | null, startup_snippet_id: null as string | null, jump_mode: 'inherit', jump_host_ids: [] as string[], terminal_theme: null as string | null, env_mode: 'inherit', env_vars: [] as EnvVar[], proxy: { kind: 'inherit', host: '', port: null } as ProxyChoice, agent: 'inherit', protocol: 'ssh' })
+const blank = () => ({ label: '', address: '', port: '' as number | string, username: '', password: '', group_id: hosts.currentGroupId as string | null, tags: [] as string[], identity_id: null as string | null, key_id: null as string | null, startup_snippet_id: null as string | null, jump_mode: 'inherit', jump_host_ids: [] as string[], terminal_theme: null as string | null, env_mode: 'inherit', env_vars: [] as EnvVar[], proxy: { kind: 'inherit', host: '', port: null } as ProxyChoice, agent: 'inherit', protocol: 'ssh', serial: { baud: 9600, data_bits: 8, stop_bits: 1, parity: 'none', flow: 'none' } as SerialConfig })
 const form = reactive(blank())
 const clearPassword = ref(false)
 const error = ref('')
@@ -59,7 +61,7 @@ const dirty = computed(() => current.value !== snapshot.value)
 // Reset the form each time the sheet opens, from the host being edited (or blank, in the group you are viewing).
 watch(() => hosts.editing, (e) => {
   const h = e && e !== 'new' ? (e as HostSummary) : null
-  Object.assign(form, h ? { label: h.label, address: h.address, port: h.port ?? '', username: h.username ?? '', password: '', group_id: h.group_id, tags: [...h.tags], identity_id: h.identity_id, key_id: h.key_id, startup_snippet_id: h.startup_snippet_id, jump_mode: h.jump_mode, jump_host_ids: [...h.jump_host_ids], terminal_theme: hosts.themes.hosts[h.id]?.own ?? null, env_mode: 'inherit', env_vars: [], proxy: { kind: 'inherit', host: '', port: null }, agent: 'inherit', protocol: h.protocol } : blank())
+  Object.assign(form, h ? { label: h.label, address: h.address, port: h.port ?? '', username: h.username ?? '', password: '', group_id: h.group_id, tags: [...h.tags], identity_id: h.identity_id, key_id: h.key_id, startup_snippet_id: h.startup_snippet_id, jump_mode: h.jump_mode, jump_host_ids: [...h.jump_host_ids], terminal_theme: hosts.themes.hosts[h.id]?.own ?? null, env_mode: 'inherit', env_vars: [], proxy: { kind: 'inherit', host: '', port: null }, agent: 'inherit', protocol: h.protocol, serial: { baud: 9600, data_bits: 8, stop_bits: 1, parity: 'none', flow: 'none' } } : blank())
   clearPassword.value = false
   error.value = ''
   snapshot.value = current.value
@@ -68,6 +70,7 @@ watch(() => hosts.editing, (e) => {
   agentInfo.value = null
   envLoaded.value = true
   if (h) loadEnv(h.id)
+  if (h?.protocol === 'serial') api.serialGet(h.id).then((c) => { form.serial = c; snapshot.value = current.value }).catch(() => {})
 })
 
 const inherited = computed(() => hosts.inheritedFor(form.group_id))
@@ -93,7 +96,7 @@ async function submit() {
     address: form.address,
     port: form.port === '' ? null : Number(form.port),
     username: form.username,
-    password: form.protocol === 'telnet' ? null : form.password || null,
+    password: form.protocol !== 'ssh' ? null : form.password || null,
     clear_password: clearPassword.value,
     group_id: form.group_id,
     tags: form.tags,
@@ -102,7 +105,7 @@ async function submit() {
     startup_snippet_id: form.startup_snippet_id,
     jump_mode: form.jump_mode,
     jump_host_ids: form.jump_host_ids,
-  }, form.terminal_theme, envLoaded.value ? { mode: form.env_mode, vars: form.env_vars.filter((v: EnvVar) => v.name.trim()).map((v: EnvVar) => ({ name: v.name.trim(), value: v.value })) } : undefined, envLoaded.value && form.protocol === 'ssh' ? form.proxy : undefined, envLoaded.value && form.protocol === 'ssh' ? { kind: form.agent } : undefined, form.protocol)
+  }, form.terminal_theme, envLoaded.value ? { mode: form.env_mode, vars: form.env_vars.filter((v: EnvVar) => v.name.trim()).map((v: EnvVar) => ({ name: v.name.trim(), value: v.value })) } : undefined, envLoaded.value && form.protocol === 'ssh' ? form.proxy : undefined, envLoaded.value && form.protocol === 'ssh' ? { kind: form.agent } : undefined, form.protocol, form.serial)
   busy.value = false
   if (!error.value) hosts.editing = null
 }
@@ -124,18 +127,19 @@ async function submit() {
       <form class="flex flex-1 flex-col gap-6 overflow-auto p-5" @submit.prevent="submit">
         <section class="flex flex-col gap-3">
           <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">General</h3>
-          <Segmented v-model="form.protocol" label="Protocol" :options="[{ value: 'ssh', label: 'SSH' }, { value: 'telnet', label: 'Telnet' }]" />
+          <Segmented v-model="form.protocol" label="Protocol" :options="[{ value: 'ssh', label: 'SSH' }, { value: 'telnet', label: 'Telnet' }, { value: 'serial', label: 'Serial' }]" />
           <p v-if="form.protocol === 'telnet'" role="note" class="rounded-md border border-warning/40 bg-warning/10 p-2.5 text-xs">Telnet isn't encrypted. Everything you type, including passwords, can be read on the network, and Dalan won't save a password for it. Use it only for devices that have nothing better.</p>
           <div class="flex flex-col gap-1.5">
             <Label for="host-label">Label</Label>
             <Input id="host-label" v-model="form.label" placeholder="web-1" autofocus autocomplete="off" />
           </div>
-          <div class="grid grid-cols-[3fr_1fr] gap-2.5">
+          <div :class="form.protocol === 'serial' ? '' : 'grid grid-cols-[3fr_1fr] gap-2.5'">
             <div class="flex flex-col gap-1.5">
-              <Label for="host-address">Address</Label>
-              <Input id="host-address" v-model="form.address" placeholder="10.0.0.5" autocomplete="off" spellcheck="false" class="font-mono" />
+              <Label for="host-address">{{ form.protocol === 'serial' ? 'Device' : 'Address' }}</Label>
+              <Input id="host-address" v-model="form.address" :list="form.protocol === 'serial' ? 'serial-ports' : undefined" :placeholder="form.protocol === 'serial' ? '/dev/tty.usbserial-1410 or COM3' : '10.0.0.5'" autocomplete="off" spellcheck="false" class="font-mono" />
+              <datalist v-if="form.protocol === 'serial'" id="serial-ports"><option v-for="p in serialPorts" :key="p" :value="p" /></datalist>
             </div>
-            <div class="flex flex-col gap-1.5">
+            <div v-if="form.protocol !== 'serial'" class="flex flex-col gap-1.5">
               <Label for="host-port">Port</Label>
               <div class="relative">
                 <NumberInput id="host-port" v-model="form.port" :placeholder="form.protocol === 'telnet' ? '23' : String(inherited.port?.value ?? 22)" />
@@ -143,6 +147,7 @@ async function submit() {
               <p v-if="form.port === '' && inherited.port" class="text-2xs text-muted">from {{ inherited.port.group }}</p>
             </div>
           </div>
+          <SerialEditor v-if="form.protocol === 'serial'" v-model="form.serial" />
           <div class="flex flex-col gap-1.5">
             <Label for="host-group">Group</Label>
             <GroupSelect id="host-group" v-model="form.group_id" :options="hosts.groupOptions()" />

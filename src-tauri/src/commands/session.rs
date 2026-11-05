@@ -69,7 +69,7 @@ pub async fn session_open(
     let tap = logs::LogTap::start(&state.store(), logs_dir(&app)?, Some(host_id.clone())).await;
     let hist = HistoryTap::start(&state.store(), Some(host_id.clone())).await;
     let io = tapped_io(tap, hist.clone(), events, data);
-    // Telnet hosts get a plain TCP session; everything else is SSH.
+    // Telnet and serial hosts get their own session type; everything else is SSH.
     let hid = host_id.clone();
     let telnet = state
         .with_db_session(move |c, s| {

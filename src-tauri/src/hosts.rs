@@ -415,15 +415,15 @@ pub fn delete(conn: &mut Connection, s: &VaultSession, id: &str) -> AppResult<()
     Ok(())
 }
 
-/// Switches a host between `ssh` and `telnet`. A Telnet host keeps no saved password: Telnet sends
-/// it unencrypted, so you type it in the terminal instead.
+/// Switches a host between `ssh`, `telnet` and `serial`. Only SSH keeps a saved password: Telnet
+/// sends it unencrypted and a serial line has no sign-in of ours, so you type it in the terminal.
 pub fn set_protocol(
     conn: &mut Connection,
     s: &VaultSession,
     host_id: &str,
     protocol: &str,
 ) -> AppResult<()> {
-    if !["ssh", "telnet"].contains(&protocol) {
+    if !["ssh", "telnet", "serial"].contains(&protocol) {
         return Err(AppError::validation("Unknown protocol."));
     }
     let tx = conn.transaction()?;
@@ -439,7 +439,7 @@ pub fn set_protocol(
         "UPDATE hosts SET protocol = ?1, updated_at = ?2 WHERE id = ?3",
         params![protocol, now_ms(), host_id],
     )?;
-    if protocol == "telnet" {
+    if protocol != "ssh" {
         if let Some(sid) = secret {
             tx.execute(
                 "UPDATE connection_profiles SET password_secret_id = NULL WHERE id = ?1",

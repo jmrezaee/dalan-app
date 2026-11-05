@@ -25,6 +25,10 @@ export const commands = {
 	hostDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("host_delete", { id })),
 	/**  Switches a host between `ssh` and `telnet`. */
 	hostSetProtocol: (id: string, protocol: string) => typedError<null, AppError>(__TAURI_INVOKE("host_set_protocol", { id, protocol })),
+	serialGet: (hostId: string) => typedError<SerialConfig, AppError>(__TAURI_INVOKE("serial_get", { hostId })),
+	serialSet: (hostId: string, config: SerialConfig) => typedError<null, AppError>(__TAURI_INVOKE("serial_set", { hostId, config })),
+	/**  Serial devices on this computer, for the picker. */
+	serialPorts: () => typedError<string[], AppError>(__TAURI_INVOKE("serial_ports")),
 	groupSave: (input: GroupInput_Deserialize) => typedError<GroupSummary_Serialize, AppError>(__TAURI_INVOKE("group_save", { input })),
 	groupDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("group_delete", { id })),
 	/**  F04: drag hosts into a group (`group_id: null` = the top level). */
@@ -949,6 +953,18 @@ export type ProxyConfig_Serialize = {
  *  not as a JSON array of numbers. The `Type` derive only exists for the generated bindings.
  */
 export type RawBytes = number[];
+
+export type SerialConfig = {
+	baud: number,
+	/**  5 to 8. */
+	data_bits: number,
+	/**  1 or 2. */
+	stop_bits: number,
+	/**  `none`, `odd` or `even`. */
+	parity: string,
+	/**  `none`, `hardware` (RTS/CTS) or `software` (XON/XOFF). */
+	flow: string,
+};
 
 export type SessionEvent = SessionEvent_Serialize | SessionEvent_Deserialize;
 

@@ -284,12 +284,17 @@ pub async fn connect_authenticated(
         Err(e) => return fail(io, e.code, e.message),
     };
     let last = plan.len() - 1;
-    if plan[last].protocol == "telnet" {
+    if plan[last].protocol != "ssh" {
+        let what = if plan[last].protocol == "serial" {
+            "a serial line"
+        } else {
+            "Telnet"
+        };
         return fail(
             io,
             ErrorCode::Validation,
             format!(
-                "{} uses Telnet, which has no files, tunnels or keys.",
+                "{} uses {what}, which has no files, tunnels or keys.",
                 plan[last].label
             ),
         );

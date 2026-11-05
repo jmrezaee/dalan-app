@@ -55,6 +55,7 @@ defineEmits<{ open: []; select: []; edit: []; delete: []; dragstart: [event: Dra
         <input v-if="multiSelect" type="checkbox" :checked="checked" :aria-label="`Select ${label}`" class="accent-[var(--accent)]">
         <span class="truncate text-base">{{ label }}</span>
         <Badge v-if="protocol === 'telnet'" variant="warning" title="Telnet is not encrypted">Telnet</Badge>
+        <Badge v-else-if="protocol === 'serial'" title="Serial line">Serial</Badge>
       </div>
       <div v-if="!list" class="truncate text-xs text-muted"><template v-if="user">{{ user }}@</template><span class="font-mono">{{ address }}</span><template v-if="port && port !== 22">:{{ port }}</template></div>
       <div v-if="tags?.length && !list" class="mt-1.5 flex flex-wrap gap-1"><TagChip v-for="t in tags" :key="t" :label="t" /></div>
