@@ -1,0 +1,24 @@
+# Sample for the F10 import check (Hosts -> Import -> SSH config -> Choose file…).
+# Points at the test servers from scripts/test-servers.sh. No real hosts.
+
+Host *
+    User test
+    Port 2222
+
+Host smoke-password
+    HostName 127.0.0.1
+
+Host smoke-key
+    HostName 127.0.0.1
+    Port 2223
+    User keyuser
+
+Host smoke-inner
+    HostName inner
+    ProxyJump smoke-password
+
+Host smoke-proxycmd
+    HostName 127.0.0.1
+    ProxyCommand nc %h %p
+
+Include other_config

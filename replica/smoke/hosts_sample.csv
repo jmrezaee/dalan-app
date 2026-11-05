@@ -1,0 +1,4 @@
+label,address,port,username,group,tags
+csv-password,127.0.0.1,2222,test,Smoke group,test;docker
+csv-key,127.0.0.1,2223,keyuser,Smoke group,test
+csv-no-group,127.0.0.1,2222,test,,

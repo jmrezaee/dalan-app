@@ -95,7 +95,9 @@ cd src-tauri && cargo clippy -- -D warnings && cargo test
 - Recon, architecture, the design system and the brand (Dalan, turquoise) are done.
 - Launch is a team rollout, not public. See `replica/launch/launch-plan.md` (phases, checklist, onboarding).
 - The download page is `site/index.html`. It is static, pre-built with the tokens. Set `REPO`/`VERSION` in its script.
-- **Next:** the phases in `replica/progress.md` (P0 to P14, mapped onto M0 to M5). Type `go` to run the next one.
+- **P0 to P14 are built.** The 2026-11-05 audit (`replica/audit-2026-11-05.md`) found that most of it has never run in the real window, and listed security, robustness and UI fixes.
+- **Next:** P15 to P20 (audit fixes) in `replica/progress.md`. Type `go` to run the next one.
+- **Manual checks:** a phase that needs Mehrdad to test something by hand is not done until he has reported back.
 - **M1 is done when F01, F11 and F12 work against a real server:**
   - unlock
   - add a host with a password

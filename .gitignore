@@ -12,3 +12,4 @@ app/utils/terminal-themes.ts
 src-tauri/target
 src-tauri/gen/schemas
 Claude outputs/
+.test-servers/

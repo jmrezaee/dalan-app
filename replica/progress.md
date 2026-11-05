@@ -58,7 +58,111 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
   - `tauri-action` builds, updater keys and `latest.json`, macOS signing and notarization hooks.
   - `site/` on GitHub Pages.
   - "Copy diagnostics".
-- [~] **P14 Could-haves** (done: 1 find in terminal, 2 custom shortcuts, 3 certificates, 4 OS icon, 6 Telnet, 7 serial, 8 Mosh, 10 PuTTY/MobaXterm import, 11 AI with your own key; Touch ID and FIDO2 deferred; next: 12 self-hosted sync): in the order listed in `replica/architecture.md` → Build order → M4.
+- [x] **P14 Could-haves** (done: 1 find in terminal, 2 custom shortcuts, 3 certificates, 4 OS icon, 6 Telnet, 7 serial, 8 Mosh, 10 PuTTY/MobaXterm import, 11 AI with your own key. Touch ID, FIDO2 and self-hosted sync moved to the Backlog below on 2026-11-05, so the audit fixes come first).
+
+### Audit fixes (from `replica/audit-2026-11-05.md`; read it before each of these phases)
+
+- [ ] **P15 Real-window smoke pass (M1 first):**
+  - Write `replica/smoke-test.md`: one numbered checklist covering F01 to F12 and every connection state in S18, each step with its expected result.
+  - Add a second Docker container plus a `scripts/test-servers.sh` that starts and stops the two test SSH servers (password user, key user, one used as a jump host). Note in the checklist how to change a server's host key to test F12, including a key-type switch.
+  - Start the servers and run `pnpm tauri dev`.
+  - **Then stop and ask Mehrdad to run the checklist in the real window and paste back what failed.** You can't click the Tauri window yourself, and this phase is not done until he has.
+  - Fix every failure he reports, in the same phase, and ask him to re-check those steps.
+  - In `features.csv`, set every row that was never run for real (Mosh, serial, Telnet, env vars, proxy, agent forwarding, certificates, AI, logs, history, and anything that failed) to `partial`, with a note saying what still needs a real check.
+- [ ] **P16 Security fixes (audit "Must fix" 2-4 and "Should fix" 6, 8, 10):**
+  1. **Known hosts:** if any key is saved for the host and none matches, return `Changed`, whatever the key type. Add a test.
+  2. **AI address:**
+     - Parse it with `url::Url` and allow `http` only for loopback hosts (`localhost`, `127.0.0.0/8`, `::1`).
+     - Turn off redirects in the reqwest client.
+     - Make changing the address require entering the key again.
+     - Add tests for `http://localhost.evil.com` and `http://127.0.0.1.nip.io`.
+  3. **Content security policy:**
+     - Set a strict CSP in `tauri.conf.json`: no remote scripts, `connect-src` limited to `ipc:` and Tauri's own schemes, and inline styles only if Tailwind or Reka needs them.
+     - Check the app still loads in dev and build.
+  4. **Replacing a changed key:**
+     - Rust must require an explicit `confirm_replace` answer, not a bare accept.
+     - Honour `remember: false` (trust once, don't save).
+  5. **Owner-only files:** create the app data folder, `logs/` and `edit-tmp/` as 0700, and `vault.db` and log files as 0600 (Unix).
+  6. **Single instance:** add `tauri-plugin-single-instance`, so a second launch focuses the first window.
+- [ ] **P17 Robustness fixes (audit "Should fix" 7, 9, 11, 12, 13, 15):**
+  1. **Command history:**
+     - Encrypt it with the vault key, re-encrypting it with everything else on a master password change.
+     - Don't save lines with obvious secret flags (`-p<value>`, `--password=`, `PASSWORD=`, `token`).
+  2. **Session logs:**
+     - Introduce a stable data key, wrapped by the master-password key, so a password change keeps old logs readable.
+     - This needs a new migration; show the plan before applying it.
+  3. **Agent forwarding:** apply it only to interactive shell sessions, never to SFTP, tunnels or key install.
+  4. **Keyboard-interactive sign-in:**
+     - Add the `keyboard_interactive` prompt from `architecture.md`.
+     - Show the server's questions in the S18 overlay.
+     - Test it with a container using PAM or ChallengeResponse.
+  5. **SFTP and vault lock:**
+     - Check the vault is still unlocked before registering a new SFTP connection.
+     - Cancel pending prompts on lock.
+  6. **Missing commands:**
+     - Add `tags_list` and `tag_delete`, with a Tags menu to delete unused tags.
+     - Add `recent_connections`, which writes `connection_history` and feeds New Tab.
+     - Add `fs_realpath` and `snippets_move`.
+     - Add the orphan-secret sweep on unlock.
+- [ ] **P18 UI fixes (audit "Must fix" 5, "Should fix" 14 and "Spec gaps"):**
+  1. **Tab status dots:**
+     - Track unread output per session; "waiting" when a prompt is pending; red for error or disconnected.
+     - Give workspace tabs a combined dot.
+     - Set the `features.csv` row to yes only after Mehrdad sees it work.
+  2. **Shortcut labels:** render them from the user's current shortcuts (`formatCombo`), with Ctrl off macOS. No hard-coded ⌘ left.
+  3. **Copy:** restore the S24 first-run copy word for word from `brand.md`.
+  4. **Colours and sizes:**
+     - Add a `scrim` token and use it for the dialog, sheet and alert overlays.
+     - Replace `text-[13px]`/`text-[15px]` with type tokens.
+     - Replace the ad-hoc theme-swatch colours with tokens.
+  5. **Accessibility:**
+     - Make `RuleCard` keyboard-accessible (a real button, Enter toggles).
+     - Hide the terminal from screen readers while an overlay shows.
+  6. **SFTP:**
+     - Add friendly "no access" and "SFTP isn't enabled on this server" states.
+     - Virtualise lists over 500 rows.
+     - F2 rename, and ⌘C/⌘V across panes.
+  7. **Tab bar:** ⌃Tab / ⌃⇧Tab cycling, middle-click close, F2 rename, drag to reorder, drag a tab onto a tab to make a workspace.
+  8. **Workspace:** resizable splits (shadcn Resizable), ⌘⇧D split down, a "Broadcasting to N" pill.
+  9. **Port forwarding:** use the 3-step S10 wizard, with "Skip the wizard" opening the current single form.
+  10. **Settings (S23):**
+      - Add post-quantum key exchange on/off, the local shell path, the default terminal theme, SFTP open-with apps, and font family.
+      - Use the ShortcutRecorder "Press keys…" UI.
+  11. **Conventions:**
+      - Move the three direct dialog-plugin calls into `useTauri.ts`.
+      - Use the generated `TunnelState` in `RuleCard`.
+      - Make the import `kind` a Rust enum, so it lands in `bindings.ts`.
+- [ ] **P19 Tests:**
+  - **Fake backend:** commit a Tauri-command mock, the fake Rust backend used in the browser checks, as a test fixture.
+  - **End to end:** add Playwright tests for F01, F11 and F12 (overlay state machine), tab mounting (xterm survives tab switches), the shortcut dispatcher, and the import preview.
+  - **Store tests:** Vitest store tests for `sessions.ts`.
+  - **Rust tests:**
+    - a jump hop whose key changed
+    - vault lock cancels sessions, SFTP, tunnels and edits
+    - which commands refuse while locked
+    - a migration upgrade on a populated 0001 database
+    - backpressure pause and resume
+  - **CI:** run the 5 Docker-backed `#[ignore]` tests in CI with a service container.
+- [ ] **P20 Housekeeping and release readiness:**
+  - Bring `features.csv` in line with what actually works (PuTTY/MobaXterm import is done, SecureCRT isn't; split the SSH-config row).
+  - Remove the stale "arrives in P2/P7" header comments.
+  - Exclude `/design` from production builds.
+  - Write a short `replica/launch/release-setup.md` checklist of what Mehrdad must create:
+    - the GitHub repo `dalan-app` and its owner
+    - the updater key pair and `TAURI_SIGNING_PRIVATE_KEY`
+    - the Apple Developer secrets
+    - the optional Windows signing
+  - Make the first draft release once he has.
+
+## Backlog (not scheduled; Mehrdad picks from here after P20)
+
+- Touch ID / Windows Hello unlock (M4 item 5).
+- FIDO2 security keys (`sk-*`) (M4 item 9; prototype first, russh support is limited).
+- Self-hosted, end-to-end encrypted sync (M4 item 12).
+- Terminal autocomplete.
+- SecureCRT import, and SSH-config import of keys, known_hosts and `Include`.
+- Host certificates (CA-trusted host keys), the `ssh-rsa` (SHA-1) opt-in, and the Windows SSH agent.
+- Final logo from a designer (`replica/brand.md` logo brief): 16 px check, one-colour version, wordmark.
 
 ## Notes
 
