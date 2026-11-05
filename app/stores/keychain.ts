@@ -56,6 +56,7 @@ export const useKeychainStore = defineStore('keychain', () => {
   const generate = (input: GenerateInput) => run(() => api.keyGenerate(input), 'Key saved.')
   const importKey = (input: ImportInput) => run(() => api.keyImport(input), 'Key saved.')
   const updateKey = (input: KeyUpdate) => run(() => api.keyUpdate(input))
+  const setCertificate = (id: string, certificate: string | null, path: string | null) => run(() => api.keySetCertificate(id, certificate, path), certificate || path ? 'Certificate attached.' : 'Certificate removed.')
   const saveIdentity = (input: IdentityInput) => run(() => api.identitySave(input))
 
   async function removeKey(k: KeySummary) {
@@ -83,5 +84,5 @@ export const useKeychainStore = defineStore('keychain', () => {
     loaded.value = false
   }
 
-  return { keys, identities, loaded, keyLabel, refresh, generate, importKey, updateKey, saveIdentity, removeKey, removeIdentity, copyPublic, clear }
+  return { keys, identities, loaded, keyLabel, refresh, generate, importKey, updateKey, setCertificate, saveIdentity, removeKey, removeIdentity, copyPublic, clear }
 })

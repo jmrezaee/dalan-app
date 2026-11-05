@@ -111,6 +111,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::keychain::keys_list,
             commands::keychain::key_generate,
             commands::keychain::key_import,
+            commands::keychain::key_set_certificate,
             commands::keychain::key_update,
             commands::keychain::key_delete,
             commands::keychain::identities_list,

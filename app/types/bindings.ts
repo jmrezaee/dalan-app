@@ -133,6 +133,11 @@ export const commands = {
 	 */
 	keyGenerate: (input: GenerateInput_Deserialize) => typedError<KeySummary_Serialize, AppError>(__TAURI_INVOKE("key_generate", { input })),
 	keyImport: (input: ImportInput_Deserialize) => typedError<KeySummary_Serialize, AppError>(__TAURI_INVOKE("key_import", { input })),
+	/**
+	 *  Attaches (or, with no text and no path, removes) an OpenSSH user certificate. A path chosen in
+	 *  the dialog is read here in Rust.
+	 */
+	keySetCertificate: (id: string, certificate: string | null, path: string | null) => typedError<KeySummary_Serialize, AppError>(__TAURI_INVOKE("key_set_certificate", { id, certificate, path })),
 	keyUpdate: (input: KeyUpdate_Deserialize) => typedError<KeySummary_Serialize, AppError>(__TAURI_INVOKE("key_update", { input })),
 	keyDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("key_delete", { id })),
 	identitiesList: () => typedError<IdentitySummary_Serialize[], AppError>(__TAURI_INVOKE("identities_list")),
@@ -751,6 +756,8 @@ export type KeySummary_Deserialize = {
 	/**  ...and Dalan remembers it (otherwise it asks on every connect). */
 	passphrase_saved: boolean,
 	certificate: boolean,
+	/**  A line about the attached certificate: who it is for and when it ends. */
+	certificate_note?: string | null,
 };
 
 export type KeySummary_Serialize = {
@@ -767,6 +774,8 @@ export type KeySummary_Serialize = {
 	/**  ...and Dalan remembers it (otherwise it asks on every connect). */
 	passphrase_saved: boolean,
 	certificate: boolean,
+	/**  A line about the attached certificate: who it is for and when it ends. */
+	certificate_note: string | null,
 };
 
 export type KeyUpdate = KeyUpdate_Serialize | KeyUpdate_Deserialize;

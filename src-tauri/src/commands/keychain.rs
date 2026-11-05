@@ -2,7 +2,7 @@
 
 use tauri::State;
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::keys::{
     self, GenerateInput, IdentityInput, IdentitySummary, ImportInput, KeySummary, KeyUpdate,
 };
@@ -79,5 +79,39 @@ pub async fn identity_save(
 pub async fn identity_delete(state: State<'_, AppState>, id: String) -> AppResult<()> {
     state
         .with_db_session(move |c, s| keys::identity_delete(c, s, &id))
+        .await
+}
+
+/// Attaches (or, with no text and no path, removes) an OpenSSH user certificate. A path chosen in
+/// the dialog is read here in Rust.
+#[tauri::command]
+#[specta::specta]
+pub async fn key_set_certificate(
+    state: State<'_, AppState>,
+    id: String,
+    certificate: Option<String>,
+    path: Option<String>,
+) -> AppResult<KeySummary> {
+    state
+        .with_db_session(move |c, s| {
+            let text = match (&certificate, &path) {
+                (Some(t), _) if !t.trim().is_empty() => Some(t.clone()),
+                (_, Some(p)) => {
+                    let meta = std::fs::metadata(p)
+                        .map_err(|_| AppError::not_found("Couldn't open that file."))?;
+                    if meta.len() > 64 * 1024 {
+                        return Err(AppError::validation(
+                            "That file is too big to be a certificate.",
+                        ));
+                    }
+                    Some(
+                        std::fs::read_to_string(p)
+                            .map_err(|_| AppError::validation("That file isn't text."))?,
+                    )
+                }
+                _ => None,
+            };
+            keys::set_certificate(c, s, &id, text.as_deref())
+        })
         .await
 }

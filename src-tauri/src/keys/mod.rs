@@ -3,7 +3,8 @@
 //! the fingerprint and flags ever reach the UI.
 
 use rusqlite::{params, Connection, OptionalExtension};
-use russh::keys::ssh_key::{Algorithm, EcdsaCurve, LineEnding, PrivateKey};
+use russh::keys::ssh_key::certificate::CertType;
+use russh::keys::ssh_key::{Algorithm, Certificate, EcdsaCurve, LineEnding, PrivateKey, PublicKey};
 use russh::keys::{decode_secret_key, HashAlg};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -42,6 +43,8 @@ pub struct KeySummary {
     /// ...and Dalan remembers it (otherwise it asks on every connect).
     pub passphrase_saved: bool,
     pub certificate: bool,
+    /// A line about the attached certificate: who it is for and when it ends.
+    pub certificate_note: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Type)]
@@ -256,6 +259,7 @@ fn row_to_summary(conn: &Connection, s: &VaultSession, r: &rusqlite::Row) -> App
         }
         None => false,
     };
+    let cert: Option<String> = r.get(8)?;
     Ok(KeySummary {
         id: r.get(0)?,
         label: r.get(1)?,
@@ -265,7 +269,11 @@ fn row_to_summary(conn: &Connection, s: &VaultSession, r: &rusqlite::Row) -> App
         fingerprint: r.get(5)?,
         encrypted,
         passphrase_saved: r.get::<_, Option<String>>(7)?.is_some(),
-        certificate: r.get::<_, Option<String>>(8)?.is_some(),
+        certificate: cert.is_some(),
+        certificate_note: cert
+            .as_deref()
+            .and_then(|c| Certificate::from_openssh(c).ok())
+            .map(|c| certificate_note(&c)),
     })
 }
 
@@ -354,14 +362,16 @@ pub struct LoadedKey {
     pub private_text: Zeroizing<String>,
     pub saved_passphrase: Option<Zeroizing<String>>,
     pub encrypted: bool,
+    /// An OpenSSH user certificate for this key, if one is attached.
+    pub certificate: Option<String>,
 }
 
 pub fn load_for_auth(conn: &Connection, s: &VaultSession, id: &str) -> AppResult<LoadedKey> {
-    let (label, private_id, pass_id): (String, Option<String>, Option<String>) = conn
+    let (label, private_id, pass_id, certificate): (String, Option<String>, Option<String>, Option<String>) = conn
         .query_row(
-            "SELECT label, private_key_secret_id, passphrase_secret_id FROM keys WHERE id = ?1 AND vault_id = ?2",
+            "SELECT label, private_key_secret_id, passphrase_secret_id, certificate FROM keys WHERE id = ?1 AND vault_id = ?2",
             params![id, s.vault_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .optional()?
         .ok_or_else(|| AppError::not_found("That key no longer exists."))?;
@@ -382,6 +392,7 @@ pub fn load_for_auth(conn: &Connection, s: &VaultSession, id: &str) -> AppResult
         private_text,
         saved_passphrase,
         encrypted,
+        certificate,
     })
 }
 
@@ -389,6 +400,88 @@ pub fn load_for_auth(conn: &Connection, s: &VaultSession, id: &str) -> AppResult
 pub fn open_private(k: &LoadedKey, passphrase: Option<&str>) -> AppResult<PrivateKey> {
     decode_secret_key(&k.private_text, passphrase.filter(|p| !p.is_empty()))
         .map_err(|_| AppError::new(ErrorCode::WrongPassword, "That passphrase didn't work."))
+}
+
+// ------------------------------------------------------------------ certificates
+
+/// "For deploy, ops. Expires in 12 days." (an empty principal list means any user).
+fn certificate_note(c: &Certificate) -> String {
+    let who = if c.valid_principals().is_empty() {
+        "any user".to_string()
+    } else {
+        c.valid_principals().join(", ")
+    };
+    let end = match c.valid_before() {
+        u64::MAX => "No expiry.".to_string(),
+        vb => {
+            let left = i128::from(vb) - i128::from(now_ms() / 1000);
+            if left <= 0 {
+                "Expired.".to_string()
+            } else if left < 86_400 {
+                "Expires today.".to_string()
+            } else {
+                format!("Expires in {} days.", left / 86_400)
+            }
+        }
+    };
+    format!("For {who}. {end}")
+}
+
+/// True when the certificate's validity window has ended.
+pub fn certificate_expired(c: &Certificate) -> bool {
+    c.valid_before() != u64::MAX && c.valid_before() <= (now_ms() / 1000) as u64
+}
+
+/// Attaches an OpenSSH user certificate (`id_ed25519-cert.pub`) to a key, or removes it with
+/// `None`. The certificate must be for this key and for logging in (not a host certificate).
+pub fn set_certificate(
+    conn: &Connection,
+    s: &VaultSession,
+    id: &str,
+    text: Option<&str>,
+) -> AppResult<KeySummary> {
+    let public: String = conn
+        .query_row(
+            "SELECT public_key FROM keys WHERE id = ?1 AND vault_id = ?2",
+            params![id, s.vault_id],
+            |r| r.get(0),
+        )
+        .optional()?
+        .ok_or_else(|| AppError::not_found("That key no longer exists."))?;
+    let stored = match text.map(str::trim).filter(|t| !t.is_empty()) {
+        None => None,
+        Some(text) => {
+            let cert = Certificate::from_openssh(text).map_err(|_| {
+                AppError::validation("That isn't an OpenSSH certificate. It should start with something like ssh-ed25519-cert-v01@openssh.com.")
+            })?;
+            if cert.cert_type() != CertType::User {
+                return Err(AppError::validation(
+                    "That is a host certificate. Sign-in needs a user certificate.",
+                ));
+            }
+            let key = PublicKey::from_openssh(&public)
+                .map_err(|_| AppError::internal("the stored public key is unreadable"))?;
+            if cert.public_key() != key.key_data() {
+                return Err(AppError::validation(
+                    "That certificate was made for a different key.",
+                ));
+            }
+            if certificate_expired(&cert) {
+                return Err(AppError::validation(
+                    "That certificate has already expired.",
+                ));
+            }
+            Some(
+                cert.to_openssh()
+                    .map_err(|e| AppError::internal(e.to_string()))?,
+            )
+        }
+    };
+    conn.execute(
+        "UPDATE keys SET certificate = ?1, updated_at = ?2 WHERE id = ?3 AND vault_id = ?4",
+        params![stored, now_ms(), id, s.vault_id],
+    )?;
+    get(conn, s, id)
 }
 
 // ------------------------------------------------------------------ identities (S07)
@@ -731,5 +824,48 @@ mod tests {
             (key.value.as_str(), key.from.as_deref()),
             (k.id.as_str(), Some("Prod"))
         );
+    }
+
+    #[test]
+    fn certificates_are_checked_before_they_are_attached() {
+        use crate::ssh::tests::sign_user_cert;
+        let (mut c, s) = fresh();
+        let mk = |c: &mut Connection, label: &str| {
+            let new = generate(&GenerateInput {
+                label: label.into(),
+                kind: KeyKind::Ed25519,
+                passphrase: None,
+                save_passphrase: false,
+            })
+            .unwrap();
+            store(c, &s, &new).unwrap()
+        };
+        let (a, b) = (mk(&mut c, "a"), mk(&mut c, "b"));
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let good = sign_user_cert(
+            &a.public_key,
+            (now - 60, now + 5 * 86_400 + 3_600),
+            CertType::User,
+        );
+        let err = |r: AppResult<KeySummary>| r.err().unwrap().message;
+        assert!(err(set_certificate(&c, &s, &a.id, Some("nonsense")))
+            .contains("isn't an OpenSSH certificate"));
+        assert!(err(set_certificate(&c, &s, &b.id, Some(&good))).contains("different key")); // made for a
+        let host = sign_user_cert(&a.public_key, (now - 60, now + 3600), CertType::Host);
+        assert!(err(set_certificate(&c, &s, &a.id, Some(&host))).contains("host certificate"));
+        let old = sign_user_cert(&a.public_key, (now - 7200, now - 3600), CertType::User);
+        assert!(err(set_certificate(&c, &s, &a.id, Some(&old))).contains("expired"));
+        let k = set_certificate(&c, &s, &a.id, Some(&good)).unwrap();
+        assert!(k.certificate);
+        let note = k.certificate_note.unwrap();
+        assert!(
+            note.contains("For test") && note.contains("Expires in 5 days"),
+            "{note}"
+        );
+        assert!(load_for_auth(&c, &s, &a.id).unwrap().certificate.is_some());
+        assert!(!set_certificate(&c, &s, &a.id, None).unwrap().certificate); // removed
     }
 }

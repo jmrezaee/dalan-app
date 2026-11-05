@@ -133,6 +133,7 @@ export function useTauri() {
     keysList: () => unwrap(commands.keysList()),
     keyGenerate: (input: GenerateInput) => unwrap(commands.keyGenerate(input)),
     keyImport: (input: ImportInput) => unwrap(commands.keyImport(input)),
+    keySetCertificate: (id: string, certificate: string | null, path: string | null) => unwrap(commands.keySetCertificate(id, certificate, path)),
     keyUpdate: (input: KeyUpdate) => unwrap(commands.keyUpdate(input)),
     keyDelete: (id: string) => unwrap(commands.keyDelete(id)),
     identitiesList: () => unwrap(commands.identitiesList()),

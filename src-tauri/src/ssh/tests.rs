@@ -23,6 +23,8 @@ use crate::vault::{self, kdf::KdfParams};
 #[derive(Clone, Default)]
 pub(crate) struct TestServer {
     pub(crate) accepted_key: Arc<std::sync::Mutex<Option<String>>>,
+    /// Sign-ins that came in as an OpenSSH certificate (for the accepted key).
+    pub(crate) cert_logins: Arc<std::sync::Mutex<u32>>,
     pub(crate) execs: Arc<std::sync::Mutex<Vec<String>>>,
     /// Targets this server was asked to forward to (direct-tcpip), i.e. hops made through it.
     pub(crate) forwards: Arc<std::sync::Mutex<Vec<String>>>,
@@ -57,6 +59,22 @@ impl server::Handler for TestServer {
             .to_string();
         let ok =
             user == "test" && self.accepted_key.lock().unwrap().as_deref() == Some(fp.as_str());
+        Ok(if ok { Auth::Accept } else { Auth::reject() })
+    }
+    async fn auth_openssh_certificate(
+        &mut self,
+        user: &str,
+        certificate: &russh::keys::Certificate,
+    ) -> Result<Auth, Self::Error> {
+        // Stands in for "I trust the CA": accept a user certificate for the key we accept.
+        let fp = russh::keys::PublicKey::from(certificate.public_key().clone())
+            .fingerprint(russh::keys::HashAlg::Sha256)
+            .to_string();
+        let ok =
+            user == "test" && self.accepted_key.lock().unwrap().as_deref() == Some(fp.as_str());
+        if ok {
+            *self.cert_logins.lock().unwrap() += 1;
+        }
         Ok(if ok { Auth::Accept } else { Auth::reject() })
     }
     async fn channel_open_direct_tcpip(
@@ -634,6 +652,54 @@ async fn key_auth_signs_in_without_a_password() {
     give_host_a_key(&h, None, false).await;
     let mut s = trusted(&h).await;
     s.until(is_state(SessionState::Ready)).await; // never saw a password prompt
+    s.cmds.send(Cmd::Close).unwrap();
+}
+
+/// A user certificate for `key`, signed by a throwaway CA.
+pub(crate) fn sign_user_cert(
+    key_public: &str,
+    valid_secs: (u64, u64),
+    cert_type: russh::keys::ssh_key::certificate::CertType,
+) -> String {
+    use russh::keys::ssh_key::{certificate::Builder, Algorithm, PrivateKey, PublicKey};
+    let ca = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+    let subject = PublicKey::from_openssh(key_public).unwrap();
+    let mut b =
+        Builder::new_with_random_nonce(&mut rand::rng(), &subject, valid_secs.0, valid_secs.1)
+            .unwrap();
+    b.serial(1).unwrap();
+    b.key_id("test-cert").unwrap();
+    b.cert_type(cert_type).unwrap();
+    b.valid_principal("test").unwrap();
+    b.sign(&ca).unwrap().to_openssh().unwrap()
+}
+
+#[tokio::test]
+async fn key_with_a_certificate_signs_in_as_a_certificate() {
+    use russh::keys::ssh_key::certificate::CertType;
+    let h = harness(None).await;
+    let key = give_host_a_key(&h, None, false).await;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let cert = sign_user_cert(&key.public_key, (now - 60, now + 86_400), CertType::User);
+    let kid = key.id.clone();
+    let summary = h
+        .state
+        .store()
+        .with_db_session(move |c, s| crate::keys::set_certificate(c, s, &kid, Some(&cert)))
+        .await
+        .unwrap();
+    assert!(summary.certificate);
+    assert!(summary
+        .certificate_note
+        .as_deref()
+        .unwrap()
+        .contains("test"));
+    let mut s = trusted(&h).await;
+    s.until(is_state(SessionState::Ready)).await;
+    assert_eq!(*h.server.cert_logins.lock().unwrap(), 1); // it really went in as a certificate
     s.cmds.send(Cmd::Close).unwrap();
 }
 

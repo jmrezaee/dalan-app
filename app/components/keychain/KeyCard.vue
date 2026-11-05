@@ -1,10 +1,10 @@
 <script setup lang="ts">
 // S05. Never shows secret material: only the public fingerprint.
-import { Copy, Ellipsis, KeyRound, Lock, Pencil, ServerCog, Trash2 } from '@lucide/vue'
+import { BadgeCheck, Copy, Ellipsis, KeyRound, Lock, Pencil, ServerCog, Trash2 } from '@lucide/vue'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 
-defineProps<{ label: string, type: string, fingerprint: string, passphraseSaved?: boolean, encrypted?: boolean, certificate?: boolean }>()
-defineEmits<{ copyPublic: [], install: [], edit: [], delete: [] }>()
+defineProps<{ label: string, type: string, fingerprint: string, passphraseSaved?: boolean, encrypted?: boolean, certificate?: boolean, certificateNote?: string | null }>()
+defineEmits<{ copyPublic: [], install: [], edit: [], delete: [], certificate: [], removeCertificate: [] }>()
 </script>
 
 <template>
@@ -18,6 +18,7 @@ defineEmits<{ copyPublic: [], install: [], edit: [], delete: [] }>()
         <Lock v-if="encrypted" class="size-3.5 text-muted" :aria-label="passphraseSaved ? 'Passphrase saved' : 'Passphrase protected'" :title="passphraseSaved ? 'Passphrase saved' : 'Asks for its passphrase on every connect'" />
       </div>
       <div class="truncate font-mono text-xs text-muted" :title="fingerprint">{{ fingerprint }}</div>
+      <div v-if="certificateNote" class="truncate text-xs text-muted" :title="certificateNote">{{ certificateNote }}</div>
     </div>
     <IconButton label="Copy public key" size="xs" @click="$emit('copyPublic')"><Copy /></IconButton>
     <DropdownMenu>
@@ -27,6 +28,8 @@ defineEmits<{ copyPublic: [], install: [], edit: [], delete: [] }>()
       <DropdownMenuContent align="end">
         <DropdownMenuItem @select="$emit('install')"><ServerCog />Install on a server…</DropdownMenuItem>
         <DropdownMenuItem @select="$emit('edit')"><Pencil />Edit</DropdownMenuItem>
+        <DropdownMenuItem @select="$emit('certificate')"><BadgeCheck />{{ certificate ? 'Replace certificate…' : 'Attach certificate…' }}</DropdownMenuItem>
+        <DropdownMenuItem v-if="certificate" @select="$emit('removeCertificate')">Remove certificate</DropdownMenuItem>
         <DropdownMenuItem class="text-danger" @select="$emit('delete')"><Trash2 />Delete</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

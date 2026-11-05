@@ -12,6 +12,7 @@ const importOpen = ref(false)
 const editKeyOpen = ref(false)
 const exportOpen = ref(false)
 const identityOpen = ref(false)
+const certOpen = ref(false)
 const activeKey = ref<KeySummary | null>(null)
 const activeIdentity = ref<IdentitySummary | null>(null)
 
@@ -26,6 +27,10 @@ const typeLabel = (k: KeySummary) => (k.key_type === 'rsa' ? `RSA ${k.bits ?? ''
 function install(k: KeySummary) {
   activeKey.value = k
   exportOpen.value = true
+}
+function attachCert(k: KeySummary) {
+  activeKey.value = k
+  certOpen.value = true
 }
 function editKey(k: KeySummary) {
   activeKey.value = k
@@ -84,6 +89,9 @@ async function confirmDeleteIdentity() {
             :encrypted="k.encrypted"
             :passphrase-saved="k.passphrase_saved"
             :certificate="k.certificate"
+            :certificate-note="k.certificate_note"
+            @certificate="attachCert(k)"
+            @remove-certificate="keychain.setCertificate(k.id, null, null)"
             @copy-public="keychain.copyPublic(k)"
             @install="install(k)"
             @edit="editKey(k)"
@@ -116,6 +124,7 @@ async function confirmDeleteIdentity() {
   <GenerateKeyDialog v-model:open="generateOpen" />
   <ImportKeyDialog v-model:open="importOpen" />
   <KeyEditDialog v-model:open="editKeyOpen" :key-item="activeKey" />
+  <CertificateDialog v-model:open="certOpen" :key-item="activeKey" />
   <ExportKeyDialog v-model:open="exportOpen" :key-item="activeKey" />
   <IdentitySheet v-model:open="identityOpen" :identity="activeIdentity" />
 

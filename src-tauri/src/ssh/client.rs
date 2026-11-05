@@ -475,10 +475,32 @@ async fn try_key(
     } else {
         None
     };
-    match handle
-        .authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key), hash))
-        .await
+    let result = match loaded
+        .certificate
+        .as_deref()
+        .map(russh::keys::Certificate::from_openssh)
     {
+        // Key + certificate: the server trusts the CA that signed the certificate, not the bare key.
+        Some(Ok(cert)) => {
+            if keys::certificate_expired(&cert) {
+                emit_error(
+                    io,
+                    ErrorCode::AuthFailed,
+                    format!("The certificate for the key \"{}\" has expired. Attach a new one in Keychain.", loaded.label),
+                );
+                return KeyResult::Stop;
+            }
+            handle
+                .authenticate_openssh_cert(user, Arc::new(key), cert)
+                .await
+        }
+        _ => {
+            handle
+                .authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key), hash))
+                .await
+        }
+    };
+    match result {
         Ok(r) if r.success() => KeyResult::Accepted,
         Ok(_) => KeyResult::Rejected(loaded.label.clone()),
         Err(e) => {
