@@ -24,6 +24,8 @@ pub enum ErrorCode {
     KexFailed,
     PortInUse,
     PermissionDenied,
+    /// The server doesn't offer the SFTP subsystem.
+    SftpDisabled,
     Internal,
 }
 

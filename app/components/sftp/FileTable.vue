@@ -18,6 +18,27 @@ const emit = defineEmits<{
 }>()
 
 let anchor = ''
+
+// ---- Long folders: past this many rows only the ones in view are drawn (rows are a fixed 28px).
+const VIRTUAL_OVER = 500
+const ROW_H = 28
+const scroller = ref<HTMLElement | null>(null)
+const scrollTop = ref(0)
+const viewH = ref(600)
+const virtual = computed(() => props.entries.length > VIRTUAL_OVER)
+const range = computed(() => {
+  if (!virtual.value) return { from: 0, to: props.entries.length }
+  const from = Math.max(0, Math.floor(scrollTop.value / ROW_H) - 15)
+  return { from, to: Math.min(props.entries.length, from + Math.ceil(viewH.value / ROW_H) + 30) }
+})
+const shown = computed(() => (virtual.value ? props.entries.slice(range.value.from, range.value.to) : props.entries))
+function onScroll() {
+  if (!scroller.value) return
+  scrollTop.value = scroller.value.scrollTop
+  viewH.value = scroller.value.clientHeight
+}
+onMounted(onScroll)
+watch(() => props.entries, () => { if (scroller.value && scroller.value.scrollTop > props.entries.length * ROW_H) scroller.value.scrollTop = 0; onScroll() })
 function select(e: FsEntry, ev: MouseEvent | KeyboardEvent) {
   if (ev.shiftKey && anchor) {
     const names = props.entries.map(x => x.name)
@@ -50,7 +71,7 @@ const arrow = (by: Pane['sort']['by']) => (props.sort.by === by ? (props.sort.de
 </script>
 
 <template>
-  <div :class="cn('flex-1 overflow-auto', dropTarget && 'ring-2 ring-inset ring-accent')" @contextmenu="onBlankContext">
+  <div ref="scroller" :class="cn('flex-1 overflow-auto', dropTarget && 'ring-2 ring-inset ring-accent')" @contextmenu="onBlankContext" @scroll.passive="onScroll">
     <table class="w-full border-collapse text-sm" role="grid">
       <thead>
         <tr class="sticky top-0 bg-bg text-left text-xs font-medium text-muted">
@@ -61,8 +82,9 @@ const arrow = (by: Pane['sort']['by']) => (props.sort.by === by ? (props.sort.de
         </tr>
       </thead>
       <tbody>
+        <tr v-if="virtual && range.from > 0" aria-hidden="true" :style="{ height: `${range.from * ROW_H}px` }"><td :colspan="showMode ? 4 : 3" /></tr>
         <tr
-          v-for="e in entries"
+          v-for="e in shown"
           :key="e.name"
           role="row"
           tabindex="0"
@@ -89,6 +111,7 @@ const arrow = (by: Pane['sort']['by']) => (props.sort.by === by ? (props.sort.de
           <td class="px-2.5 text-muted">{{ formatModified(e.mtime) }}</td>
           <td v-if="showMode" class="px-2.5 font-mono text-xs text-muted">{{ formatMode(e.mode, e.kind, e.symlink) }}</td>
         </tr>
+        <tr v-if="virtual && range.to < entries.length" aria-hidden="true" :style="{ height: `${(entries.length - range.to) * ROW_H}px` }"><td :colspan="showMode ? 4 : 3" /></tr>
       </tbody>
     </table>
     <p v-if="!entries.length" class="px-4 py-6 text-center text-sm text-muted">This folder is empty.</p>

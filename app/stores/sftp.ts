@@ -15,6 +15,8 @@ export interface Pane {
   loading: boolean
   connecting: boolean
   error: string
+  /** The `AppError` code behind `error`, so the pane can show a friendly state. */
+  errorCode: string
   sort: { by: 'name' | 'size' | 'mtime', desc: boolean }
 }
 
@@ -38,7 +40,7 @@ export interface TransferRow {
   dstPane: number
 }
 
-const blankPane = (): Pane => ({ endpoint: '', hostId: null, label: '', path: '', entries: [], selected: [], showHidden: false, loading: false, connecting: false, error: '', sort: { by: 'name', desc: false } })
+const blankPane = (): Pane => ({ endpoint: '', hostId: null, label: '', path: '', entries: [], selected: [], showHidden: false, loading: false, connecting: false, error: '', errorCode: '', sort: { by: 'name', desc: false } })
 
 /** Remote and local paths use different separators; this keeps panes honest about which they are. */
 export const isRemote = (p: Pane) => p.endpoint !== 'local' && p.endpoint !== ''
@@ -60,9 +62,11 @@ export const useSftpStore = defineStore('sftp', () => {
   const prompt = ref<{ pane: number, openId: string, id: string, kind: PromptKind } | null>(null)
   /** What is being dragged between panes. */
   const dragging = ref<{ pane: number, names: string[] } | null>(null)
+  /** ⌘C in a pane: what ⌘V in the other pane copies over. */
+  const clipboard = ref<{ pane: number, names: string[] } | null>(null)
 
   function message(e: unknown) {
-    if (e instanceof CommandError) return e.code === 'validation' || e.code === 'permission_denied' || e.code === 'not_found' || e.code === 'host_unreachable' || e.code === 'auth_failed' || e.code === 'internal' ? e.message : 'Something went wrong. Try again.'
+    if (e instanceof CommandError) return e.code === 'validation' || e.code === 'sftp_disabled' || e.code === 'permission_denied' || e.code === 'not_found' || e.code === 'host_unreachable' || e.code === 'auth_failed' || e.code === 'internal' ? e.message : 'Something went wrong. Try again.'
     return 'Something went wrong. Try again.'
   }
 
@@ -81,6 +85,7 @@ export const useSftpStore = defineStore('sftp', () => {
     if (!p.endpoint) return
     p.loading = true
     p.error = ''
+    p.errorCode = ''
     try {
       const target = path ?? p.path
       p.entries = await api.fsList(p.endpoint, target, p.showHidden)
@@ -89,6 +94,7 @@ export const useSftpStore = defineStore('sftp', () => {
     }
     catch (e) {
       p.error = message(e)
+      p.errorCode = e instanceof CommandError ? e.code : ''
     }
     finally {
       p.loading = false
@@ -98,7 +104,7 @@ export const useSftpStore = defineStore('sftp', () => {
   async function showLocal(i: number) {
     const p = panes[i]!
     closeRemote(p)
-    Object.assign(p, { endpoint: 'local', hostId: null, label: 'This computer', entries: [], selected: [], error: '' })
+    Object.assign(p, { endpoint: 'local', hostId: null, label: 'This computer', entries: [], selected: [], error: '', errorCode: '' })
     try {
       p.path = await api.fsHome('local')
     }
@@ -168,6 +174,7 @@ export const useSftpStore = defineStore('sftp', () => {
     const openId = crypto.randomUUID()
     p.connecting = true
     p.error = ''
+    p.errorCode = ''
     try {
       const opened = await api.sftpOpen(openId, host.id, (e: SessionEvent) => {
         if (e.type === 'prompt') prompt.value = { pane: i, openId, id: e.prompt_id, kind: e.kind }
@@ -178,6 +185,7 @@ export const useSftpStore = defineStore('sftp', () => {
     }
     catch (e) {
       p.error = message(e)
+      p.errorCode = e instanceof CommandError ? e.code : ''
     }
     finally {
       p.connecting = false
@@ -306,5 +314,5 @@ export const useSftpStore = defineStore('sftp', () => {
     prompt.value = null
   }
 
-  return { panes, transfers, prompt, dragging, sorted, load, showLocal, connect, edit, answer, refresh, go, up, open, toggleHidden, mkdir, rename, chmod, remove, copy, resolveConflict, cancel, clearFinished, dropOn, clear }
+  return { panes, transfers, prompt, dragging, clipboard, sorted, load, showLocal, connect, edit, answer, refresh, go, up, open, toggleHidden, mkdir, rename, chmod, remove, copy, resolveConflict, cancel, clearFinished, dropOn, clear }
 })

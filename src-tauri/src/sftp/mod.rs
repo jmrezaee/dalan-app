@@ -156,10 +156,12 @@ pub async fn open_remote(
         .channel_open_session()
         .await
         .map_err(|e| AppError::internal(format!("Couldn't open a channel on {label}: {e}")))?;
-    channel
-        .request_subsystem(true, "sftp")
-        .await
-        .map_err(|_| AppError::internal(format!("SFTP is turned off on {label}.")))?;
+    channel.request_subsystem(true, "sftp").await.map_err(|_| {
+        AppError::new(
+            crate::error::ErrorCode::SftpDisabled,
+            format!("SFTP is turned off on {label}."),
+        )
+    })?;
     let sftp = russh_sftp::client::SftpSession::new(channel.into_stream())
         .await
         .map_err(|e| AppError::internal(format!("{label} didn't start SFTP: {e}")))?;

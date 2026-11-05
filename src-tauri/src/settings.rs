@@ -21,6 +21,13 @@ const KEYS: [&str; 8] = [
 const MAX_VALUE_BYTES: usize = 16 * 1024;
 const MAX_AUTO_LOCK_MINUTES: u64 = 24 * 60;
 
+/// One field of the `hosts` settings document (`detect_os`, `post_quantum`, `local_shell`), if set.
+pub fn hosts_field(conn: &Connection, name: &str) -> Option<serde_json::Value> {
+    let all = get_all(conn).ok()?;
+    let doc: serde_json::Value = serde_json::from_str(all.get("hosts")?).ok()?;
+    doc.get(name).cloned()
+}
+
 pub fn get_all(conn: &Connection) -> AppResult<HashMap<String, String>> {
     let mut st = conn.prepare("SELECT key, value FROM settings")?;
     let rows = st

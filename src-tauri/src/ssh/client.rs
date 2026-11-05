@@ -241,10 +241,30 @@ where
         remote,
         agent,
     };
+    // Settings -> "Post-quantum key exchange": on by default. Off drops the ML-KEM hybrid from the offer
+    // (for a server or middlebox that chokes on the larger key exchange message).
+    let post_quantum = store
+        .with_db(|c| Ok(crate::settings::hosts_field(c, "post_quantum").and_then(|v| v.as_bool())))
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(true);
+    let mut preferred = russh::Preferred::DEFAULT;
+    if !post_quantum {
+        preferred.kex = std::borrow::Cow::Owned(
+            preferred
+                .kex
+                .iter()
+                .filter(|k| **k != russh::kex::MLKEM768X25519_SHA256)
+                .copied()
+                .collect(),
+        );
+    }
     let config = Arc::new(client::Config {
         // Detect dead links (F11): 3 missed keepalives, 30 s apart.
         keepalive_interval: Some(Duration::from_secs(30)),
         keepalive_max: 3,
+        preferred,
         ..Default::default()
     });
     let mut handle = match client::connect_stream(config, stream, handler).await {

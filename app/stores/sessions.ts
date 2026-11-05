@@ -194,6 +194,41 @@ export const useSessionsStore = defineStore('sessions', () => {
     else if (sessions.value[n - 3]) activeKey.value = sessions.value[n - 3]!.key
   }
 
+  /** ⌃Tab / ⌃⇧Tab: the next or previous tab, in the order they are shown (Vault, SFTP, then the open tabs). */
+  function cycle(delta: 1 | -1) {
+    const order: (string | null)[] = [null, 'sftp', ...sessions.value.map(s => s.key)]
+    const at = Math.max(0, order.indexOf(activeKey.value))
+    activeKey.value = order[(at + delta + order.length) % order.length] ?? null
+  }
+
+  function rename(sess: Session, label: string) {
+    const name = label.trim()
+    if (name) sess.label = name
+    if (sess.kind === 'workspace') sess.dirty = true
+  }
+
+  /** Drag to reorder: puts `key` before or after `ontoKey`. */
+  function moveTab(key: string, ontoKey: string, where: 'before' | 'after') {
+    const from = sessions.value.findIndex(s => s.key === key)
+    if (from < 0 || key === ontoKey) return
+    const [moved] = sessions.value.splice(from, 1)
+    const to = sessions.value.findIndex(s => s.key === ontoKey)
+    if (!moved || to < 0) return
+    sessions.value.splice(where === 'before' ? to : to + 1, 0, moved)
+  }
+
+  /**
+   * Drag a tab onto another to work on both side by side. Live terminals can't move between views
+   * without losing their scrollback (hard rule 4), so this opens a workspace with fresh connections to the
+   * same servers and leaves both tabs as they are.
+   */
+  function mergeTabs(key: string, ontoKey: string, allHosts: HostSummary[]) {
+    const ids = [ontoKey, key].map(k => sessions.value.find(s => s.key === k)).flatMap(s => (s?.kind === 'session' && s.hostId ? [s.hostId] : []))
+    const list = ids.map(id => allHosts.find(h => h.id === id)).filter((h): h is HostSummary => !!h)
+    if (list.length < 2) return void toast('Only tabs connected to a saved server can be combined.')
+    openWorkspace(list)
+  }
+
   /** TerminalView calls this once xterm exists; buffered output is replayed in order. */
   function attach(key: string, write: (b: Uint8Array) => void) {
     writers.set(key, write)
@@ -271,11 +306,13 @@ export const useSessionsStore = defineStore('sessions', () => {
     if (hosts.length > MAX_PANES) toast(`A workspace holds ${MAX_PANES} panes. The rest were left out.`)
   }
 
-  function addPane(ws: Session, host: HostSummary) {
+  /** Adds a pane at the end, or at `at` (⌘⇧D puts the new one under the focused pane). */
+  function addPane(ws: Session, host: HostSummary, at = ws.panes.length) {
     if (ws.panes.length >= MAX_PANES) return void toast(`A workspace holds ${MAX_PANES} panes.`)
     const p = makePane(host, ws.key)
-    ws.panes.push(p)
-    ws.focus = ws.panes.length - 1
+    const i = Math.min(Math.max(at, 0), ws.panes.length)
+    ws.panes.splice(i, 0, p)
+    ws.focus = i
     ws.dirty = true
     connect(p)
   }
@@ -328,5 +365,5 @@ export const useSessionsStore = defineStore('sessions', () => {
     pending.clear()
   }
 
-  return { sessions, activeKey, active, activeSession, panelOpen, open, openLocal, openNewTab, openWorkspace, addPane, closePane, focusPane, setMode, toggleMode, toggleBroadcast, input, activateNth, attach, detach, write, resize, ack, respond, reconnect, close, clear }
+  return { sessions, activeKey, active, activeSession, panelOpen, open, openLocal, openNewTab, openWorkspace, addPane, closePane, focusPane, setMode, toggleMode, toggleBroadcast, input, activateNth, cycle, rename, moveTab, mergeTabs, attach, detach, write, resize, ack, respond, reconnect, close, clear }
 })

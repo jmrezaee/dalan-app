@@ -12,9 +12,13 @@ export interface TerminalSettings {
   cursor_blink: boolean
   scrollback: number
   copy_on_select: boolean
+  /** Empty = the bundled JetBrains Mono. Any installed monospace family name. */
+  font_family: string
+  /** Theme for servers that have none of their own; empty = the app's light or dark default. */
+  default_theme: string
 }
 
-const TERMINAL_DEFAULTS: TerminalSettings = { font_size: 14, cursor: 'block', cursor_blink: true, scrollback: 10000, copy_on_select: false }
+const TERMINAL_DEFAULTS: TerminalSettings = { font_size: 14, cursor: 'block', cursor_blink: true, scrollback: 10000, copy_on_select: false, font_family: '', default_theme: '' }
 const clamp = (n: unknown, lo: number, hi: number, fallback: number) => (typeof n === 'number' && Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n))) : fallback)
 
 /** S23. Loaded from Rust after unlock, saved back on change. Terminals read `terminal` live. */
@@ -29,6 +33,10 @@ export const useSettingsStore = defineStore('settings', () => {
   const logsEnabled = ref(false)
   /** Ask a server which OS it runs, once, for its icon. On unless switched off. */
   const detectOs = ref(true)
+  /** ML-KEM hybrid key exchange in the SSH handshake. On unless switched off. */
+  const postQuantum = ref(true)
+  /** Path of the shell for "This computer"; empty = your own ($SHELL). */
+  const localShell = ref('')
   /** Shortcuts the user changed: action id -> combo (see utils/shortcuts). */
   const shortcutOverrides = ref<Record<string, string>>({})
   const combos = computed(() => effectiveCombos(shortcutOverrides.value))
@@ -44,6 +52,8 @@ export const useSettingsStore = defineStore('settings', () => {
     terminal.cursor = v.cursor === 'bar' || v.cursor === 'underline' ? v.cursor : 'block'
     terminal.cursor_blink = v.cursor_blink ?? TERMINAL_DEFAULTS.cursor_blink
     terminal.copy_on_select = v.copy_on_select ?? TERMINAL_DEFAULTS.copy_on_select
+    terminal.font_family = typeof v.font_family === 'string' ? v.font_family.slice(0, 80) : ''
+    terminal.default_theme = typeof v.default_theme === 'string' ? v.default_theme : ''
   }
 
   async function load() {
@@ -57,7 +67,10 @@ export const useSettingsStore = defineStore('settings', () => {
       const sec = parse('security')
       if (typeof sec.auto_lock_minutes === 'number') autoLockMinutes.value = sec.auto_lock_minutes
       logsEnabled.value = parse('logs').enabled === true
-      detectOs.value = parse('hosts').detect_os !== false
+      const hostsDoc = parse('hosts')
+      detectOs.value = hostsDoc.detect_os !== false
+      postQuantum.value = hostsDoc.post_quantum !== false
+      localShell.value = typeof hostsDoc.local_shell === 'string' ? hostsDoc.local_shell : ''
       const ov = parse('shortcuts').overrides
       shortcutOverrides.value = ov && typeof ov === 'object' ? Object.fromEntries(Object.entries(ov).filter(([id, c]) => SHORTCUT_ACTIONS.some(a => a.id === id) && typeof c === 'string')) as Record<string, string> : {}
       historyEnabled.value = parse('history').enabled === true
@@ -106,9 +119,19 @@ export const useSettingsStore = defineStore('settings', () => {
     return null
   }
 
+  // The `hosts` document holds three switches; every change saves all of them.
+  const saveHosts = () => save('hosts', { detect_os: detectOs.value, post_quantum: postQuantum.value, local_shell: localShell.value })
   function setDetectOs(on: boolean) {
     detectOs.value = on
-    save('hosts', { detect_os: on })
+    saveHosts()
+  }
+  function setPostQuantum(on: boolean) {
+    postQuantum.value = on
+    saveHosts()
+  }
+  function setLocalShell(path: string) {
+    localShell.value = path.trim()
+    saveHosts()
   }
 
   function setLogs(enabled: boolean) {
@@ -121,5 +144,5 @@ export const useSettingsStore = defineStore('settings', () => {
     save('history', { enabled })
   }
 
-  return { detectOs, setDetectOs, shortcutOverrides, combos, setShortcut, logsEnabled, setLogs, historyEnabled, setHistory, theme, terminal, autoLockMinutes, loaded, resolvedTheme, load, setTheme, setTerminal, setAutoLock }
+  return { detectOs, setDetectOs, postQuantum, setPostQuantum, localShell, setLocalShell, shortcutOverrides, combos, setShortcut, logsEnabled, setLogs, historyEnabled, setHistory, theme, terminal, autoLockMinutes, loaded, resolvedTheme, load, setTheme, setTerminal, setAutoLock }
 })

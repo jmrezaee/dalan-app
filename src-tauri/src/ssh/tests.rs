@@ -1600,3 +1600,39 @@ async fn keyboard_interactive_asks_the_servers_question_and_signs_in() {
         _ => unreachable!(),
     }
 }
+
+#[tokio::test]
+async fn connects_with_post_quantum_key_exchange_switched_off_and_the_local_shell_setting_is_checked(
+) {
+    let h = harness(Some("right-pw")).await;
+    h.state
+        .with_db(|c| {
+            crate::settings::set(
+                c,
+                "hosts",
+                r#"{"post_quantum":false,"local_shell":"/definitely/not/a/shell"}"#,
+            )
+        })
+        .await
+        .unwrap();
+    let mut s = trusted(&h).await;
+    s.until(is_state(SessionState::Ready)).await; // the handshake still works without ML-KEM
+    s.cmds.send(Cmd::Close).unwrap();
+    // A path that isn't a file is ignored: the user's own shell is used instead.
+    let shell = h
+        .state
+        .with_db(|c| Ok(crate::pty::local_shell(c)))
+        .await
+        .unwrap();
+    assert_eq!(shell, crate::pty::default_shell());
+    h.state
+        .with_db(|c| crate::settings::set(c, "hosts", r#"{"local_shell":"/bin/sh"}"#))
+        .await
+        .unwrap();
+    let shell = h
+        .state
+        .with_db(|c| Ok(crate::pty::local_shell(c)))
+        .await
+        .unwrap();
+    assert_eq!(shell, "/bin/sh");
+}

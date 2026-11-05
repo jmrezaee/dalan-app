@@ -31,6 +31,14 @@ pub fn default_shell() -> String {
     }
 }
 
+/// The shell for "This computer": the one chosen in Settings if it is a real file, else the user's own.
+pub fn local_shell(conn: &rusqlite::Connection) -> String {
+    crate::settings::hosts_field(conn, "local_shell")
+        .and_then(|v| v.as_str().map(|s| s.trim().to_string()))
+        .filter(|s| !s.is_empty() && std::path::Path::new(s).is_file())
+        .unwrap_or_else(default_shell)
+}
+
 fn state(io: &SessionIo, s: SessionState) {
     (io.event)(SessionEvent::State { state: s });
 }

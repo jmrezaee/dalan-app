@@ -250,14 +250,11 @@ impl SessionManager {
         tauri::async_runtime::spawn(async move {
             match job {
                 Job::Local => {
-                    crate::pty::run(
-                        Arc::clone(&io),
-                        crate::pty::default_shell(),
-                        params.cols,
-                        params.rows,
-                        rx,
-                    )
-                    .await
+                    let shell = store
+                        .with_db(|c| Ok(crate::pty::local_shell(c)))
+                        .await
+                        .unwrap_or_else(|_| crate::pty::default_shell());
+                    crate::pty::run(Arc::clone(&io), shell, params.cols, params.rows, rx).await
                 }
                 Job::Telnet => {
                     let hid = params.host_id.clone();

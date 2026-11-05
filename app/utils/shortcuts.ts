@@ -19,6 +19,7 @@ export const SHORTCUT_ACTIONS: ShortcutAction[] = [
   { id: 'find', label: 'Find in terminal', combo: 'Mod+F' },
   { id: 'broadcast', label: 'Broadcast typing (workspace)', combo: 'Mod+B' },
   { id: 'duplicate-pane', label: 'Duplicate pane (workspace)', combo: 'Mod+D' },
+  { id: 'split-down', label: 'Duplicate pane below (workspace)', combo: 'Mod+Shift+D' },
   { id: 'toggle-layout', label: 'Split or focus layout (workspace)', combo: 'Mod+Shift+M' },
   { id: 'save-template', label: 'Save workspace as template', combo: 'Mod+S' },
 ]

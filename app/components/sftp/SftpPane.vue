@@ -1,11 +1,14 @@
 <script setup lang="ts">
 // One side of S21: where it is (this computer or a server), a path bar, and the files.
-import { ArrowLeftRight, ChevronDown, Eye, EyeOff, FolderPlus, KeyRound, Laptop, Loader, Pencil, RefreshCw, Server, Trash2 } from '@lucide/vue'
+import { ArrowLeftRight, ChevronDown, Eye, EyeOff, FolderPlus, KeyRound, Laptop, Lock, ServerOff, Loader, Pencil, RefreshCw, Server, Trash2 } from '@lucide/vue'
 import type { FsEntry } from '~/types/bindings'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { formatBytes } from '~/utils/format'
 import { isRemote, parentPath } from '~/stores/sftp'
+import { toast } from 'vue-sonner'
+
+const { fixed: shortcutFixed } = useShortcutLabel()
 
 const props = defineProps<{ index: number }>()
 const emit = defineEmits<{ newFolder: [], rename: [name: string], remove: [names: string[]], chmod: [name: string] }>()
@@ -22,6 +25,13 @@ const foot = computed(() => {
   if (sel.length) return `${sel.length} selected · ${formatBytes(sel.reduce((n, e) => n + (e.kind === 'file' ? (e.size ?? 0) : 0), 0))}`
   return `${rows.value.length} ${rows.value.length === 1 ? 'item' : 'items'}`
 })
+/** Friendly copy for the two errors people actually hit; anything else shows the server's message. */
+const problem = computed(() => {
+  const p = pane.value
+  if (p.errorCode === 'permission_denied') return { icon: Lock, title: 'No access', text: `You don't have permission to open ${p.path || 'that folder'}. Go up a folder, or ask whoever runs the server.` }
+  if (p.errorCode === 'sftp_disabled') return { icon: ServerOff, title: `SFTP isn't enabled on ${p.label || 'this server'}`, text: 'The server doesn\'t offer file transfer. Its owner can turn it on with a Subsystem sftp line in sshd_config.' }
+  return { icon: KeyRound, title: '', text: p.error }
+})
 const overDrop = ref(false)
 const ctx = ref<FsEntry | null>(null)
 
@@ -31,11 +41,32 @@ function setSort(by: 'name' | 'size' | 'mtime') {
   else Object.assign(s, { by, desc: false })
 }
 const copyOver = () => sftp.copy(props.index, pane.value.selected)
+
+// Keyboard: F2 renames, ⌘C / ⌘V (Ctrl elsewhere) copy a selection over to the other pane. Rows hold focus, so keys bubble up here.
+function onKey(e: KeyboardEvent) {
+  if ((e.target as HTMLElement).closest('input, textarea')) return
+  if (e.key === 'F2' && picked.value.length === 1) {
+    e.preventDefault()
+    emit('rename', picked.value[0]!.name)
+    return
+  }
+  if (!(e.metaKey || e.ctrlKey) || e.altKey) return
+  const k = e.key.toLowerCase()
+  if (k === 'c' && picked.value.length) {
+    e.preventDefault()
+    sftp.clipboard = { pane: props.index, names: picked.value.map(p => p.name) }
+    toast(`Copied ${picked.value.length} ${picked.value.length === 1 ? 'item' : 'items'}. Press ${shortcutFixed('Mod+V')} in the other pane.`)
+  }
+  else if (k === 'v' && sftp.clipboard && sftp.clipboard.pane !== props.index && pane.value.endpoint) {
+    e.preventDefault()
+    sftp.copy(sftp.clipboard.pane, sftp.clipboard.names, props.index)
+  }
+}
 const dirName = computed(() => (props.index === 0 ? 'right' : 'left'))
 </script>
 
 <template>
-  <section :aria-label="pane.label || 'Empty pane'" class="flex min-h-0 min-w-0 flex-col bg-bg">
+  <section :aria-label="pane.label || 'Empty pane'" class="flex min-h-0 min-w-0 flex-col bg-bg" @keydown="onKey">
     <div class="flex h-10 shrink-0 items-center gap-2 border-b border-border px-2.5">
       <DropdownMenu>
         <DropdownMenuTrigger as-child>
@@ -72,8 +103,9 @@ const dirName = computed(() => (props.index === 0 ? 'right' : 'left'))
     </div>
     <div v-else-if="pane.error" class="grid flex-1 place-items-center p-6">
       <div class="flex max-w-sm flex-col items-center gap-2 text-center">
-        <KeyRound class="size-6 text-danger" aria-hidden="true" />
-        <p role="alert" class="text-sm">{{ pane.error }}</p>
+        <component :is="problem.icon" class="size-6 text-danger" aria-hidden="true" />
+        <h3 v-if="problem.title" class="text-base">{{ problem.title }}</h3>
+        <p role="alert" class="text-sm" :class="problem.title && 'text-muted'">{{ problem.text }}</p>
         <div class="flex gap-2">
           <Button v-if="pane.path" variant="secondary" size="sm" @click="sftp.go(index, parentPath(pane))">Go up</Button>
           <Button size="sm" @click="pane.hostId ? sftp.connect(index, hosts.hosts.find(h => h.id === pane.hostId)!) : sftp.refresh(index)">Try again</Button>

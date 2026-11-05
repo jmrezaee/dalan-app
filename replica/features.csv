@@ -1,7 +1,7 @@
 feature,area,priority,original,clone,notes
 Master password unlock for local encrypted vault,security,must,yes,yes,S24; clone design choice standing in for Termius account encryption password
 Horizontal tab bar with Vault and SFTP fixed tabs,shell,must,yes,yes,S01
-Tab status dots (unread / needs input / error),shell,must,yes,no,S01 S19
+Tab status dots (unread / needs input / error),shell,must,yes,partial,S01 S19; P18: seen working in the window (green output, yellow question); red and workspace dot not seen; Mehrdad to confirm
 Hosts list with grid/list view and search,hosts,must,yes,yes,S02
 Create and edit host (address port username password),hosts,must,yes,yes,S03
 Nested groups,hosts,must,yes,partial,S04; smoke 2026-11-05: groups never run in the real window

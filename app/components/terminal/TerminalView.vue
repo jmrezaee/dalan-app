@@ -24,7 +24,8 @@ const encoder = new TextEncoder()
 
 const hosts = useHostsStore()
 /** The host's (or its group's) chosen theme, else the default for the app's light/dark mode. */
-const themeFor = (t: 'dark' | 'light') => terminalThemes[hosts.themeFor(props.session.hostId) ?? ''] ?? terminalThemes[t === 'light' ? 'default-light' : 'default-dark']
+const themeFor = (t: 'dark' | 'light') => terminalThemes[hosts.themeFor(props.session.hostId) ?? ''] ?? terminalThemes[settings.terminal.default_theme] ?? terminalThemes[t === 'light' ? 'default-light' : 'default-dark']
+const fontFor = () => (settings.terminal.font_family ? `"${settings.terminal.font_family.replace(/"/g, '')}", "JetBrains Mono Variable", ui-monospace, monospace` : '"JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace')
 
 // ---- Find in terminal (⌘F by default; the shortcut can be changed in Settings).
 const finding = ref(false)
@@ -64,7 +65,7 @@ function refit() {
 
 onMounted(() => {
   term = new Terminal({
-    fontFamily: '"JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace',
+    fontFamily: fontFor(),
     fontSize: settings.terminal.font_size,
     lineHeight: 1.2,
     cursorBlink: settings.terminal.cursor_blink,
@@ -74,7 +75,8 @@ onMounted(() => {
     theme: themeFor(settings.resolvedTheme),
   })
   // ⌘ shortcuts (new tab, palette, ...) belong to the app: tell xterm to ignore them so they reach the window.
-  term.attachCustomKeyEventHandler(e => !e.metaKey)
+  // ⌃Tab cycles tabs, so it is ours too.
+  term.attachCustomKeyEventHandler(e => !e.metaKey && !(e.ctrlKey && e.key === 'Tab'))
   term.onSelectionChange(() => {
     const sel = term?.getSelection()
     if (settings.terminal.copy_on_select && sel) navigator.clipboard.writeText(sel).catch(() => {})
@@ -119,6 +121,8 @@ watch(() => settings.terminal, (t) => {
   term.options.cursorStyle = t.cursor
   term.options.cursorBlink = t.cursor_blink
   term.options.scrollback = t.scrollback
+  term.options.fontFamily = fontFor()
+  term.options.theme = themeFor(settings.resolvedTheme)
   nextTick(refit)
 }, { deep: true })
 watch([() => settings.resolvedTheme, () => hosts.themeFor(props.session.hostId)], () => { if (term) term.options.theme = themeFor(settings.resolvedTheme) })

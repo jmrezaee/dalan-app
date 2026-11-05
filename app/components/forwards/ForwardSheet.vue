@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import type { ForwardKind, ForwardSummary } from '~/types/bindings'
+import { ArrowRightLeft, Globe, Network } from '@lucide/vue'
 
 const open = defineModel<boolean>('open', { required: true })
 const props = defineProps<{ rule: ForwardSummary | null }>()
@@ -18,6 +19,24 @@ const error = ref('')
 const busy = ref(false)
 const current = computed(() => JSON.stringify(form))
 const snapshot = ref('')
+// A new rule starts in the three-step wizard (Type, Where, Review); "Skip the wizard" or editing shows the single form.
+const wizard = ref(false)
+const step = ref(0)
+const STEPS = ['Type', 'Where', 'Review']
+const KINDS = [
+  { value: 'local', label: 'Local', icon: ArrowRightLeft, text: 'Reach a port on the server\'s network from this computer.' },
+  { value: 'remote', label: 'Remote', icon: Network, text: 'Let the server reach a port on this computer.' },
+  { value: 'dynamic', label: 'SOCKS proxy', icon: Globe, text: 'Use the server as a proxy for a browser or tool.' },
+]
+function next() {
+  error.value = ''
+  if (step.value === 1) {
+    if (!form.host_id) return void (error.value = 'Choose a server for this rule.')
+    if (!Number(form.bind_port)) return void (error.value = 'Enter the port to listen on.')
+    if (form.kind !== 'dynamic' && !Number(form.dest_port)) return void (error.value = 'Enter the port to forward to.')
+  }
+  step.value = Math.min(step.value + 1, 2)
+}
 const dirty = computed(() => current.value !== snapshot.value)
 
 watch(open, (o) => {
@@ -27,6 +46,8 @@ watch(open, (o) => {
     ? { kind: r.kind, label: r.label, host_id: r.host_id, bind_address: r.bind_address, bind_port: r.bind_port, dest_address: r.dest_address ?? '127.0.0.1', dest_port: r.dest_port ?? '', autostart: r.autostart }
     : { kind: 'local', label: '', host_id: null, bind_address: '127.0.0.1', bind_port: '', dest_address: '127.0.0.1', dest_port: '', autostart: false })
   error.value = ''
+  wizard.value = !r
+  step.value = 0
   snapshot.value = current.value
 })
 
@@ -75,10 +96,30 @@ async function submit() {
         <SheetTitle class="text-base">{{ rule ? 'Edit rule' : 'New rule' }}</SheetTitle>
         <span v-if="dirty" class="text-xs text-warning">· Unsaved changes</span>
       </div>
-      <form class="flex flex-1 flex-col gap-4 overflow-auto p-5" @submit.prevent="submit">
+      <form class="flex flex-1 flex-col gap-4 overflow-auto p-5" @submit.prevent="wizard && step < 2 ? next() : submit()">
         <p v-if="locked" class="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted">Stop this rule to change it.</p>
-        <fieldset :disabled="locked" class="flex flex-col gap-4">
-          <div class="flex flex-col gap-1.5">
+        <Stepper v-if="wizard" :steps="STEPS" :current="step" />
+        <div v-if="wizard && step === 0" role="radiogroup" aria-label="Type" class="flex flex-col gap-2">
+          <button
+            v-for="k in KINDS"
+            :key="k.value"
+            type="button"
+            role="radio"
+            :aria-checked="form.kind === k.value"
+            :class="['flex items-start gap-3 rounded-lg border p-3 text-left', form.kind === k.value ? 'border-accent bg-accent/10' : 'border-border hover:bg-surface-hover']"
+            @click="form.kind = k.value"
+          >
+            <component :is="k.icon" class="mt-0.5 size-5 shrink-0 text-accent" aria-hidden="true" />
+            <span class="flex flex-col"><span class="text-sm font-medium">{{ k.label }}</span><span class="text-xs text-muted">{{ k.text }}</span></span>
+          </button>
+        </div>
+        <div v-if="wizard && step === 2" class="flex flex-col gap-3">
+          <p class="rounded-md border border-border bg-surface px-3 py-2 font-mono text-xs text-muted">{{ route }}</p>
+          <p v-if="exposed" class="text-xs text-warning">Anyone who can reach this address can use the tunnel. Use 127.0.0.1 to keep it to this computer.</p>
+          <label class="flex items-center gap-2.5 text-sm"><Switch v-model="form.autostart" />Start when Dalan unlocks</label>
+        </div>
+        <fieldset v-if="!wizard || step === 1" :disabled="locked" class="flex flex-col gap-4">
+          <div v-if="!wizard" class="flex flex-col gap-1.5">
             <Label>Type</Label>
             <Segmented v-model="form.kind" label="Type" :options="[{ value: 'local', label: 'Local' }, { value: 'remote', label: 'Remote' }, { value: 'dynamic', label: 'SOCKS' }]" />
             <p class="text-xs text-muted">{{ HINTS[form.kind] }}</p>
@@ -94,16 +135,21 @@ async function submit() {
             <div class="flex flex-col gap-1.5"><Label for="fw-dest">{{ form.kind === 'remote' ? 'To (on this computer)' : 'To (as the server sees it)' }}</Label><Input id="fw-dest" v-model="form.dest_address" class="font-mono" autocomplete="off" spellcheck="false" /></div>
             <div class="flex flex-col gap-1.5"><Label for="fw-dport">Port</Label><NumberInput id="fw-dport" v-model="form.dest_port" /></div>
           </div>
-          <p class="rounded-md border border-border bg-surface px-3 py-2 font-mono text-xs text-muted">{{ route }}</p>
-          <label class="flex items-center gap-2.5 text-sm"><Switch v-model="form.autostart" />Start when Dalan unlocks</label>
+          <template v-if="!wizard">
+            <p class="rounded-md border border-border bg-surface px-3 py-2 font-mono text-xs text-muted">{{ route }}</p>
+            <label class="flex items-center gap-2.5 text-sm"><Switch v-model="form.autostart" />Start when Dalan unlocks</label>
+          </template>
         </fieldset>
         <p v-if="error" role="alert" class="text-sm text-danger">{{ error }}</p>
         <button type="submit" class="hidden" tabindex="-1" aria-hidden="true" />
       </form>
       <div class="flex h-14 shrink-0 items-center justify-end gap-2 border-t border-border px-5">
         <Button v-if="rule" variant="ghost" class="mr-auto text-danger" @click="emit('delete', rule)">Delete</Button>
+        <Button v-if="wizard" variant="link" class="mr-auto" @click="wizard = false">Skip the wizard</Button>
         <Button variant="secondary" @click="open = false">Cancel</Button>
-        <Button :loading="busy" :disabled="locked" @click="submit">Save</Button>
+        <Button v-if="wizard && step > 0" variant="secondary" @click="step--">Back</Button>
+        <Button v-if="wizard && step < 2" @click="next">Next</Button>
+        <Button v-else :loading="busy" :disabled="locked" @click="submit">Save</Button>
       </div>
     </SheetContent>
   </Sheet>

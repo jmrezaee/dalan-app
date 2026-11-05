@@ -72,6 +72,15 @@ function confirmClose() {
   closeOpen.value = false
   if (closing.value) sessions.close(closing.value)
 }
+// ---- Tab drag: reorder (outer quarters) or combine into a workspace (middle).
+const dragKey = ref('')
+function dropTab(ontoKey: string, where: 'before' | 'after' | 'onto') {
+  const key = dragKey.value
+  dragKey.value = ''
+  if (!key || key === ontoKey) return
+  if (where === 'onto') sessions.mergeTabs(key, ontoKey, hosts.hosts)
+  else sessions.moveTab(key, ontoKey, where)
+}
 const closingCount = computed(() => (closing.value?.kind === 'workspace' ? closing.value.panes.length : 1))
 
 
@@ -94,13 +103,22 @@ function onPaletteAction(name: string) {
   else if (name === 'sftp') sessions.activeKey = 'sftp'
   else go(name === 'vault' ? 'hosts' : name as typeof section.value)
 }
-/** ⌘D: another pane on the same server as the focused one. */
-function addDuplicatePane(ws: Session) {
+/** ⌘D: another pane on the same server as the focused one. ⌘⇧D puts it directly below (one grid row down). */
+function addDuplicatePane(ws: Session, below = false) {
   const host = hosts.hosts.find(h => h.id === ws.panes[ws.focus]?.hostId)
-  if (host) sessions.addPane(ws, host)
+  if (!host) return
+  const n = ws.panes.length
+  const cols = n <= 1 ? 1 : n <= 4 ? 2 : n <= 9 ? 3 : 4
+  sessions.addPane(ws, host, below ? ws.focus + cols : undefined)
 }
 
 function onShortcut(e: KeyboardEvent) {
+  // ⌃Tab / ⌃⇧Tab cycle the tabs (the same on every platform).
+  if (e.key === 'Tab' && e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault()
+    sessions.cycle(e.shiftKey ? -1 : 1)
+    return
+  }
   const combo = eventCombo(e)
   if (!combo) return
   // Outside a Mac, Ctrl combos inside a terminal belong to the shell. Shift/Alt ones are ours.
@@ -122,6 +140,7 @@ function onShortcut(e: KeyboardEvent) {
     case 'side-panel': sessions.panelOpen = !sessions.panelOpen; break
     case 'broadcast': if (!ws) return; sessions.toggleBroadcast(ws); break
     case 'duplicate-pane': if (!ws) return; addDuplicatePane(ws); break
+    case 'split-down': if (!ws) return; addDuplicatePane(ws, true); break
     case 'toggle-layout': if (!ws) return; sessions.toggleMode(ws); break
     case 'save-template': if (!ws) return; workspaceView.value?.[0]?.askSave(); break
     case 'new-host': newHost(); break
@@ -149,8 +168,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
         :active="sessions.activeKey === s.key"
         :unsaved="s.kind === 'workspace' && s.dirty"
         closable
+        movable
         @select="sessions.activeKey = s.key"
         @close="requestClose(s)"
+        @rename="(name: string) => sessions.rename(s, name)"
+        @drag-start="dragKey = s.key"
+        @drag-end="dragKey = ''"
+        @drop-on="(where: 'before' | 'after' | 'onto') => dropTab(s.key, where)"
       >
         <template #leading>
           <StatusDot v-if="s.kind === 'session'" :status="paneDot(s)" :label="paneDotLabel(s, s.label)" />

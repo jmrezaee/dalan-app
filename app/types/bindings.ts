@@ -282,7 +282,9 @@ export type ErrorCode = "locked" | "wrong_password" | "too_many_attempts" |
 /**  Importing an encrypted key without its passphrase. */
 "needs_passphrase" | 
 /**  The text isn't a private key we can read. */
-"invalid_key" | "not_found" | "validation" | "in_use" | "auth_failed" | "host_unreachable" | "host_key_changed" | "kex_failed" | "port_in_use" | "permission_denied" | "internal";
+"invalid_key" | "not_found" | "validation" | "in_use" | "auth_failed" | "host_unreachable" | "host_key_changed" | "kex_failed" | "port_in_use" | "permission_denied" | 
+/**  The server doesn't offer the SFTP subsystem. */
+"sftp_disabled" | "internal";
 
 export type ForwardInput = ForwardInput_Serialize | ForwardInput_Deserialize;
 

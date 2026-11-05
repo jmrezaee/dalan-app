@@ -5,6 +5,8 @@ import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import { SHORTCUT_ACTIONS, defaultCombo, eventCombo, formatCombo } from '~/utils/shortcuts'
+import { terminalThemeLabels } from '~/utils/terminal-themes'
+import { Input } from '@/components/ui/input'
 const { label: shortcutLabel } = useShortcutLabel()
 
 const settings = useSettingsStore()
@@ -165,6 +167,19 @@ const num = (v: string | number, fallback: number) => (Number.isFinite(Number(v)
           </div>
           <div class="row"><span class="flex flex-1 flex-col">Copy on select<span class="text-xs text-muted">Copies whatever you highlight in a terminal.</span></span><Switch :model-value="settings.terminal.copy_on_select" @update:model-value="(v: boolean) => settings.setTerminal({ copy_on_select: v })" /></div>
           <div class="row"><span class="flex flex-1 flex-col">Detect server OS<span class="text-xs text-muted">On the first connect to a server, runs <span class="font-mono">uname</span> once to show its OS on the host card. Nothing else is read.</span></span><Switch :model-value="settings.detectOs" aria-label="Detect server OS" @update:model-value="(v: boolean) => settings.setDetectOs(v)" /></div>
+          <div class="row">
+            <span class="flex flex-1 flex-col">Font<span class="text-xs text-muted">Any monospace font installed on this computer. Empty uses the bundled JetBrains Mono.</span></span>
+            <div class="w-56"><Input :model-value="settings.terminal.font_family" placeholder="JetBrains Mono" aria-label="Terminal font" autocomplete="off" @change="(e: Event) => settings.setTerminal({ font_family: (e.target as HTMLInputElement).value.trim() })" /></div>
+          </div>
+          <div class="row">
+            <span class="flex flex-1 flex-col">Default theme<span class="text-xs text-muted">For servers that have no theme of their own.</span></span>
+            <div class="w-56"><OptionSelect id="default-theme" :model-value="settings.terminal.default_theme || null" :options="Object.entries(terminalThemeLabels).map(([value, label]) => ({ value, label }))" none-label="Match the app" @update:model-value="(v: string | null) => settings.setTerminal({ default_theme: v ?? '' })" /></div>
+          </div>
+          <div class="row">
+            <span class="flex flex-1 flex-col">Local shell<span class="text-xs text-muted">Full path of the program for "This computer", for example /opt/homebrew/bin/fish. Empty uses your own shell. Applies to new terminals.</span></span>
+            <div class="w-56"><Input :model-value="settings.localShell" placeholder="Your own shell" aria-label="Local shell path" autocomplete="off" spellcheck="false" @change="(e: Event) => settings.setLocalShell((e.target as HTMLInputElement).value)" /></div>
+          </div>
+          <div class="row"><span class="flex flex-1 flex-col">Post-quantum key exchange<span class="text-xs text-muted">Offers the ML-KEM hybrid when connecting, so recorded traffic stays safe from future quantum computers. Turn off only for a server that fails to connect with it. Applies to new connections.</span></span><Switch :model-value="settings.postQuantum" aria-label="Post-quantum key exchange" @update:model-value="(v: boolean) => settings.setPostQuantum(v)" /></div>
           <p class="pt-3 text-xs text-muted">Changes apply to open terminals straight away.</p>
         </template>
 
@@ -183,7 +198,7 @@ const num = (v: string | number, fallback: number) => (Number.isFinite(Number(v)
         <template v-else-if="section === 'Shortcuts'">
           <div v-for="a in SHORTCUT_ACTIONS" :key="a.id" class="row">
             <span class="flex-1">{{ a.label }}</span>
-            <span v-if="recording === a.id" class="text-sm text-accent" role="status">Press the new shortcut…</span>
+            <span v-if="recording === a.id" class="text-sm text-accent" role="status">Press keys…</span>
             <Kbd v-else>{{ formatCombo(settings.combos[a.id]!) }}</Kbd>
             <Button variant="secondary" size="sm" @click="recording === a.id ? (recording = null) : startRecording(a.id)">{{ recording === a.id ? 'Cancel' : 'Change' }}</Button>
             <Button v-if="settings.combos[a.id] !== defaultCombo(a)" variant="ghost" size="sm" :aria-label="`Reset ${a.label}`" @click="settings.setShortcut(a.id, null)">Reset</Button>

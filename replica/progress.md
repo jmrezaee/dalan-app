@@ -113,7 +113,7 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
     - **SFTP and lock:** re-check after connecting, pending questions cancelled on lock.
     - **Commands:** `tags_list`, `tag_delete` (right-click a tag in the sidebar), `recent_connections` (feeds New Tab, written by `mark_connected`), `fs_realpath`, `snippets_move`, orphan-secret sweep at unlock. `fs_realpath` and `snippets_move` have no UI yet.
   - **Still to check:** keyboard-interactive against a real PAM/2FA container; the tag delete menu and New Tab recents in the window.
-- [~] **P18 UI fixes (audit "Must fix" 5, "Should fix" 14 and "Spec gaps"):**
+- [x] **P18 UI fixes (audit "Must fix" 5, "Should fix" 14 and "Spec gaps"):**
   1. **Tab status dots:**
      - Track unread output per session; "waiting" when a prompt is pending; red for error or disconnected.
      - Give workspace tabs a combined dot.
@@ -142,8 +142,15 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
       - Use the generated `TunnelState` in `RuleCard`.
       - Make the import `kind` a Rust enum, so it lands in `bindings.ts`.
   - **Part 1 built (2026-11-05): items 1 to 5 and 11.** Tab dots from `app/utils/sessionDot.ts` (waiting > failed > unread > quiet; workspace tabs get a combined dot; unread is set when output arrives while the tab isn't showing and cleared when you open it). Shortcut labels come from `useShortcutLabel()` (user's bindings, Ctrl off macOS; no ⌘ left in templates). S24 first-run copy word for word (the duplicate warning box removed). `scrim` token (dark and light) used by the four overlays; `text-[13px]`/`[15px]` replaced; theme swatches use the real theme scopes. `RuleCard` focusable (Enter toggles, double-click toggles, pencil edits) and uses `TunnelState`; the terminal is `inert` and `aria-hidden` while an overlay shows. File picking goes through `useTauri().pickFile()`; import `kind` is the generated `ImportKind` enum.
-  - **Resume at part 2:** items 6 (SFTP states, virtual lists, F2, ⌘C/⌘V), 7 (tab bar), 8 (workspace splits), 9 (3-step tunnel wizard), 10 (settings gaps).
   - **For Mehrdad to see (not run in the window yet):** tab dots (output in a background tab turns green, a password question turns yellow, a dropped connection turns red), shortcut labels after rebinding one in Settings, the light-theme swatches, tabbing to a port-forward card and pressing Enter. The dots row in `features.csv` stays `no` until then.
+  - **Part 2 built (2026-11-06): items 6 to 10.**
+    - **Tab bar:** ⌃Tab and ⌃⇧Tab cycle (xterm ignores them), middle-click closes, double-click or F2 renames, drag reorders (outer quarters of a tab) or combines (middle). Combining opens a workspace with *fresh* connections to both servers and leaves the two tabs alone, because moving a live terminal between views would lose its scrollback (hard rule 4). F2 only works while the tab button has focus, which a click gives straight to the terminal; double-click is the usual way.
+    - **SFTP:** `sftp_disabled` error code; "No access" and "SFTP isn't enabled" states; folders over 500 rows draw only the rows in view; F2 renames; ⌘C then ⌘V in the other pane copies.
+    - **Workspace:** draggable column and row handles on the same CSS grid (not shadcn Resizable, which would remount terminals); ⌘⇧D puts a copy of the focused server one row down; a "Broadcasting to N" pill.
+    - **Tunnels:** new rules start in the 3-step wizard (Type, Where, Review), "Skip the wizard" shows the single form; editing always shows the form.
+    - **Settings:** terminal font, default terminal theme, local shell path, post-quantum key exchange on/off (drops ML-KEM from the offer), "Press keys…" recorder text.
+  - **Not built:** SFTP "open with" apps (needs a per-extension app list and an opener call with an app; left for the backlog).
+  - **Checked in the window (fresh vault):** tab dots (green for background output, yellow while a question is open, workspace dot), ⌃Tab and ⌃⇧Tab, double-click rename, New Tab recents, workspace column handle, tunnel wizard steps and validation, the new Settings rows, S24 copy. **Not checked:** drag to reorder and drag to combine tabs (a scripted drag can't start one), middle-click close, ⌘⇧D, SFTP F2 and ⌘C/⌘V, a 500+ row folder, the new settings taking effect (font, shell, post-quantum).
 - [ ] **P19 Tests:**
   - **Fake backend:** commit a Tauri-command mock, the fake Rust backend used in the browser checks, as a test fixture.
   - **End to end:** add Playwright tests for F01, F11 and F12 (overlay state machine), tab mounting (xterm survives tab switches), the shortcut dispatcher, and the import preview.
@@ -217,3 +224,5 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
 - 2026-11-05 P15 and P16 closed: Mehrdad confirmed by hand that SFTP drag and drop and dragging a host onto a group work (after `dragDropEnabled: false` and the row drag styles), and that double-clicking Dalan.app while it runs opens no second copy. Not checked: `open -n` (forced second copy), a tunnel under the CSP.
 
 - 2026-11-05 P17 done (see its note above). A hand check is still open for keyboard-interactive against a real server.
+
+- 2026-11-06 P18 done in two parts; open hand checks listed in its note. `features.csv` tab-dot row can go to yes once Mehrdad has seen the dots.
