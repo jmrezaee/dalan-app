@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { toast } from 'vue-sonner'
 import { useTauri } from '~/composables/useTauri'
+import { SHORTCUT_ACTIONS, comboProblem, defaultCombo, effectiveCombos } from '~/utils/shortcuts'
 
 export type Theme = 'system' | 'dark' | 'light'
 export type CursorStyle = 'block' | 'bar' | 'underline'
@@ -26,6 +27,9 @@ export const useSettingsStore = defineStore('settings', () => {
   const loaded = ref(false)
   /** Keep a log of each session (S15). Off until chosen. */
   const logsEnabled = ref(false)
+  /** Shortcuts the user changed: action id -> combo (see utils/shortcuts). */
+  const shortcutOverrides = ref<Record<string, string>>({})
+  const combos = computed(() => effectiveCombos(shortcutOverrides.value))
   /** Remember typed commands for the side panel's History tab. Off until chosen. */
   const historyEnabled = ref(false)
 
@@ -51,6 +55,8 @@ export const useSettingsStore = defineStore('settings', () => {
       const sec = parse('security')
       if (typeof sec.auto_lock_minutes === 'number') autoLockMinutes.value = sec.auto_lock_minutes
       logsEnabled.value = parse('logs').enabled === true
+      const ov = parse('shortcuts').overrides
+      shortcutOverrides.value = ov && typeof ov === 'object' ? Object.fromEntries(Object.entries(ov).filter(([id, c]) => SHORTCUT_ACTIONS.some(a => a.id === id) && typeof c === 'string')) as Record<string, string> : {}
       historyEnabled.value = parse('history').enabled === true
       loaded.value = true
     }
@@ -83,6 +89,20 @@ export const useSettingsStore = defineStore('settings', () => {
     save('security', { auto_lock_minutes: minutes })
   }
 
+  /** `null` goes back to the default. Returns a reason when the combo can't be used. */
+  function setShortcut(id: string, combo: string | null): string | null {
+    // Copy without this action's entry; add it back below if it differs from the default.
+    const next = Object.fromEntries(Object.entries(shortcutOverrides.value).filter(([k]) => k !== id))
+    if (combo !== null && combo !== defaultCombo(SHORTCUT_ACTIONS.find(a => a.id === id)!)) {
+      const problem = comboProblem(id, combo, effectiveCombos(next))
+      if (problem) return problem
+      next[id] = combo
+    }
+    shortcutOverrides.value = next
+    save('shortcuts', { overrides: next })
+    return null
+  }
+
   function setLogs(enabled: boolean) {
     logsEnabled.value = enabled
     save('logs', { enabled })
@@ -93,5 +113,5 @@ export const useSettingsStore = defineStore('settings', () => {
     save('history', { enabled })
   }
 
-  return { logsEnabled, setLogs, historyEnabled, setHistory, theme, terminal, autoLockMinutes, loaded, resolvedTheme, load, setTheme, setTerminal, setAutoLock }
+  return { shortcutOverrides, combos, setShortcut, logsEnabled, setLogs, historyEnabled, setHistory, theme, terminal, autoLockMinutes, loaded, resolvedTheme, load, setTheme, setTerminal, setAutoLock }
 })

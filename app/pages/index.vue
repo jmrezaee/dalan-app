@@ -102,21 +102,32 @@ function addDuplicatePane(ws: Session) {
 }
 
 function onShortcut(e: KeyboardEvent) {
+  const combo = eventCombo(e)
+  if (!combo) return
+  // Outside a Mac, Ctrl combos inside a terminal belong to the shell. Shift/Alt ones are ours.
   const inTerminal = !!(e.target as HTMLElement | null)?.closest?.('.xterm')
-  if (!(e.metaKey || (e.ctrlKey && !inTerminal))) return
-  const k = e.key.toLowerCase()
-  if (k === 'k') paletteOpen.value = !paletteOpen.value
-  else if (k === 't') sessions.openNewTab()
-  else if (k === 'w' && sessions.active) requestClose(sessions.active)
-  else if (k === ',') go('settings')
-  else if (k === '.') sessions.panelOpen = !sessions.panelOpen
-  else if (k === 'b' && sessions.active?.kind === 'workspace') sessions.toggleBroadcast(sessions.active)
-  else if (k === 'd' && sessions.active?.kind === 'workspace') addDuplicatePane(sessions.active)
-  else if (k === 'm' && e.shiftKey && sessions.active?.kind === 'workspace') sessions.toggleMode(sessions.active)
-  else if (k === 's' && sessions.active?.kind === 'workspace') workspaceView.value?.[0]?.askSave()
-  else if (k === 'n') newHost()
-  else if (/^[1-9]$/.test(k)) sessions.activateNth(Number(k))
-  else return
+  if (inTerminal && !navigator.platform.toLowerCase().includes('mac') && !/\+(Shift|Alt)\+/.test(combo)) return
+  const tab = /^Mod\+([1-9])$/.exec(combo)
+  if (tab) {
+    sessions.activateNth(Number(tab[1]))
+    e.preventDefault()
+    return
+  }
+  const active = sessions.active
+  const ws = active?.kind === 'workspace' ? active : null
+  switch (actionFor(e, settings.combos)) {
+    case 'palette': paletteOpen.value = !paletteOpen.value; break
+    case 'new-tab': sessions.openNewTab(); break
+    case 'close-tab': if (!active) return; requestClose(active); break
+    case 'settings': go('settings'); break
+    case 'side-panel': sessions.panelOpen = !sessions.panelOpen; break
+    case 'broadcast': if (!ws) return; sessions.toggleBroadcast(ws); break
+    case 'duplicate-pane': if (!ws) return; addDuplicatePane(ws); break
+    case 'toggle-layout': if (!ws) return; sessions.toggleMode(ws); break
+    case 'save-template': if (!ws) return; workspaceView.value?.[0]?.askSave(); break
+    case 'new-host': newHost(); break
+    default: return // includes `find`, which the terminal handles itself
+  }
   e.preventDefault()
 }
 onMounted(() => window.addEventListener('keydown', onShortcut, true))

@@ -9,6 +9,7 @@ import { ChevronDown, ChevronUp, X } from '@lucide/vue'
 import '@xterm/xterm/css/xterm.css'
 import { terminalThemes } from '~/utils/terminal-themes'
 import type { Session } from '~/stores/sessions'
+import { actionFor } from '~/utils/shortcuts'
 
 const props = defineProps<{ session: Session, active: boolean }>()
 const sessions = useSessionsStore()
@@ -25,7 +26,7 @@ const hosts = useHostsStore()
 /** The host's (or its group's) chosen theme, else the default for the app's light/dark mode. */
 const themeFor = (t: 'dark' | 'light') => terminalThemes[hosts.themeFor(props.session.hostId) ?? ''] ?? terminalThemes[t === 'light' ? 'default-light' : 'default-dark']
 
-// ---- Find in terminal. ⌘F on a Mac, Ctrl+Shift+F elsewhere (plain Ctrl+F belongs to the shell).
+// ---- Find in terminal (⌘F by default; the shortcut can be changed in Settings).
 const finding = ref(false)
 const query = ref('')
 const matchCase = ref(false)
@@ -49,12 +50,9 @@ function closeFind() {
   term?.focus()
 }
 function onFindKey(e: KeyboardEvent) {
-  if (!props.active || e.key.toLowerCase() !== 'f') return
-  const mac = navigator.platform.toLowerCase().includes('mac')
-  if (mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && e.shiftKey) {
-    e.preventDefault()
-    openFind()
-  }
+  if (!props.active || actionFor(e, settings.combos) !== 'find') return
+  e.preventDefault()
+  openFind()
 }
 watch(() => props.active, (a) => { if (!a) finding.value = false })
 

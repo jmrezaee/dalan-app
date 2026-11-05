@@ -4,6 +4,7 @@ import { toast } from 'vue-sonner'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+import { SHORTCUT_ACTIONS, defaultCombo, eventCombo, formatCombo } from '~/utils/shortcuts'
 
 const settings = useSettingsStore()
 const sections = ['Appearance', 'Terminal', 'Logs', 'Shortcuts', 'Security', 'About'] as const
@@ -52,10 +53,28 @@ const THEMES = [
   { value: 'light', label: 'Light', swatch: 'bg-white' },
 ] as const
 const LOCK_OPTIONS = [{ v: 0, l: 'Never' }, { v: 1, l: '1 minute' }, { v: 5, l: '5 minutes' }, { v: 15, l: '15 minutes' }, { v: 30, l: '30 minutes' }, { v: 60, l: '1 hour' }]
-const SHORTCUTS = [
-  ['Command palette', '⌘K'], ['New tab', '⌘T'], ['Close tab', '⌘W'], ['New host', '⌘N'],
-  ['Hosts', '⌘1'], ['Switch to tab 1 to 8', '⌘2 to ⌘9'], ['Settings', '⌘,'],
-]
+const fixedShortcuts = [{ name: 'Vault', keys: ['Mod+1'] }, { name: 'SFTP', keys: ['Mod+2'] }, { name: 'Switch to tab 3 to 9', keys: ['Mod+3', 'Mod+9'] }]
+// ---- Shortcut recorder: press Change, then the new combination. Esc cancels.
+const recording = ref<string | null>(null)
+const shortcutError = ref('')
+function startRecording(id: string) {
+  shortcutError.value = ''
+  recording.value = id
+}
+function onRecord(e: KeyboardEvent) {
+  const id = recording.value
+  if (!id) return
+  e.preventDefault()
+  e.stopPropagation()
+  if (e.key === 'Escape') { recording.value = null; return }
+  const combo = eventCombo(e)
+  if (!combo) return // still holding modifiers
+  const problem = settings.setShortcut(id, combo)
+  if (problem) shortcutError.value = problem
+  else recording.value = null
+}
+onMounted(() => window.addEventListener('keydown', onRecord, true))
+onBeforeUnmount(() => window.removeEventListener('keydown', onRecord, true))
 // Terminals need a number box that commits on change, not on every keystroke.
 const num = (v: string | number, fallback: number) => (Number.isFinite(Number(v)) && v !== '' ? Number(v) : fallback)
 </script>
@@ -130,10 +149,18 @@ const num = (v: string | number, fallback: number) => (Number.isFinite(Number(v)
         </template>
 
         <template v-else-if="section === 'Shortcuts'">
-          <div v-for="[name, keys] in SHORTCUTS" :key="name" class="row">
-            <span class="flex-1">{{ name }}</span><Kbd>{{ keys }}</Kbd>
+          <div v-for="a in SHORTCUT_ACTIONS" :key="a.id" class="row">
+            <span class="flex-1">{{ a.label }}</span>
+            <span v-if="recording === a.id" class="text-sm text-accent" role="status">Press the new shortcut…</span>
+            <Kbd v-else>{{ formatCombo(settings.combos[a.id]!) }}</Kbd>
+            <Button variant="secondary" size="sm" @click="recording === a.id ? (recording = null) : startRecording(a.id)">{{ recording === a.id ? 'Cancel' : 'Change' }}</Button>
+            <Button v-if="settings.combos[a.id] !== defaultCombo(a)" variant="ghost" size="sm" :aria-label="`Reset ${a.label}`" @click="settings.setShortcut(a.id, null)">Reset</Button>
           </div>
-          <p class="pt-3 text-xs text-muted">Rebinding shortcuts comes later.</p>
+          <div v-for="f in fixedShortcuts" :key="f.name" class="row text-muted">
+            <span class="flex-1">{{ f.name }}</span><Kbd>{{ f.keys.map(k => formatCombo(k)).join(' to ') }}</Kbd><span class="w-[66px]" />
+          </div>
+          <p v-if="shortcutError" role="alert" class="pt-3 text-sm text-danger">{{ shortcutError }}</p>
+          <p class="pt-3 text-xs text-muted">Shortcuts use the {{ formatCombo('Mod+X').startsWith('⌘') ? '⌘' : 'Ctrl' }} key. Press Change, then the new combination.</p>
         </template>
 
         <template v-else-if="section === 'About'">
