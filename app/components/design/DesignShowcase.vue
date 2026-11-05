@@ -173,7 +173,7 @@ const fp = 'SHA256:3b0c2f4d9a1e8c7f5b6a0d2e4c8f1a3b5d7e9f0a2c4'
         <HostCard label="Hover/selected" user="deploy" address="10.0.0.9" os-letter="D" selected />
         <HostCard label="Connecting" user="deploy" address="10.0.0.6" connecting />
         <HostCard label="Connected" user="admin" address="db.internal" :port="2222" connected multi-select checked />
-        <GroupCard label="Production" :count="12" /><GroupCard label="Drop target" :count="1" drop-target />
+        <GroupCard label="Production" :hosts="12" :groups="2" /><GroupCard label="Drop target" :hosts="1" drop-target />
       </div>
       <KeyCard label="deploy-ed25519" type="ED25519" fingerprint="SHA256:3b0c2f4d9a1e8c7f5b6a0d2e4c8f1a3b5d7e9f0a2c4" passphrase-saved />
       <div class="flex flex-col gap-2">

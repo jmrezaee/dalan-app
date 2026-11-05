@@ -1,7 +1,7 @@
 // The only place that talks to Rust. Stores call these wrappers, never `invoke` directly.
 import { Channel } from '@tauri-apps/api/core'
 import { commands } from '~/types/bindings'
-import type { AppError, HostInput, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
+import type { AppError, GroupInput, HostInput, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -33,6 +33,9 @@ export function useTauri() {
     hostGet: (id: string) => unwrap(commands.hostGet(id)),
     hostSave: (input: HostInput) => unwrap(commands.hostSave(input)),
     hostDelete: (id: string) => unwrap(commands.hostDelete(id)),
+    groupSave: (input: GroupInput) => unwrap(commands.groupSave(input)),
+    groupDelete: (id: string) => unwrap(commands.groupDelete(id)),
+    hostsMove: (ids: string[], groupId: string | null) => unwrap(commands.hostsMove(ids, groupId)),
     /** Terminal output arrives as raw bytes on its own channel (an ArrayBuffer, not JSON). */
     sessionOpen: (hostId: string, cols: number, rows: number, onEvent: (e: SessionEvent) => void, onData: (b: Uint8Array) => void) => {
       const events = new Channel<SessionEvent>()

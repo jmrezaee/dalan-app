@@ -2,6 +2,7 @@ pub mod commands;
 pub mod db;
 pub mod error;
 pub mod events;
+pub mod groups;
 pub mod hosts;
 pub mod import;
 pub mod keys;
@@ -34,6 +35,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::hosts::host_get,
             commands::hosts::host_save,
             commands::hosts::host_delete,
+            commands::hosts::group_save,
+            commands::hosts::group_delete,
+            commands::hosts::hosts_move,
             commands::session::session_open,
             commands::session::session_write,
             commands::session::session_resize,

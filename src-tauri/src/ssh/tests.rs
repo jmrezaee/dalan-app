@@ -127,6 +127,8 @@ async fn harness(saved_password: Option<&str>) -> Harness {
                     username: Some("test".into()),
                     password: pw,
                     clear_password: false,
+                    group_id: None,
+                    tags: vec![],
                 },
             )
         })
@@ -404,6 +406,8 @@ async fn unreachable_host_reports_host_unreachable() {
                     username: Some("test".into()),
                     password: None,
                     clear_password: false,
+                    group_id: None,
+                    tags: vec![],
                 },
             )
         })
@@ -437,6 +441,8 @@ async fn docker_openssh_server_runs_a_real_shell() {
                     username: Some("test".into()),
                     password: Some("test".into()),
                     clear_password: false,
+                    group_id: None,
+                    tags: vec![],
                 },
             )
         })

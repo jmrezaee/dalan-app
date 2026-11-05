@@ -83,7 +83,7 @@ export const useSessionsStore = defineStore('sessions', () => {
       id: '',
       hostId: host.id,
       label: host.label,
-      address: `${host.address}:${host.port ?? 22}`,
+      address: `${host.address}:${host.effective_port}`,
       status: 'connecting',
       prompt: null,
       error: null,

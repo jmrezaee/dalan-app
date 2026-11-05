@@ -4,10 +4,10 @@ Horizontal tab bar with Vault and SFTP fixed tabs,shell,must,yes,no,S01
 Tab status dots (unread / needs input / error),shell,must,yes,no,S01 S19
 Hosts list with grid/list view and search,hosts,must,yes,yes,S02
 Create and edit host (address port username password),hosts,must,yes,yes,S03
-Nested groups,hosts,must,yes,no,S04
-Per-field inheritance from parent groups,hosts,must,yes,no,source 3; resolve up the parent chain per field
-Tags with filter,hosts,must,yes,no,S02 S03
-Drag hosts into groups,hosts,must,yes,no,F04
+Nested groups,hosts,must,yes,yes,S04
+Per-field inheritance from parent groups,hosts,must,yes,yes,source 3; resolve up the parent chain per field
+Tags with filter,hosts,must,yes,yes,S02 S03
+Drag hosts into groups,hosts,must,yes,yes,F04
 Generate SSH key (Ed25519 ECDSA RSA),keychain,must,yes,no,S06
 Import private key (paste / drop / file) with passphrase,keychain,must,yes,no,S06
 Save passphrase toggle (else prompt each connect),keychain,must,yes,no,source 7

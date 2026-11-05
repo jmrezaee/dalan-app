@@ -3,6 +3,7 @@
 use tauri::State;
 
 use crate::error::AppResult;
+use crate::groups::{self, GroupInput, GroupSummary};
 use crate::hosts::{self, HostInput, HostSummary, HostsTree};
 use crate::state::AppState;
 
@@ -42,5 +43,34 @@ pub async fn host_delete(state: State<'_, AppState>, id: String) -> AppResult<()
     }
     state
         .with_db_session(move |c, s| hosts::delete(c, s, &id))
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn group_save(state: State<'_, AppState>, input: GroupInput) -> AppResult<GroupSummary> {
+    state
+        .with_db_session(move |c, s| groups::save(c, s, &input))
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn group_delete(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    state
+        .with_db_session(move |c, s| groups::delete(c, s, &id))
+        .await
+}
+
+/// F04: drag hosts into a group (`group_id: null` = the top level).
+#[tauri::command]
+#[specta::specta]
+pub async fn hosts_move(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+    group_id: Option<String>,
+) -> AppResult<()> {
+    state
+        .with_db_session(move |c, s| groups::move_hosts(c, &s.vault_id, &ids, group_id.as_deref()))
         .await
 }

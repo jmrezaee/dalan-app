@@ -20,12 +20,13 @@ defineProps<{
   /** Row layout (h 44) for the list view. */
   list?: boolean
 }>()
-defineEmits<{ open: []; select: []; edit: []; delete: [] }>()
+defineEmits<{ open: []; select: []; edit: []; delete: []; dragstart: [event: DragEvent]; dragend: [] }>()
 </script>
 
 <template>
   <div
     role="row"
+    draggable="true"
     tabindex="0"
     :aria-selected="selected"
     :class="cn(
@@ -34,6 +35,8 @@ defineEmits<{ open: []; select: []; edit: []; delete: [] }>()
       selected && 'ring-2 ring-accent',
       dragging && 'opacity-50',
     )"
+    @dragstart="$emit('dragstart', $event)"
+    @dragend="$emit('dragend')"
     @click="$emit('select')"
     @dblclick="$emit('open')"
     @keydown.enter="$emit('open')"

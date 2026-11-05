@@ -23,6 +23,10 @@ export const commands = {
 	/**  Creates when `input.id` is `None`, otherwise updates. The password goes straight into `secrets`. */
 	hostSave: (input: HostInput_Deserialize) => typedError<HostSummary_Serialize, AppError>(__TAURI_INVOKE("host_save", { input })),
 	hostDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("host_delete", { id })),
+	groupSave: (input: GroupInput_Deserialize) => typedError<GroupSummary_Serialize, AppError>(__TAURI_INVOKE("group_save", { input })),
+	groupDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("group_delete", { id })),
+	/**  F04: drag hosts into a group (`group_id: null` = the top level). */
+	hostsMove: (ids: string[], groupId: string | null) => typedError<null, AppError>(__TAURI_INVOKE("hosts_move", { ids, groupId })),
 	/**  Opens a tab's connection. Returns at once; progress arrives on `events`, terminal output on `data`. */
 	sessionOpen: (hostId: string, cols: number, rows: number, events: Channel<SessionEvent_Deserialize>, data: Channel<RawBytes>) => typedError<SessionOpened, AppError>(__TAURI_INVOKE("session_open", { hostId, cols, rows, events, data })),
 	sessionWrite: (sessionId: string, data: number[]) => typedError<null, AppError>(__TAURI_INVOKE("session_write", { sessionId, data })),
@@ -62,18 +66,56 @@ export type AutoLockWarning = {
 /**  Codes from replica/architecture.md. Add new ones there first. */
 export type ErrorCode = "locked" | "wrong_password" | "too_many_attempts" | "not_found" | "validation" | "in_use" | "auth_failed" | "host_unreachable" | "host_key_changed" | "kex_failed" | "port_in_use" | "permission_denied" | "internal";
 
+export type GroupInput = GroupInput_Serialize | GroupInput_Deserialize;
+
+export type GroupInput_Deserialize = {
+	id?: string | null,
+	parent_id?: string | null,
+	label: string,
+	port?: number | null,
+	username?: string | null,
+	password?: string | null,
+	clear_password: boolean,
+};
+
+export type GroupInput_Serialize = {
+	id: string | null,
+	parent_id: string | null,
+	label: string,
+	port: number | null,
+	username: string | null,
+	password: string | null,
+	clear_password: boolean,
+};
+
 export type GroupSummary = GroupSummary_Serialize | GroupSummary_Deserialize;
 
 export type GroupSummary_Deserialize = {
 	id: string,
 	parent_id?: string | null,
 	label: string,
+	username?: string | null,
+	port?: number | null,
+	has_password: boolean,
+	/**  Hosts in this group and everything below it. */
+	host_count: number,
+	group_count: number,
+	/**  What the group gets from its own ancestors. */
+	inherited: Inherited_Deserialize,
 };
 
 export type GroupSummary_Serialize = {
 	id: string,
 	parent_id: string | null,
 	label: string,
+	username: string | null,
+	port: number | null,
+	has_password: boolean,
+	/**  Hosts in this group and everything below it. */
+	host_count: number,
+	group_count: number,
+	/**  What the group gets from its own ancestors. */
+	inherited: Inherited_Serialize,
 };
 
 /**  Create and update share one shape. `id` is `None` to create. */
@@ -90,6 +132,9 @@ export type HostInput_Deserialize = {
 	password?: string | null,
 	/**  Removes the saved password (only used on update). */
 	clear_password: boolean,
+	group_id?: string | null,
+	/**  Tag names. Missing tags are created, and tags no host uses any more are removed. */
+	tags: string[],
 };
 
 /**  Create and update share one shape. `id` is `None` to create. */
@@ -103,35 +148,56 @@ export type HostInput_Serialize = {
 	password: string | null,
 	/**  Removes the saved password (only used on update). */
 	clear_password: boolean,
+	group_id: string | null,
+	/**  Tag names. Missing tags are created, and tags no host uses any more are removed. */
+	tags: string[],
 };
 
-/**  What the list needs to draw a card. No secret, only the `has_password` flag. */
+/**  What the list needs to draw a card. No secret, only `has_password` flags. */
 export type HostSummary = HostSummary_Serialize | HostSummary_Deserialize;
 
-/**  What the list needs to draw a card. No secret, only the `has_password` flag. */
+/**  What the list needs to draw a card. No secret, only `has_password` flags. */
 export type HostSummary_Deserialize = {
 	id: string,
 	label: string,
 	address: string,
-	/**  `None` = the default (22). Shown as a placeholder in the editor. */
+	/**  The host's own port. `None` = inherit (from its group, else 22). */
 	port?: number | null,
+	/**  The host's own username. `None` = inherit. */
 	username?: string | null,
+	/**  The host has its own saved password. */
 	has_password: boolean,
 	group_id?: string | null,
+	tags: string[],
+	/**  What actually gets used after inheritance. Cards show these. */
+	effective_username?: string | null,
+	effective_port: number,
+	effective_has_password: boolean,
+	/**  What the host would get from its groups if it set nothing itself ("from Production"). */
+	inherited: Inherited_Deserialize,
 	/**  Epoch ms. Fits a JS number safely, so it is exported as `number` rather than bigint. */
 	last_connected_at?: number | null,
 };
 
-/**  What the list needs to draw a card. No secret, only the `has_password` flag. */
+/**  What the list needs to draw a card. No secret, only `has_password` flags. */
 export type HostSummary_Serialize = {
 	id: string,
 	label: string,
 	address: string,
-	/**  `None` = the default (22). Shown as a placeholder in the editor. */
+	/**  The host's own port. `None` = inherit (from its group, else 22). */
 	port: number | null,
+	/**  The host's own username. `None` = inherit. */
 	username: string | null,
+	/**  The host has its own saved password. */
 	has_password: boolean,
 	group_id: string | null,
+	tags: string[],
+	/**  What actually gets used after inheritance. Cards show these. */
+	effective_username: string | null,
+	effective_port: number,
+	effective_has_password: boolean,
+	/**  What the host would get from its groups if it set nothing itself ("from Production"). */
+	inherited: Inherited_Serialize,
 	/**  Epoch ms. Fits a JS number safely, so it is exported as `number` rather than bigint. */
 	last_connected_at: number | null,
 };
@@ -146,6 +212,36 @@ export type HostsTree_Deserialize = {
 export type HostsTree_Serialize = {
 	groups: GroupSummary_Serialize[],
 	hosts: HostSummary_Serialize[],
+};
+
+/**  What this item would get if it set nothing itself. Drives the "from Production" hints. */
+export type Inherited = Inherited_Serialize | Inherited_Deserialize;
+
+export type InheritedPort = {
+	value: number,
+	group: string,
+};
+
+export type InheritedText = {
+	value: string,
+	/**  Label of the group the value comes from. */
+	group: string,
+};
+
+/**  What this item would get if it set nothing itself. Drives the "from Production" hints. */
+export type Inherited_Deserialize = {
+	username?: InheritedText | null,
+	port?: InheritedPort | null,
+	/**  Group label, when a password is inherited. The password itself never leaves Rust. */
+	password?: string | null,
+};
+
+/**  What this item would get if it set nothing itself. Drives the "from Production" hints. */
+export type Inherited_Serialize = {
+	username: InheritedText | null,
+	port: InheritedPort | null,
+	/**  Group label, when a password is inherited. The password itself never leaves Rust. */
+	password: string | null,
 };
 
 export type KnownHost = KnownHost_Serialize | KnownHost_Deserialize;
