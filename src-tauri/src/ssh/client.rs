@@ -47,6 +47,8 @@ pub struct Client {
     label: String,
     pattern: String,
     rejected: Arc<Mutex<Option<Rejected>>>,
+    /// Set for a remote (`-R`) forward: where connections the server sends us should go.
+    remote: Option<Arc<crate::tunnels::RemoteHook>>,
 }
 
 impl Client {
@@ -60,6 +62,34 @@ impl Client {
 
 impl Handler for Client {
     type Error = russh::Error;
+
+    /// Remote forward: the server accepted a connection on its listening port and hands it to us.
+    /// We connect to the local destination and pipe the two together. Without a hook, refuse.
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        channel: russh::Channel<russh::client::Msg>,
+        _connected_address: &str,
+        _connected_port: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: russh::client::ChannelOpenHandle,
+        _session: &mut russh::client::Session,
+    ) -> Result<(), Self::Error> {
+        let Some(hook) = self.remote.clone() else {
+            return Ok(()); // dropping `reply` rejects the channel
+        };
+        if let Ok(tcp) =
+            tokio::net::TcpStream::connect((hook.dest_address.as_str(), hook.dest_port)).await
+        {
+            reply.accept().await;
+            tokio::spawn(crate::tunnels::pipe(
+                tcp,
+                channel.into_stream(),
+                Arc::clone(&hook.open),
+            ));
+        }
+        Ok(())
+    }
 
     /// F01 / F12. Known key: continue. Unknown: ask, and trust only on a yes. Changed: block
     /// unless the user explicitly replaces the saved key.
@@ -153,6 +183,7 @@ fn closed<T>(io: &SessionIo) -> Option<T> {
 
 /// One SSH handshake over any byte stream (a TCP socket, or a channel through a jump host), then sign in.
 /// The host-key prompt happens inside `connect_stream`; sign-in failures are reported through `io`.
+#[allow(clippy::too_many_arguments)] // one call site per hop; a struct would just move the list
 async fn handshake<R>(
     stream: R,
     store: &Store,
@@ -161,6 +192,7 @@ async fn handshake<R>(
     info: &hosts::ConnectInfo,
     user: &str,
     pattern: &str,
+    remote: Option<Arc<crate::tunnels::RemoteHook>>,
 ) -> Option<client::Handle<Client>>
 where
     R: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
@@ -173,6 +205,7 @@ where
         label: info.label.clone(),
         pattern: pattern.to_string(),
         rejected: Arc::clone(&rejected),
+        remote,
     };
     let config = Arc::new(client::Config {
         // Detect dead links (F11): 3 missed keepalives, 30 s apart.
@@ -218,6 +251,7 @@ pub async fn connect_authenticated(
     io: &Arc<SessionIo>,
     prompts: &Arc<Prompts>,
     host_id: &str,
+    remote: Option<Arc<crate::tunnels::RemoteHook>>,
 ) -> Option<Connected> {
     emit_state(io, SessionState::Connecting);
 
@@ -267,7 +301,17 @@ pub async fn connect_authenticated(
                         )
                     }
                 };
-                handshake(ch.into_stream(), store, io, prompts, info, &user, &pattern).await?
+                handshake(
+                    ch.into_stream(),
+                    store,
+                    io,
+                    prompts,
+                    info,
+                    &user,
+                    &pattern,
+                    remote.clone().filter(|_| i == last),
+                )
+                .await?
             }
             None => {
                 let tcp = match timeout(
@@ -293,7 +337,17 @@ pub async fn connect_authenticated(
                     }
                 };
                 let _ = tcp.set_nodelay(true);
-                handshake(tcp, store, io, prompts, info, &user, &pattern).await?
+                handshake(
+                    tcp,
+                    store,
+                    io,
+                    prompts,
+                    info,
+                    &user,
+                    &pattern,
+                    remote.clone().filter(|_| i == last),
+                )
+                .await?
             }
         };
         if i == last {
@@ -488,7 +542,7 @@ pub async fn run(
     p: Params,
     mut cmds: mpsc::UnboundedReceiver<Cmd>,
 ) {
-    let Some(conn) = connect_authenticated(&store, &io, &prompts, &p.host_id).await else {
+    let Some(conn) = connect_authenticated(&store, &io, &prompts, &p.host_id, None).await else {
         return;
     };
 
@@ -618,7 +672,7 @@ pub async fn run_export(
         Ok(k) => k,
         Err(e) => return emit_error(&io, e.code, e.message),
     };
-    let Some(conn) = connect_authenticated(&store, &io, &prompts, &host_id).await else {
+    let Some(conn) = connect_authenticated(&store, &io, &prompts, &host_id, None).await else {
         return;
     };
     // Absolute paths stay as typed; `~/x` becomes "$HOME/x".

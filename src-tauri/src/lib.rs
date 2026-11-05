@@ -50,6 +50,12 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::session::known_hosts_list,
             commands::session::known_host_delete,
             commands::session::key_export_to_host,
+            commands::tunnels::forwards_list,
+            commands::tunnels::forward_save,
+            commands::tunnels::forward_delete,
+            commands::tunnels::forward_start,
+            commands::tunnels::forward_stop,
+            commands::tunnels::forward_respond,
             commands::snippets::snippets_list,
             commands::snippets::snippet_save,
             commands::snippets::snippet_delete,
@@ -68,7 +74,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
         ])
         .events(collect_events![
             events::VaultLocked,
-            events::AutoLockWarning
+            events::AutoLockWarning,
+            events::TunnelChanged
         ])
 }
 

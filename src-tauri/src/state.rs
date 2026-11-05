@@ -79,6 +79,8 @@ pub struct AppState {
     pub warned: AtomicBool,
     /// Live SSH sessions (P4). Closed when the vault locks.
     pub sessions: crate::ssh::SessionManager,
+    /// Running port-forward rules (P9). Stopped when the vault locks.
+    pub tunnels: crate::tunnels::TunnelManager,
 }
 
 impl AppState {
@@ -90,6 +92,7 @@ impl AppState {
             last_activity: AtomicI64::new(now_ms()),
             warned: AtomicBool::new(false),
             sessions: crate::ssh::SessionManager::default(),
+            tunnels: crate::tunnels::TunnelManager::default(),
         }
     }
 
@@ -139,6 +142,7 @@ impl AppState {
         }
         if locking {
             self.sessions.close_all(); // locking ends every live session
+            self.tunnels.stop_all(); // ...and every tunnel
         }
         self.touch();
     }

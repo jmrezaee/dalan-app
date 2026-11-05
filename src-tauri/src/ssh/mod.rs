@@ -5,7 +5,7 @@
 
 mod client;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -18,7 +18,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::state::Store;
 
-pub use client::run;
+pub use client::{connect_authenticated, run, Connected};
 
 #[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "snake_case")]
@@ -117,14 +117,34 @@ pub enum Cmd {
 const PROMPT_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Prompts waiting for an answer, by id.
-#[derive(Default)]
 pub struct Prompts {
     pending: Mutex<HashMap<String, oneshot::Sender<PromptAnswer>>>,
+    /// False for background work (tunnel autostart): nobody is there to answer, so `ask` says no at once.
+    interactive: bool,
+}
+
+impl Default for Prompts {
+    fn default() -> Self {
+        Prompts {
+            pending: Mutex::default(),
+            interactive: true,
+        }
+    }
 }
 
 impl Prompts {
+    pub fn non_interactive() -> Self {
+        Prompts {
+            pending: Mutex::default(),
+            interactive: false,
+        }
+    }
+
     /// Emits the prompt and waits. `None` = cancelled, timed out, or the session ended.
     pub async fn ask(&self, io: &SessionIo, kind: PromptKind) -> Option<PromptAnswer> {
+        if !self.interactive {
+            return None;
+        }
         let id = uuid::Uuid::now_v7().to_string();
         let (tx, rx) = oneshot::channel();
         self.pending.lock().ok()?.insert(id.clone(), tx);
@@ -154,6 +174,10 @@ impl Prompts {
     }
 
     /// Dropping the senders makes every waiting `ask` return `None`.
+    pub fn cancel_all_pub(&self) {
+        self.cancel_all();
+    }
+
     fn cancel_all(&self) {
         if let Ok(mut p) = self.pending.lock() {
             p.clear();

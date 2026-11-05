@@ -51,13 +51,18 @@ pub async fn vault_create(state: State<'_, AppState>, master_password: String) -
 /// Verify the password, hold the key in memory. Five wrong tries start a 30 second cooldown.
 #[tauri::command]
 #[specta::specta]
-pub async fn vault_unlock(state: State<'_, AppState>, master_password: String) -> AppResult<()> {
+pub async fn vault_unlock(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    master_password: String,
+) -> AppResult<()> {
     state.check_cooldown()?;
     let pw = Zeroizing::new(master_password);
     match state.with_db(move |c| vault::unlock(c, &pw)).await {
         Ok(session) => {
             state.reset_failures();
             state.set_session(Some(session));
+            super::tunnels::autostart(&app, &state).await; // rules marked "start when Dalan unlocks"
             Ok(())
         }
         Err(e) => {

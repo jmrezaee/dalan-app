@@ -23,3 +23,12 @@ pub struct VaultLocked {
 pub struct AutoLockWarning {
     pub seconds_left: u32,
 }
+
+/// A port-forward rule changed state or connection count (S09).
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct TunnelChanged {
+    pub id: String,
+    pub state: crate::tunnels::TunnelState,
+    pub connections: u32,
+    pub error: Option<String>,
+}

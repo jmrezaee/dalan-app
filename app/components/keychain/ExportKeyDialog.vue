@@ -1,11 +1,10 @@
 <script setup lang="ts">
 // S08: install a key's public half on a server, then link the key to that host. Host-key and
 // password questions come up inside this dialog, the same ones a terminal tab would ask.
-import { CircleAlert, Check, LoaderCircle, ShieldAlert } from '@lucide/vue'
+import { CircleAlert, Check, LoaderCircle } from '@lucide/vue'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
-import { Checkbox } from '@/components/ui/checkbox'
 import type { KeySummary, PromptKind, SessionEvent } from '~/types/bindings'
 import { useTauri } from '~/composables/useTauri'
 
@@ -19,7 +18,6 @@ const phase = ref<'idle' | 'running' | 'done' | 'error'>('idle')
 const step = ref('')
 const message = ref('')
 const prompt = ref<{ id: string, kind: PromptKind } | null>(null)
-const answer = reactive({ text: '', remember: false })
 let sessionId = ''
 
 watch(open, (o) => {
@@ -41,8 +39,6 @@ function onEvent(e: SessionEvent) {
   }
   else if (e.type === 'prompt') {
     prompt.value = { id: e.prompt_id, kind: e.kind }
-    answer.text = ''
-    answer.remember = false
   }
   else if (e.type === 'error') {
     phase.value = 'error'
@@ -69,18 +65,16 @@ async function start() {
   }
 }
 
-async function reply(accept: boolean) {
+async function reply(accept: boolean, text: string | null, remember: boolean) {
   const p = prompt.value
   if (!p) return
   prompt.value = null
-  await api.sessionRespond(sessionId, p.id, { accept, text: answer.text || null, remember: answer.remember }).catch(() => {})
-  answer.text = ''
+  await api.sessionRespond(sessionId, p.id, { accept, text, remember }).catch(() => {})
 }
 function close() {
   if (phase.value === 'running') api.sessionClose(sessionId)
   open.value = false
 }
-const askingSecret = computed(() => prompt.value?.kind.type === 'password' || prompt.value?.kind.type === 'passphrase')
 </script>
 
 <template>
@@ -104,23 +98,7 @@ const askingSecret = computed(() => prompt.value?.kind.type === 'password' || pr
         </div>
 
         <div v-if="phase !== 'idle'" class="flex flex-col gap-2 rounded-md border border-border bg-surface p-3 text-xs" aria-live="polite">
-          <template v-if="prompt?.kind.type === 'host_key_new'">
-            <span class="flex items-center gap-2 text-warning"><ShieldAlert class="size-4" />First time connecting to {{ hostLabel }}</span>
-            <span class="text-muted">Check that this fingerprint matches the server:</span>
-            <code class="break-all rounded bg-bg px-2 py-1 font-mono">{{ prompt.kind.fingerprint }}</code>
-            <div class="flex justify-end gap-2"><Button type="button" size="sm" variant="secondary" @click="reply(false)">Cancel</Button><Button type="button" size="sm" @click="reply(true)">Trust and connect</Button></div>
-          </template>
-          <template v-else-if="prompt?.kind.type === 'host_key_changed'">
-            <span class="flex items-center gap-2 text-danger"><ShieldAlert class="size-4" />This server's identity changed</span>
-            <span class="text-muted">That can happen after a reinstall, or it can mean someone is intercepting the connection. Open the host in a tab to review it.</span>
-            <div class="flex justify-end"><Button type="button" size="sm" @click="reply(false)">Close</Button></div>
-          </template>
-          <template v-else-if="askingSecret">
-            <span class="text-sm">{{ prompt?.kind.type === 'passphrase' ? `Passphrase for ${prompt.kind.key_label}` : 'Password' }}</span>
-            <PasswordInput id="exp-secret" v-model="answer.text" />
-            <label class="flex items-center gap-2"><Checkbox v-model="answer.remember" />Remember it on this computer</label>
-            <div class="flex justify-end gap-2"><Button type="button" size="sm" variant="secondary" @click="reply(false)">Cancel</Button><Button type="button" size="sm" @click="reply(true)">Continue</Button></div>
-          </template>
+          <PromptPanel v-if="prompt" :kind="prompt.kind" :host="hostLabel" @reply="reply" />
           <span v-else-if="phase === 'running'" class="flex items-center gap-2"><LoaderCircle class="size-3.5 animate-spin text-accent" />{{ step }}</span>
           <template v-else-if="phase === 'done'">
             <span class="flex items-center gap-2 text-success"><Check class="size-3.5" />Key added (folder 700, file 600)</span>

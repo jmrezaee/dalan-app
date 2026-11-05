@@ -1,7 +1,7 @@
 // The only place that talks to Rust. Stores call these wrappers, never `invoke` directly.
 import { Channel } from '@tauri-apps/api/core'
 import { commands } from '~/types/bindings'
-import type { AppError, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, KeyUpdate, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
+import type { AppError, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, KeyUpdate, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -50,6 +50,17 @@ export function useTauri() {
     sessionRespond: (id: string, promptId: string, answer: PromptAnswer) => unwrap(commands.sessionRespond(id, promptId, answer)),
     sessionClose: (id: string) => commands.sessionClose(id),
     sessionReconnect: (id: string) => unwrap(commands.sessionReconnect(id)),
+    forwardsList: () => unwrap(commands.forwardsList()),
+    forwardSave: (input: ForwardInput) => unwrap(commands.forwardSave(input)),
+    forwardDelete: (id: string) => unwrap(commands.forwardDelete(id)),
+    /** Host-key and password questions arrive on `onEvent`; answer with `forwardRespond`. */
+    forwardStart: (id: string, onEvent: (e: SessionEvent) => void) => {
+      const events = new Channel<SessionEvent>()
+      events.onmessage = onEvent
+      return unwrap(commands.forwardStart(id, events as never))
+    },
+    forwardStop: (id: string) => commands.forwardStop(id),
+    forwardRespond: (id: string, promptId: string, answer: PromptAnswer) => unwrap(commands.forwardRespond(id, promptId, answer)),
     snippetsList: () => unwrap(commands.snippetsList()),
     snippetSave: (input: SnippetInput) => unwrap(commands.snippetSave(input)),
     snippetDelete: (id: string) => unwrap(commands.snippetDelete(id)),

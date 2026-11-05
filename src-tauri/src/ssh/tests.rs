@@ -21,13 +21,13 @@ use crate::vault::{self, kdf::KdfParams};
 
 /// Shared knobs for the test server: which public key it accepts, and the commands it was asked to run.
 #[derive(Clone, Default)]
-struct TestServer {
-    accepted_key: Arc<std::sync::Mutex<Option<String>>>,
-    execs: Arc<std::sync::Mutex<Vec<String>>>,
+pub(crate) struct TestServer {
+    pub(crate) accepted_key: Arc<std::sync::Mutex<Option<String>>>,
+    pub(crate) execs: Arc<std::sync::Mutex<Vec<String>>>,
     /// Targets this server was asked to forward to (direct-tcpip), i.e. hops made through it.
-    forwards: Arc<std::sync::Mutex<Vec<String>>>,
+    pub(crate) forwards: Arc<std::sync::Mutex<Vec<String>>>,
     /// Channels that carry forwarded traffic: their data belongs to the tunnel, not to our echo shell.
-    tunnel_channels: Arc<std::sync::Mutex<Vec<ChannelId>>>,
+    pub(crate) tunnel_channels: Arc<std::sync::Mutex<Vec<ChannelId>>>,
 }
 
 impl server::Server for TestServer {
@@ -82,6 +82,45 @@ impl server::Handler for TestServer {
             Err(_) => drop(reply), // dropping the handle rejects the channel
         }
         Ok(())
+    }
+    /// Remote forwards (`-R`): listen locally and hand each connection back to the client.
+    async fn tcpip_forward(
+        &mut self,
+        address: &str,
+        port: &mut u32,
+        session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        let Ok(listener) = TcpListener::bind((address, *port as u16)).await else {
+            return Ok(false);
+        };
+        *port = u32::from(listener.local_addr().map(|a| a.port()).unwrap_or(0));
+        let (handle, addr, p, tunnels) = (
+            session.handle(),
+            address.to_string(),
+            *port,
+            self.tunnel_channels.clone(),
+        );
+        tokio::spawn(async move {
+            while let Ok((mut tcp, peer)) = listener.accept().await {
+                let (handle, addr, tunnels) = (handle.clone(), addr.clone(), tunnels.clone());
+                tokio::spawn(async move {
+                    if let Ok(ch) = handle
+                        .channel_open_forwarded_tcpip(
+                            addr,
+                            p,
+                            peer.ip().to_string(),
+                            u32::from(peer.port()),
+                        )
+                        .await
+                    {
+                        tunnels.lock().unwrap().push(ch.id());
+                        let mut stream = ch.into_stream();
+                        let _ = tokio::io::copy_bidirectional(&mut stream, &mut tcp).await;
+                    }
+                });
+            }
+        });
+        Ok(true)
     }
     async fn exec_request(
         &mut self,
@@ -142,7 +181,7 @@ impl server::Handler for TestServer {
     }
 }
 
-async fn start_server(srv: TestServer) -> u16 {
+pub(crate) async fn start_server(srv: TestServer) -> u16 {
     let config = Arc::new(server::Config {
         keys: vec![russh::keys::PrivateKey::random(
             &mut rand::rng(),
@@ -162,15 +201,15 @@ async fn start_server(srv: TestServer) -> u16 {
     port
 }
 
-struct Harness {
-    state: AppState,
-    host_id: String,
-    port: u16,
-    server: TestServer,
+pub(crate) struct Harness {
+    pub(crate) state: AppState,
+    pub(crate) host_id: String,
+    pub(crate) port: u16,
+    pub(crate) server: TestServer,
 }
 
 /// A fresh unlocked vault with one host pointing at a new test server.
-async fn harness(saved_password: Option<&str>) -> Harness {
+pub(crate) async fn harness(saved_password: Option<&str>) -> Harness {
     let conn = open_in_memory().unwrap();
     let session = vault::create(&conn, "correct-horse-staple", KdfParams::cheap()).unwrap();
     let state = AppState::new(conn);
@@ -911,7 +950,7 @@ async fn docker_f02_install_key_then_connect_key_only() {
 
 // ------------------------------------------------------------------ jump hosts (F05) and startup snippets
 
-fn host_input(label: &str, port: u16, group: Option<&str>) -> HostInput {
+pub(crate) fn host_input(label: &str, port: u16, group: Option<&str>) -> HostInput {
     HostInput {
         id: None,
         label: label.into(),

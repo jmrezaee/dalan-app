@@ -27,7 +27,7 @@ Jump host / host chain,hosts,must,yes,yes,F05; free in Termius since 10.1.0
 Startup snippet per host,hosts,must,yes,yes,source 10
 Snippets with packages,snippets,must,yes,yes,S11 S12
 Run snippet in current session from side panel,snippets,must,yes,yes,S20
-Local / remote / dynamic port forwarding rules with start-stop,port forwarding,must,yes,no,S09 S10 F06
+Local / remote / dynamic port forwarding rules with start-stop,port forwarding,must,yes,yes,S09 S10 F06
 SFTP dual pane (local or host on each side),sftp,must,yes,no,S21
 SFTP drag-and-drop transfers with progress,sftp,must,yes,no,S21 S22 F07
 SFTP rename delete new folder hidden files typed path,sftp,must,yes,no,S21; rename/delete not in Termius docs but expected

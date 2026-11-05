@@ -43,6 +43,13 @@ export const commands = {
 	 *  (host key, password) arrive on `events`, and answers go to `session_respond`.
 	 */
 	keyExportToHost: (keyId: string, hostId: string, dir: string, fileName: string, events: Channel<SessionEvent_Deserialize>) => typedError<SessionOpened, AppError>(__TAURI_INVOKE("key_export_to_host", { keyId, hostId, dir, fileName, events })),
+	forwardsList: () => typedError<ForwardSummary_Serialize[], AppError>(__TAURI_INVOKE("forwards_list")),
+	forwardSave: (input: ForwardInput_Deserialize) => typedError<ForwardSummary_Serialize, AppError>(__TAURI_INVOKE("forward_save", { input })),
+	forwardDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("forward_delete", { id })),
+	/**  Starts a rule. Host-key and password questions arrive on `events` (answer with `forward_respond`). */
+	forwardStart: (id: string, events: Channel<SessionEvent_Deserialize>) => typedError<null, AppError>(__TAURI_INVOKE("forward_start", { id, events })),
+	forwardStop: (id: string) => __TAURI_INVOKE<void>("forward_stop", { id }),
+	forwardRespond: (id: string, promptId: string, answer: PromptAnswer_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("forward_respond", { id, promptId, answer })),
 	snippetsList: () => typedError<SnippetsAll_Serialize, AppError>(__TAURI_INVOKE("snippets_list")),
 	snippetSave: (input: SnippetInput_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("snippet_save", { input })),
 	snippetDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("snippet_delete", { id })),
@@ -67,6 +74,7 @@ export const commands = {
 /** Events */
 export const events = {
 	autoLockWarning: makeEvent<AutoLockWarning, AutoLockWarning>("auto-lock-warning"),
+	tunnelChanged: makeEvent<TunnelChanged_Serialize, TunnelChanged_Deserialize>("tunnel-changed"),
 	vaultLocked: makeEvent<VaultLocked, VaultLocked>("vault-locked"),
 };
 
@@ -93,6 +101,74 @@ export type ErrorCode = "locked" | "wrong_password" | "too_many_attempts" |
 "needs_passphrase" | 
 /**  The text isn't a private key we can read. */
 "invalid_key" | "not_found" | "validation" | "in_use" | "auth_failed" | "host_unreachable" | "host_key_changed" | "kex_failed" | "port_in_use" | "permission_denied" | "internal";
+
+export type ForwardInput = ForwardInput_Serialize | ForwardInput_Deserialize;
+
+export type ForwardInput_Deserialize = {
+	id?: string | null,
+	host_id: string,
+	label: string,
+	kind: ForwardKind,
+	bind_address: string,
+	bind_port: number,
+	dest_address?: string | null,
+	dest_port?: number | null,
+	autostart: boolean,
+};
+
+export type ForwardInput_Serialize = {
+	id: string | null,
+	host_id: string,
+	label: string,
+	kind: ForwardKind,
+	bind_address: string,
+	bind_port: number,
+	dest_address: string | null,
+	dest_port: number | null,
+	autostart: boolean,
+};
+
+export type ForwardKind = 
+/**  `-L`: a port on this computer reaches a destination on the server's network. */
+"local" | 
+/**  `-R`: a port on the server reaches a destination on this computer. */
+"remote" | 
+/**  `-D`: a SOCKS5 proxy on this computer, exiting on the server. */
+"dynamic";
+
+export type ForwardSummary = ForwardSummary_Serialize | ForwardSummary_Deserialize;
+
+export type ForwardSummary_Deserialize = {
+	id: string,
+	host_id: string,
+	host_label: string,
+	label: string,
+	kind: ForwardKind,
+	bind_address: string,
+	bind_port: number,
+	dest_address?: string | null,
+	dest_port?: number | null,
+	autostart: boolean,
+	state: TunnelState,
+	connections: number,
+	error?: string | null,
+};
+
+export type ForwardSummary_Serialize = {
+	id: string,
+	host_id: string,
+	host_label: string,
+	label: string,
+	kind: ForwardKind,
+	bind_address: string,
+	bind_port: number,
+	dest_address: string | null,
+	dest_port: number | null,
+	autostart: boolean,
+	state: TunnelState,
+	connections: number,
+	error: string | null,
+};
 
 export type GenerateInput = GenerateInput_Serialize | GenerateInput_Deserialize;
 
@@ -603,6 +679,27 @@ export type SnippetsAll_Serialize = {
 	packages: PackageSummary[],
 	snippets: SnippetSummary_Serialize[],
 };
+
+/**  A port-forward rule changed state or connection count (S09). */
+export type TunnelChanged = TunnelChanged_Serialize | TunnelChanged_Deserialize;
+
+/**  A port-forward rule changed state or connection count (S09). */
+export type TunnelChanged_Deserialize = {
+	id: string,
+	state: TunnelState,
+	connections: number,
+	error?: string | null,
+};
+
+/**  A port-forward rule changed state or connection count (S09). */
+export type TunnelChanged_Serialize = {
+	id: string,
+	state: TunnelState,
+	connections: number,
+	error: string | null,
+};
+
+export type TunnelState = "stopped" | "starting" | "active" | "reconnecting" | "error";
 
 export type VaultLocked = {
 	reason: LockReason,

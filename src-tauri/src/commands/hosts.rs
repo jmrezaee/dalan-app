@@ -35,10 +35,10 @@ pub async fn host_save(state: State<'_, AppState>, input: HostInput) -> AppResul
 #[tauri::command]
 #[specta::specta]
 pub async fn host_delete(state: State<'_, AppState>, id: String) -> AppResult<()> {
-    if state.sessions.has_live_session_for(&id) {
+    if state.sessions.has_live_session_for(&id) || state.tunnels.running_for_host(&id) {
         return Err(crate::error::AppError::new(
             crate::error::ErrorCode::InUse,
-            "Close this host's tab before deleting it.",
+            "Close this host's tab and stop its port forwards before deleting it.",
         ));
     }
     state
