@@ -63,3 +63,7 @@ Run against a debug bundle of Dalan (`pnpm tauri build --debug --bundles app`, s
 - The "Saved." toast sits on top of the editor sheet's Save/Cancel footer.
 - After an upload the remote file list still shows the old size until refreshed.
 - The first click after the window regains focus is sometimes swallowed.
+
+## Confirmed by Mehrdad by hand
+- SFTP drag and drop and dragging a host onto a group work (the fix in item 4 above did it).
+- Double-clicking Dalan.app while it runs does not open a second copy. `open -n` still untested.
