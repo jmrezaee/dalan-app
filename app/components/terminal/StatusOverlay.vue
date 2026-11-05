@@ -32,7 +32,8 @@ function submit() {
 </script>
 
 <template>
-  <div class="absolute inset-0 grid place-items-center bg-bg/80 backdrop-blur-[2px]">
+  <!-- z-20: xterm stacks its own canvases (z-index up to 5) over anything unpositioned, which swallowed clicks. -->
+  <div class="absolute inset-0 z-20 grid place-items-center bg-bg/80 backdrop-blur-[2px]">
     <div
       :role="needsAnswer ? 'alertdialog' : 'status'"
       class="flex w-[420px] flex-col gap-3 rounded-lg border border-border bg-surface-raised p-5 shadow-pop"
