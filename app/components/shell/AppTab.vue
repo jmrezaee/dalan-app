@@ -27,9 +27,9 @@ defineEmits<{ select: []; close: [] }>()
       <slot name="leading" />
       <span class="truncate">{{ label }}</span>
     </button>
-    <span v-if="unsaved" class="size-2 shrink-0 rounded-full bg-text" title="Unsaved workspace" />
+    <span v-if="unsaved" class="size-1.5 shrink-0 rounded-full bg-muted" title="Unsaved changes" aria-label="Unsaved changes" />
     <button
-      v-else-if="closable"
+      v-if="closable"
       type="button"
       :aria-label="`Close ${label}`"
       :class="cn('grid size-4 shrink-0 place-items-center rounded-sm hover:bg-surface-hover', active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100')"

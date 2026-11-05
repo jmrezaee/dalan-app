@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // S11: snippets grouped by package.
-import { Code2, FolderPlus, Pencil, Plus, Trash2 } from '@lucide/vue'
+import { Code2, FolderPlus, Pencil, Play, Plus, Trash2 } from '@lucide/vue'
 import type { PackageSummary, SnippetSummary } from '~/types/bindings'
 import { buttonVariants } from '@/components/ui/button'
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
@@ -9,6 +9,13 @@ import { Input } from '@/components/ui/input'
 
 const snippets = useSnippetsStore()
 const hosts = useHostsStore()
+
+const runOpen = ref(false)
+const runSnippet = ref<SnippetSummary | null>(null)
+function askRun(s: SnippetSummary) {
+  runSnippet.value = s
+  runOpen.value = true
+}
 
 const sheetOpen = ref(false)
 const editing = ref<SnippetSummary | null>(null)
@@ -88,24 +95,24 @@ async function confirmPk() {
           </template>
         </h2>
         <p v-if="!g.items.length" class="px-1 text-sm text-muted">Empty. Choose this package when you edit a snippet.</p>
-        <button
+        <div
           v-for="s in g.items"
           :key="s.id"
-          type="button"
-          class="flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5 text-left hover:border-muted/40 hover:bg-surface-raised"
-          @click="openSheet(s)"
+          class="flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5 hover:border-muted/40 hover:bg-surface-raised"
         >
-          <span class="flex min-w-0 flex-1 flex-col">
+          <button type="button" class="flex min-w-0 flex-1 flex-col text-left" @click="openSheet(s)">
             <span class="font-medium">{{ s.label }}</span>
             <span class="truncate font-mono text-xs text-muted">{{ s.script.split('\n')[0] }}</span>
-          </span>
+          </button>
           <span class="shrink-0 text-xs text-muted">{{ targets(s) }}</span>
-        </button>
+          <Button variant="secondary" size="sm" @click="askRun(s)"><Play />Run</Button>
+        </div>
       </section>
     </div>
   </div>
 
   <SnippetSheet v-model:open="sheetOpen" :snippet="editing" @delete="askDelete" />
+  <RunOnHostsDialog v-model:open="runOpen" :snippet="runSnippet" />
 
   <Dialog v-model:open="pkgOpen">
     <DialogContent class="sm:max-w-[380px]">

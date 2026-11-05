@@ -32,12 +32,12 @@ SFTP dual pane (local or host on each side),sftp,must,yes,yes,S21
 SFTP drag-and-drop transfers with progress,sftp,must,yes,yes,S21 S22 F07
 SFTP rename delete new folder hidden files typed path,sftp,must,yes,yes,S21; rename/delete not in Termius docs but expected
 Settings: appearance terminal font shortcuts,settings,must,yes,yes,S23
-Workspaces: split view up to 16 panes,workspaces,should,yes,no,S19 F09
-Workspaces: focus mode toggle,workspaces,should,yes,no,S19
-Broadcast input to all panes (Cmd+B),workspaces,should,yes,no,S19; free in Termius since 9.17.1
-Save workspace as template and reopen,workspaces,should,yes,no,S19 source 11
+Workspaces: split view up to 16 panes,workspaces,should,yes,yes,S19 F09
+Workspaces: focus mode toggle,workspaces,should,yes,yes,S19
+Broadcast input to all panes (Cmd+B),workspaces,should,yes,yes,S19; free in Termius since 9.17.1
+Save workspace as template and reopen,workspaces,should,yes,yes,S19 source 11
 Drag a tab onto another to make a workspace,workspaces,should,yes,no,source 11
-Run snippet on multiple hosts (opens workspace),snippets,should,yes,no,S13 F08
+Run snippet on multiple hosts (opens workspace),snippets,should,yes,yes,S13 F08
 SFTP edit remote file locally and prompt to re-upload,sftp,should,yes,no,F07 source 5
 SFTP transfer conflicts (replace / keep both / skip),sftp,should,yes,yes,S22
 SFTP permissions (chmod),sftp,should,unknown,yes,not in Termius docs; expected by users

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // S17: jump to a host, a tab or an action. Built on the shadcn Command (Reka listbox) dialog.
-import { ArrowDownUp, Code2, KeyRound, Waypoints, Lock, Plus, Server, Settings, ShieldCheck, SquareTerminal, Vault } from '@lucide/vue'
+import { ArrowDownUp, Code2, LayoutGrid, KeyRound, Waypoints, Lock, Plus, Server, Settings, ShieldCheck, SquareTerminal, Vault } from '@lucide/vue'
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator, CommandShortcut } from '@/components/ui/command'
 import type { HostSummary } from '~/types/bindings'
 
@@ -8,6 +8,7 @@ const open = defineModel<boolean>('open', { required: true })
 const emit = defineEmits<{ action: [name: 'new-host' | 'new-tab' | 'sftp' | 'keychain' | 'forwards' | 'snippets' | 'known-hosts' | 'settings' | 'lock' | 'vault'] }>()
 const hosts = useHostsStore()
 const sessions = useSessionsStore()
+const templates = useWorkspacesStore()
 
 const run = (fn: () => void) => {
   open.value = false
@@ -35,6 +36,10 @@ const openTabs = computed(() => sessions.sessions.filter(s => s.kind === 'sessio
         <CommandItem v-for="h in hosts.hosts" :key="h.id" :value="`host ${h.label} ${h.address} ${h.tags.join(' ')}`" @select="connect(h)">
           <Server />{{ h.label }}<span class="ml-2 font-mono text-xs text-muted">{{ h.effective_username ? `${h.effective_username}@` : '' }}{{ h.address }}</span>
         </CommandItem>
+      </CommandGroup>
+
+      <CommandGroup v-if="templates.templates.length" heading="Workspaces">
+        <CommandItem v-for="t in templates.templates" :key="t.id" :value="`workspace ${t.name}`" @select="run(() => templates.open(t))"><LayoutGrid />{{ t.name }}</CommandItem>
       </CommandGroup>
 
       <CommandSeparator />

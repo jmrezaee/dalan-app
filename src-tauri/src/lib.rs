@@ -16,6 +16,7 @@ pub mod ssh;
 pub mod state;
 pub mod tunnels;
 pub mod vault;
+pub mod workspaces;
 
 use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events, Builder};
@@ -50,6 +51,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::session::known_hosts_list,
             commands::session::known_host_delete,
             commands::session::key_export_to_host,
+            commands::workspaces::workspaces_list,
+            commands::workspaces::workspace_save,
+            commands::workspaces::workspace_delete,
             commands::sftp::sftp_open,
             commands::sftp::sftp_respond,
             commands::sftp::sftp_close,

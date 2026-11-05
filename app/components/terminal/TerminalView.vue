@@ -53,8 +53,8 @@ onMounted(() => {
   }
   catch { /* no WebGL: the default renderer is fine */ }
 
-  term.onData(d => sessions.write(props.session, encoder.encode(d)))
-  term.onBinary(d => sessions.write(props.session, Uint8Array.from(d, c => c.charCodeAt(0))))
+  term.onData(d => sessions.input(props.session, encoder.encode(d)))
+  term.onBinary(d => sessions.input(props.session, Uint8Array.from(d, c => c.charCodeAt(0))))
   term.onResize(({ cols, rows }) => sessions.resize(props.session, cols, rows))
 
   // Report how many bytes xterm has actually drawn, so Rust can pause the server when we fall behind.

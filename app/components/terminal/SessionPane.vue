@@ -6,7 +6,7 @@ import type { OverlayKind } from './StatusOverlay.vue'
 import { Input } from '@/components/ui/input'
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 
-const props = defineProps<{ session: Session, active: boolean }>()
+const props = defineProps<{ session: Session, active: boolean, embedded?: boolean }>()
 defineEmits<{ editHost: [hostId: string], newHost: [] }>()
 const sessions = useSessionsStore()
 
@@ -51,7 +51,7 @@ const cancel = () => sessions.respond(props.session, false)
   <div v-else class="flex size-full">
     <div class="relative min-w-0 flex-1">
     <TerminalView :session="session" :active="active" />
-    <IconButton v-if="session.status === 'ready'" label="Snippets" shortcut="⌘." class="absolute right-3 top-2 z-10 bg-surface/70" :pressed="sessions.panelOpen" @click="sessions.panelOpen = !sessions.panelOpen"><PanelRight /></IconButton>
+    <IconButton v-if="session.status === 'ready' && !embedded" label="Snippets" shortcut="⌘." class="absolute right-3 top-2 z-10 bg-surface/70" :pressed="sessions.panelOpen" @click="sessions.panelOpen = !sessions.panelOpen"><PanelRight /></IconButton>
     <StatusOverlay
       v-if="overlay"
       :kind="overlay"
@@ -88,6 +88,6 @@ const cancel = () => sessions.respond(props.session, false)
       </AlertDialogContent>
     </AlertDialog>
     </div>
-    <SessionSidePanel v-if="sessions.panelOpen && session.status === 'ready'" />
+    <SessionSidePanel v-if="sessions.panelOpen && session.status === 'ready' && !embedded" />
   </div>
 </template>

@@ -51,7 +51,7 @@ export const useSnippetsStore = defineStore('snippets', () => {
 
   /** Types the script into the active terminal, as if you had pasted it and pressed Enter. */
   function runInActive(s: SnippetSummary) {
-    const sess = sessions.active
+    const sess = sessions.activeSession
     if (!sess || sess.kind !== 'session' || sess.status !== 'ready') {
       toast('Open a connection first, then run the snippet in it.')
       return false

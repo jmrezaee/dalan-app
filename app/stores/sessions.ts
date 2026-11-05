@@ -7,7 +7,7 @@ export type SessionStatus = 'connecting' | 'authenticating' | 'ready' | 'disconn
 
 export interface Session {
   /** `new` is the S16 New Tab screen: it has no connection until a host is picked. */
-  kind: 'session' | 'new'
+  kind: 'session' | 'new' | 'workspace'
   /** Local id for the tab. Stable from the first moment, unlike `id`. */
   key: string
   /** Rust's session id. Empty until `session_open` answers; events can arrive before that. */
@@ -21,7 +21,22 @@ export interface Session {
   disconnectedAt: Date | null
   /** Jump hosts this connection goes through, e.g. `bastion`. */
   hop: string
+  /** Key of the workspace this pane belongs to (`''` for a normal tab). */
+  parent: string
+  /** Typed into the shell once it is ready (run-a-snippet-on-hosts). */
+  autorun: string
+  // ---- workspace tabs only (S19)
+  panes: Session[]
+  mode: 'split' | 'focus'
+  focus: number
+  broadcast: boolean
+  /** The id of the saved template this workspace came from, if any. */
+  templateId: string
+  /** Panes changed since the workspace was opened or saved. */
+  dirty: boolean
 }
+
+export const MAX_PANES = 16
 
 /** Live SSH tabs (S18). The xterm instance lives in TerminalView; this store only routes bytes to it. */
 export const useSessionsStore = defineStore('sessions', () => {
@@ -38,12 +53,20 @@ export const useSessionsStore = defineStore('sessions', () => {
   /** S20: the side panel beside the active terminal (⌘.). */
   const panelOpen = ref(false)
   const active = computed(() => sessions.value.find(s => s.key === activeKey.value) ?? null)
+  /** The session keystrokes and snippets go to: the tab itself, or a workspace's focused pane. */
+  const activeSession = computed(() => (active.value?.kind === 'workspace' ? (active.value.panes[active.value.focus] ?? null) : active.value))
 
   function onEvent(sess: Session, e: SessionEvent) {
     switch (e.type) {
       case 'state':
         sess.error = null
-        if (e.state === 'connecting' || e.state === 'authenticating' || e.state === 'ready') sess.status = e.state
+        if (e.state === 'connecting' || e.state === 'authenticating' || e.state === 'ready') {
+          sess.status = e.state
+          if (e.state === 'ready' && sess.autorun) {
+            write(sess, new TextEncoder().encode(`${sess.autorun.replace(/\s+$/, '')}\n`))
+            sess.autorun = ''
+          }
+        }
         else if (e.state === 'disconnected') {
           sess.status = 'disconnected'
           sess.disconnectedAt = new Date()
@@ -94,6 +117,14 @@ export const useSessionsStore = defineStore('sessions', () => {
     error: null,
     disconnectedAt: null,
     hop: '',
+    parent: '',
+    autorun: '',
+    panes: [],
+    mode: 'split',
+    focus: 0,
+    broadcast: false,
+    templateId: '',
+    dirty: false,
   })
 
   /** Opens a tab for a host and switches to it. A New Tab that is showing turns into the session. */
@@ -169,12 +200,88 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
   }
 
-  function close(sess: Session) {
+  const workspaceOf = (sess: Session) => sessions.value.find(s => s.key === sess.parent)
+
+  /** Keystrokes from a terminal. In a broadcasting workspace they go to every live pane, not just this one. */
+  function input(sess: Session, bytes: Uint8Array) {
+    const ws = workspaceOf(sess)
+    if (ws?.broadcast) for (const p of ws.panes) write(p, bytes)
+    else write(sess, bytes)
+  }
+
+  // ---- workspaces (S19): one tab holding several sessions
+
+  function makePane(host: HostSummary, parent: string, autorun = ''): Session {
+    const p = blank()
+    Object.assign(p, { hostId: host.id, label: host.label, address: `${host.address}:${host.effective_port}`, parent, autorun })
+    return p
+  }
+
+  /** Opens one tab with a pane per host (up to 16). */
+  function openWorkspace(hosts: HostSummary[], opts: { label?: string, mode?: 'split' | 'focus', autorun?: string, templateId?: string } = {}) {
+    const list = hosts.slice(0, MAX_PANES)
+    if (!list.length) return
+    const ws = blank()
+    ws.kind = 'workspace'
+    ws.status = 'ready'
+    ws.label = opts.label ?? `Workspace ×${list.length}`
+    ws.mode = opts.mode ?? 'split'
+    ws.templateId = opts.templateId ?? ''
+    ws.panes = list.map(h => makePane(h, ws.key, opts.autorun ?? ''))
+    // A New Tab that is showing is replaced by the workspace.
+    const newTab = active.value?.kind === 'new' ? active.value : null
+    if (newTab) sessions.value.splice(sessions.value.indexOf(newTab), 1, ws)
+    else sessions.value.push(ws)
+    activeKey.value = ws.key
+    for (const p of ws.panes) connect(p)
+    if (hosts.length > MAX_PANES) toast(`A workspace holds ${MAX_PANES} panes. The rest were left out.`)
+  }
+
+  function addPane(ws: Session, host: HostSummary) {
+    if (ws.panes.length >= MAX_PANES) return void toast(`A workspace holds ${MAX_PANES} panes.`)
+    const p = makePane(host, ws.key)
+    ws.panes.push(p)
+    ws.focus = ws.panes.length - 1
+    ws.dirty = true
+    connect(p)
+  }
+
+  function dropSession(p: Session) {
+    if (p.id) api.sessionClose(p.id)
+    writers.delete(p.key)
+    pending.delete(p.key)
+  }
+
+  function closePane(ws: Session, pane: Session): void {
+    const i = ws.panes.findIndex(p => p.key === pane.key)
+    if (i < 0) return
+    dropSession(pane)
+    ws.panes.splice(i, 1)
+    ws.dirty = true
+    if (!ws.panes.length) return close(ws)
+    ws.focus = Math.min(ws.focus, ws.panes.length - 1)
+  }
+
+  function focusPane(ws: Session, i: number) {
+    if (ws.panes[i]) ws.focus = i
+  }
+  function setMode(ws: Session, mode: 'split' | 'focus') {
+    ws.mode = mode
+  }
+  function toggleMode(ws: Session) {
+    setMode(ws, ws.mode === 'split' ? 'focus' : 'split')
+  }
+  function toggleBroadcast(ws: Session) {
+    ws.broadcast = !ws.broadcast
+  }
+
+  function close(sess: Session): void {
+    const ws = workspaceOf(sess)
+    if (ws) return closePane(ws, sess) // a pane that ends closes inside its workspace
     const i = sessions.value.findIndex(s => s.key === sess.key)
     if (i < 0) return
-    if (sess.kind === 'session' && sess.id) api.sessionClose(sess.id)
-    writers.delete(sess.key)
-    pending.delete(sess.key)
+    if (sess.kind === 'workspace') sess.panes.forEach(dropSession)
+    else if (sess.kind === 'session') dropSession(sess)
     sessions.value.splice(i, 1)
     if (activeKey.value === sess.key) activeKey.value = sessions.value.at(-1)?.key ?? null
   }
@@ -187,5 +294,5 @@ export const useSessionsStore = defineStore('sessions', () => {
     pending.clear()
   }
 
-  return { sessions, activeKey, active, panelOpen, open, openNewTab, activateNth, attach, detach, write, resize, ack, respond, reconnect, close, clear }
+  return { sessions, activeKey, active, activeSession, panelOpen, open, openNewTab, openWorkspace, addPane, closePane, focusPane, setMode, toggleMode, toggleBroadcast, input, activateNth, attach, detach, write, resize, ack, respond, reconnect, close, clear }
 })

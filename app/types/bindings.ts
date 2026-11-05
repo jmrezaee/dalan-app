@@ -43,6 +43,9 @@ export const commands = {
 	 *  (host key, password) arrive on `events`, and answers go to `session_respond`.
 	 */
 	keyExportToHost: (keyId: string, hostId: string, dir: string, fileName: string, events: Channel<SessionEvent_Deserialize>) => typedError<SessionOpened, AppError>(__TAURI_INVOKE("key_export_to_host", { keyId, hostId, dir, fileName, events })),
+	workspacesList: () => typedError<TemplateSummary[], AppError>(__TAURI_INVOKE("workspaces_list")),
+	workspaceSave: (input: TemplateInput_Deserialize) => typedError<string, AppError>(__TAURI_INVOKE("workspace_save", { input })),
+	workspaceDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("workspace_delete", { id })),
 	/**
 	 *  Opens an SFTP session on a host. The caller picks `open_id` so it can answer host-key and
 	 *  password questions (events on `events`, answers to `sftp_respond`) before this call returns.
@@ -737,6 +740,35 @@ export type SnippetsAll_Deserialize = {
 export type SnippetsAll_Serialize = {
 	packages: PackageSummary[],
 	snippets: SnippetSummary_Serialize[],
+};
+
+export type TemplateInput = TemplateInput_Serialize | TemplateInput_Deserialize;
+
+export type TemplateInput_Deserialize = {
+	id?: string | null,
+	name: string,
+	mode: string,
+	layout: string,
+	panes: string,
+};
+
+export type TemplateInput_Serialize = {
+	id: string | null,
+	name: string,
+	mode: string,
+	layout: string,
+	panes: string,
+};
+
+export type TemplateSummary = {
+	id: string,
+	name: string,
+	/**  `split` or `focus`. */
+	mode: string,
+	/**  JSON: the split layout. */
+	layout: string,
+	/**  JSON array: `[{ "host_id": "...", "title": "..." }]`. */
+	panes: string,
 };
 
 export type TransferEvent = TransferEvent_Serialize | TransferEvent_Deserialize;
