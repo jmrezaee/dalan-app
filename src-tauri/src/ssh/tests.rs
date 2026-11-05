@@ -28,6 +28,8 @@ pub(crate) struct TestServer {
     pub(crate) execs: Arc<std::sync::Mutex<Vec<String>>>,
     /// What the server prints for a `uname` command (the OS-detection probe).
     pub(crate) uname_reply: Arc<std::sync::Mutex<Option<String>>>,
+    /// What the server prints for `mosh-server new ...`.
+    pub(crate) mosh_reply: Arc<std::sync::Mutex<Option<String>>>,
     /// Targets this server was asked to forward to (direct-tcpip), i.e. hops made through it.
     pub(crate) forwards: Arc<std::sync::Mutex<Vec<String>>>,
     /// Channels that carry forwarded traffic: their data belongs to the tunnel, not to our echo shell.
@@ -153,6 +155,11 @@ impl server::Handler for TestServer {
             .unwrap()
             .push(String::from_utf8_lossy(data).into_owned());
         s.channel_success(c)?;
+        if data.starts_with(b"mosh-server") {
+            if let Some(reply) = self.mosh_reply.lock().unwrap().clone() {
+                s.data(c, reply.into_bytes())?;
+            }
+        }
         if data.starts_with(b"uname") {
             if let Some(reply) = self.uname_reply.lock().unwrap().clone() {
                 s.data(c, reply.into_bytes())?;
@@ -285,6 +292,28 @@ struct Running {
 }
 
 fn start(h: &Harness) -> Running {
+    start_with(h, |store, io, prompts, params, crx| {
+        tokio::spawn(client::run(store, io, prompts, params, crx))
+    })
+}
+
+/// Like `start`, but for the Mosh job.
+fn start_mosh(h: &Harness) -> Running {
+    start_with(h, |store, io, prompts, params, crx| {
+        tokio::spawn(crate::mosh::run(store, io, prompts, params, crx))
+    })
+}
+
+fn start_with(
+    h: &Harness,
+    spawn: impl FnOnce(
+        crate::state::Store,
+        Arc<SessionIo>,
+        Arc<Prompts>,
+        client::Params,
+        mpsc::UnboundedReceiver<Cmd>,
+    ) -> tokio::task::JoinHandle<()>,
+) -> Running {
     let (etx, events) = mpsc::unbounded_channel();
     let (dtx, data) = mpsc::unbounded_channel();
     let (cmds, crx) = mpsc::unbounded_channel();
@@ -302,13 +331,7 @@ fn start(h: &Harness) -> Running {
         cols: 80,
         rows: 24,
     };
-    let task = tokio::spawn(client::run(
-        h.state.store(),
-        io,
-        Arc::clone(&prompts),
-        params,
-        crx,
-    ));
+    let task = spawn(h.state.store(), io, Arc::clone(&prompts), params, crx);
     Running {
         events,
         data,
@@ -796,6 +819,60 @@ async fn telnet_hosts_use_plain_tcp_and_refuse_ssh_only_features() {
         })
         .await
         .unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn mosh_starts_the_server_over_ssh_then_runs_the_local_client() {
+    use std::os::unix::fs::PermissionsExt;
+    // A stand-in for `mosh-client` that reports how it was started.
+    let dir = std::env::temp_dir().join(format!("dalan-mosh-{}", uuid::Uuid::now_v7()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let fake = dir.join("mosh-client");
+    std::fs::write(&fake, "#!/bin/sh\necho \"ARGS:$1 $2 KEY:$MOSH_KEY\"\n").unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::env::set_var("DALAN_MOSH_CLIENT", &fake); // only this test reads it
+
+    let h = harness(Some("right-pw")).await;
+    let hid = h.host_id.clone();
+    h.state
+        .store()
+        .with_db_session(move |c, s| hosts::set_protocol(c, s, &hid, "mosh"))
+        .await
+        .unwrap();
+    *h.server.mosh_reply.lock().unwrap() =
+        Some("\r\nMOSH CONNECT 60001 4NeCCgvZFe2RnPgrcU1PQw\r\n".into());
+
+    let mut s = start_mosh(&h);
+    let (id, _) = s.expect_prompt().await; // the SSH bootstrap asks about the host key as usual
+    s.answer(&id, true, None, false);
+    s.until(is_state(SessionState::Ready)).await;
+    s.until(is_state(SessionState::Disconnected)).await; // the fake client exits at once
+    let mut shown = Vec::new();
+    while let Ok(b) = s.data.try_recv() {
+        shown.extend(b);
+    }
+    let shown = String::from_utf8_lossy(&shown).into_owned();
+    assert!(
+        shown.contains("ARGS:127.0.0.1 60001 KEY:4NeCCgvZFe2RnPgrcU1PQw"),
+        "{shown:?}"
+    );
+    assert!(h
+        .server
+        .execs
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|e| e.starts_with("mosh-server new")));
+
+    // The server never started mosh: a clear message, no client.
+    *h.server.mosh_reply.lock().unwrap() = Some("bash: mosh-server: command not found\r\n".into());
+    let mut s = start_mosh(&h);
+    let e = s.until(|e| matches!(e, SessionEvent::Error { .. })).await;
+    assert!(
+        matches!(e, SessionEvent::Error { ref message, .. } if message.contains("isn't installed"))
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]

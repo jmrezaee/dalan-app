@@ -12,12 +12,14 @@ use crate::error::AppResult;
 const MIGRATION_0001: &str = include_str!("../../../replica/schema.sql");
 const MIGRATION_0002: &str = include_str!("../../migrations/0002_protocol.sql");
 const MIGRATION_0003: &str = include_str!("../../migrations/0003_serial.sql");
+const MIGRATION_0004: &str = include_str!("../../migrations/0004_mosh.sql");
 
 fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
         M::up(MIGRATION_0001),
         M::up(MIGRATION_0002),
         M::up(MIGRATION_0003),
+        M::up(MIGRATION_0004),
     ])
 }
 

@@ -3,7 +3,7 @@
 //!
 //! Terminal data is bytes end to end: it is never turned into a `String` here (hard rule 3).
 
-mod client;
+pub(crate) mod client;
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -195,6 +195,8 @@ pub enum Job {
     Telnet,
     /// A serial device (the host's address is its path).
     Serial,
+    /// Mosh: SSH to start `mosh-server`, then the local `mosh-client` in a terminal.
+    Mosh,
     /// S08: install a public key in `authorized_keys`.
     Export {
         key_id: String,
@@ -269,6 +271,9 @@ impl SessionManager {
                             message: e.message,
                         }),
                     }
+                }
+                Job::Mosh => {
+                    crate::mosh::run(store, Arc::clone(&io), Arc::clone(&prompts), params, rx).await
                 }
                 Job::Serial => {
                     let hid = params.host_id.clone();

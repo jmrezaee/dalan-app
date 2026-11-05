@@ -42,6 +42,16 @@ fn fail(io: &SessionIo, message: String) {
     });
 }
 
+/// A program to run in the terminal.
+pub struct Program {
+    pub path: String,
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+    /// True for a shell: when it exits the tab closes, like any terminal window. False for something
+    /// like `mosh-client`, where the exit is the end of a connection: the tab says so and can reconnect.
+    pub close_on_exit: bool,
+}
+
 /// Runs until the shell exits or the tab closes. When the shell exits the tab closes too
 /// (`closed`), like any terminal window.
 pub async fn run(
@@ -49,8 +59,30 @@ pub async fn run(
     shell: String,
     cols: u32,
     rows: u32,
+    cmds: mpsc::UnboundedReceiver<Cmd>,
+) {
+    let args = if cfg!(unix) {
+        vec!["-l".to_string()]
+    } else {
+        vec![]
+    }; // a login shell, so profile files run
+    let program = Program {
+        path: shell,
+        args,
+        env: vec![],
+        close_on_exit: true,
+    };
+    run_program(io, program, cols, rows, cmds).await;
+}
+
+pub async fn run_program(
+    io: Arc<SessionIo>,
+    program: Program,
+    cols: u32,
+    rows: u32,
     mut cmds: mpsc::UnboundedReceiver<Cmd>,
 ) {
+    let shell = program.path.clone();
     let size = |c: u32, r: u32| PtySize {
         rows: r.clamp(1, 500) as u16,
         cols: c.clamp(1, 1000) as u16,
@@ -61,9 +93,12 @@ pub async fn run(
         Ok(p) => p,
         Err(e) => return fail(&io, format!("Couldn't open a terminal: {e}")),
     };
-    let mut cmd = CommandBuilder::new(&shell);
-    if cfg!(unix) {
-        cmd.arg("-l"); // a login shell, like a new terminal window, so profile files run
+    let mut cmd = CommandBuilder::new(&program.path);
+    for a in &program.args {
+        cmd.arg(a);
+    }
+    for (k, v) in &program.env {
+        cmd.env(k, v);
     }
     cmd.env("TERM", "xterm-256color");
     if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
@@ -107,10 +142,11 @@ pub async fn run(
         }
     };
 
+    let mut closed_by_user = false;
     loop {
         tokio::select! {
             cmd = cmds.recv() => match cmd {
-                None | Some(Cmd::Close) => break,
+                None | Some(Cmd::Close) => { closed_by_user = true; break; }
                 // Keystrokes are tiny; a blocking write here is fine.
                 Some(Cmd::Write(b)) => { if writer.write_all(&b).and_then(|()| writer.flush()).is_err() { break; } }
                 Some(Cmd::Resize(c, r)) => { let _ = master.resize(size(c, r)); }
@@ -131,7 +167,12 @@ pub async fn run(
     flush(&mut buf);
     let _ = child.kill(); // no-op when it already exited
     let _ = child.wait();
-    state(&io, SessionState::Closed);
+    if program.close_on_exit || closed_by_user {
+        state(&io, SessionState::Closed);
+    } else {
+        (io.event)(SessionEvent::Exit { status: None });
+        state(&io, SessionState::Disconnected);
+    }
 }
 
 #[cfg(all(test, unix))]

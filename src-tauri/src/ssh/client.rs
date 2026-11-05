@@ -284,7 +284,7 @@ pub async fn connect_authenticated(
         Err(e) => return fail(io, e.code, e.message),
     };
     let last = plan.len() - 1;
-    if plan[last].protocol != "ssh" {
+    if matches!(plan[last].protocol.as_str(), "telnet" | "serial") {
         let what = if plan[last].protocol == "serial" {
             "a serial line"
         } else {
@@ -597,6 +597,36 @@ async fn authenticate(
             false
         }
     }
+}
+
+/// Runs one command on its own channel and returns what it printed (capped at `max` bytes), or
+/// `None` when the channel couldn't be opened or `limit` passed.
+pub async fn exec_output(
+    handle: &client::Handle<Client>,
+    command: &str,
+    max: usize,
+    limit: Duration,
+) -> Option<Vec<u8>> {
+    let ask = async {
+        let mut ch = handle.channel_open_session().await.ok()?;
+        ch.exec(true, command).await.ok()?;
+        let mut out = Vec::new();
+        while let Some(msg) = ch.wait().await {
+            match msg {
+                ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. } => {
+                    out.extend_from_slice(&data);
+                    if out.len() >= max {
+                        break;
+                    }
+                }
+                ChannelMsg::Close => break,
+                _ => {}
+            }
+        }
+        let _ = ch.close().await;
+        Some(out)
+    };
+    timeout(limit, ask).await.ok().flatten()
 }
 
 /// Runs the OS-detection command on its own channel. Slow or silent servers give `unknown`

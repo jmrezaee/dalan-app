@@ -56,7 +56,7 @@ Terminal autocomplete (history paths snippets),terminal,could,yes,no,needs shell
 Find in terminal,terminal,could,unknown,yes,not documented; xterm search addon
 Customisable keyboard shortcuts,settings,could,yes,yes,S23
 Import PuTTY / MobaXterm / SecureCRT,import,could,yes,no,source 2
-Mosh,protocols,could,yes,no,needs mosh client binary; not logged by Termius
+Mosh,protocols,could,yes,yes,needs mosh client binary; not logged by Termius
 Telnet,protocols,could,yes,yes,plaintext warning
 Serial connections,protocols,could,yes,yes,baud data bits stop bits parity flow control
 Auto-detect remote OS icon,hosts,could,yes,yes,uses an exec channel; make it toggleable

@@ -423,7 +423,7 @@ pub fn set_protocol(
     host_id: &str,
     protocol: &str,
 ) -> AppResult<()> {
-    if !["ssh", "telnet", "serial"].contains(&protocol) {
+    if !["ssh", "telnet", "serial", "mosh"].contains(&protocol) {
         return Err(AppError::validation("Unknown protocol."));
     }
     let tx = conn.transaction()?;
@@ -439,7 +439,7 @@ pub fn set_protocol(
         "UPDATE hosts SET protocol = ?1, updated_at = ?2 WHERE id = ?3",
         params![protocol, now_ms(), host_id],
     )?;
-    if protocol != "ssh" {
+    if protocol == "telnet" || protocol == "serial" {
         if let Some(sid) = secret {
             tx.execute(
                 "UPDATE connection_profiles SET password_secret_id = NULL WHERE id = ?1",

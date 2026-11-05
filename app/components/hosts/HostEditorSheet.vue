@@ -21,6 +21,8 @@ const host = computed(() => (hosts.editing && hosts.editing !== 'new' ? hosts.ed
 
 const api = useTauri()
 /** Variables from the groups above, and whether this item's own were loaded (so a failed load can't wipe them on save). */
+/** SSH and Mosh both sign in over SSH, so they share the credential, connection and proxy sections. */
+const sshLike = computed(() => form.protocol === 'ssh' || form.protocol === 'mosh')
 const serialPorts = ref<string[]>([])
 watch(() => form.protocol, async (p) => { if (p === 'serial' && !serialPorts.value.length) serialPorts.value = await api.serialPorts().catch(() => []) })
 const envInherited = ref<InheritedVar[]>([])
@@ -85,7 +87,7 @@ const hasOwnPassword = computed(() => !!host.value?.has_password && !clearPasswo
 async function submit() {
   if (busy.value) return
   // Checked here too: the proxy is saved after the item, and a late failure would leave a half-saved copy open.
-  if (form.protocol === 'ssh' && (form.proxy.kind === 'socks5' || form.proxy.kind === 'http') && (!form.proxy.host.trim() || !form.proxy.port)) {
+  if (sshLike.value && (form.proxy.kind === 'socks5' || form.proxy.kind === 'http') && (!form.proxy.host.trim() || !form.proxy.port)) {
     error.value = 'Enter the proxy\'s address and port.'
     return
   }
@@ -105,7 +107,7 @@ async function submit() {
     startup_snippet_id: form.startup_snippet_id,
     jump_mode: form.jump_mode,
     jump_host_ids: form.jump_host_ids,
-  }, form.terminal_theme, envLoaded.value ? { mode: form.env_mode, vars: form.env_vars.filter((v: EnvVar) => v.name.trim()).map((v: EnvVar) => ({ name: v.name.trim(), value: v.value })) } : undefined, envLoaded.value && form.protocol === 'ssh' ? form.proxy : undefined, envLoaded.value && form.protocol === 'ssh' ? { kind: form.agent } : undefined, form.protocol, form.serial)
+  }, form.terminal_theme, envLoaded.value ? { mode: form.env_mode, vars: form.env_vars.filter((v: EnvVar) => v.name.trim()).map((v: EnvVar) => ({ name: v.name.trim(), value: v.value })) } : undefined, envLoaded.value && sshLike.value ? form.proxy : undefined, envLoaded.value && sshLike.value ? { kind: form.agent } : undefined, form.protocol, form.serial)
   busy.value = false
   if (!error.value) hosts.editing = null
 }
@@ -127,7 +129,8 @@ async function submit() {
       <form class="flex flex-1 flex-col gap-6 overflow-auto p-5" @submit.prevent="submit">
         <section class="flex flex-col gap-3">
           <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">General</h3>
-          <Segmented v-model="form.protocol" label="Protocol" :options="[{ value: 'ssh', label: 'SSH' }, { value: 'telnet', label: 'Telnet' }, { value: 'serial', label: 'Serial' }]" />
+          <Segmented v-model="form.protocol" label="Protocol" :options="[{ value: 'ssh', label: 'SSH' }, { value: 'telnet', label: 'Telnet' }, { value: 'serial', label: 'Serial' }, { value: 'mosh', label: 'Mosh' }]" />
+          <p v-if="form.protocol === 'mosh'" role="note" class="rounded-md border border-border bg-surface-raised p-2.5 text-xs text-muted">Mosh keeps a session alive across network changes and sleep. It needs mosh installed here and on the server, can't use jump hosts or a proxy, and talks to the server directly over UDP.</p>
           <p v-if="form.protocol === 'telnet'" role="note" class="rounded-md border border-warning/40 bg-warning/10 p-2.5 text-xs">Telnet isn't encrypted. Everything you type, including passwords, can be read on the network, and Dalan won't save a password for it. Use it only for devices that have nothing better.</p>
           <div class="flex flex-col gap-1.5">
             <Label for="host-label">Label</Label>
@@ -158,7 +161,7 @@ async function submit() {
           </div>
         </section>
 
-        <section v-if="form.protocol === 'ssh'" class="flex flex-col gap-3">
+        <section v-if="sshLike" class="flex flex-col gap-3">
           <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">Credentials</h3>
           <div class="flex flex-col gap-1.5">
             <Label for="host-user">Username</Label>
@@ -193,7 +196,7 @@ async function submit() {
           </div>
         </section>
 
-        <section v-if="form.protocol === 'ssh'" class="flex flex-col gap-3">
+        <section v-if="sshLike" class="flex flex-col gap-3">
           <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">Connection</h3>
           <div class="flex flex-col gap-1.5">
             <Label>Jump hosts</Label>
@@ -216,22 +219,22 @@ async function submit() {
           </div>
         </section>
 
-        <section v-if="form.protocol === 'ssh'" class="flex flex-col gap-3">
+        <section v-if="sshLike" class="flex flex-col gap-3">
           <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">Environment variables</h3>
           <EnvVarsEditor v-model:mode="form.env_mode" v-model:vars="form.env_vars" :inherited="envInherited" />
         </section>
 
-        <section v-if="form.protocol === 'ssh'" class="flex flex-col gap-3">
+        <section v-if="sshLike" class="flex flex-col gap-3">
           <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">Proxy</h3>
           <ProxyEditor v-model="form.proxy" :inherited="proxyInherited?.inherited ?? null" :inherited-from="proxyInherited?.inherited_from ?? null" />
         </section>
 
-        <section v-if="form.protocol === 'ssh'" class="flex flex-col gap-3">
+        <section v-if="sshLike" class="flex flex-col gap-3">
           <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">SSH agent</h3>
           <AgentEditor v-model="form.agent" :info="agentInfo" />
         </section>
 
-        <section v-if="form.protocol === 'ssh'" class="flex flex-col gap-3">
+        <section v-if="sshLike" class="flex flex-col gap-3">
           <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">On connect</h3>
           <div class="flex flex-col gap-1.5">
             <Label for="host-startup">Startup snippet</Label>
