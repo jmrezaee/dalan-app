@@ -234,7 +234,7 @@ async fn run_io<R, W>(
                 Some(Cmd::Write(b)) => { if port.write_all(&b).and_then(|()| port.flush()).is_err() { break; } }
                 Some(Cmd::Resize(..)) => {} // a serial line has no window size
                 Some(Cmd::Ack(n)) => {
-                    let _ = unacked.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |u| Some(u.saturating_sub(n)));
+                    crate::release_unacked(&unacked, n);
                 }
             },
             chunk = out.recv(), if unacked.load(Ordering::Relaxed) < MAX_UNACKED => match chunk {

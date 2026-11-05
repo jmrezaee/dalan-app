@@ -159,7 +159,7 @@ pub async fn run_program(
                 Some(Cmd::Write(b)) => { if writer.write_all(&b).and_then(|()| writer.flush()).is_err() { break; } }
                 Some(Cmd::Resize(c, r)) => { let _ = master.resize(size(c, r)); }
                 Some(Cmd::Ack(n)) => {
-                    let _ = unacked.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |u| Some(u.saturating_sub(n)));
+                    crate::release_unacked(&unacked, n);
                 }
             },
             chunk = out.recv(), if unacked.load(Ordering::Relaxed) < MAX_UNACKED => match chunk {

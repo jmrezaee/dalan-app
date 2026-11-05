@@ -253,7 +253,7 @@ pub async fn run(
                     if !sub.is_empty() && wr.write_all(&sub).await.is_err() { break; }
                 }
                 Some(Cmd::Ack(n)) => {
-                    let _ = unacked.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |u| Some(u.saturating_sub(n)));
+                    crate::release_unacked(&unacked, n);
                 }
             },
             // Not read while the UI is behind: the socket fills and the server slows down.

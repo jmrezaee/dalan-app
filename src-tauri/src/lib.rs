@@ -143,6 +143,17 @@ fn specta_builder() -> Builder<tauri::Wry> {
         ])
 }
 
+/// An acknowledgement from the UI: that many bytes of terminal output are no longer in flight.
+/// (`fetch_update` is renamed `try_update` in newer Rust; the old name works on both, so it stays.)
+#[allow(deprecated)]
+pub(crate) fn release_unacked(unacked: &std::sync::atomic::AtomicUsize, n: usize) {
+    let _ = unacked.fetch_update(
+        std::sync::atomic::Ordering::Relaxed,
+        std::sync::atomic::Ordering::Relaxed,
+        |u| Some(u.saturating_sub(n)),
+    );
+}
+
 /// Anchored to this crate, not to the working directory: a debug app started from Finder has `/` as its cwd.
 const BINDINGS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../app/types/bindings.ts");
 

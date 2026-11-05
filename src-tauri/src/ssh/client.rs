@@ -891,7 +891,7 @@ pub async fn run(
                 Some(Cmd::Write(bytes)) => { if channel.data_bytes(bytes).await.is_err() { break; } }
                 Some(Cmd::Resize(c, r)) => { let _ = channel.window_change(c, r, 0, 0).await; }
                 Some(Cmd::Ack(n)) => {
-                    let _ = unacked.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |u| Some(u.saturating_sub(n)));
+                    crate::release_unacked(&unacked, n);
                 }
             },
             // Not polled while the UI is behind: the SSH window fills and the server pauses.
