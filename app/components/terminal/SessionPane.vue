@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 
 const props = defineProps<{ session: Session, active: boolean }>()
-defineEmits<{ editHost: [hostId: string] }>()
+defineEmits<{ editHost: [hostId: string], newHost: [] }>()
 const sessions = useSessionsStore()
 
 const overlay = computed<OverlayKind | null>(() => {
@@ -46,7 +46,8 @@ const cancel = () => sessions.respond(props.session, false)
 </script>
 
 <template>
-  <div class="relative size-full">
+  <NewTab v-if="session.kind === 'new'" @new-host="$emit('newHost')" />
+  <div v-else class="relative size-full">
     <TerminalView :session="session" :active="active" />
     <StatusOverlay
       v-if="overlay"

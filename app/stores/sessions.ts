@@ -6,6 +6,8 @@ import { CommandError, useTauri } from '~/composables/useTauri'
 export type SessionStatus = 'connecting' | 'authenticating' | 'ready' | 'disconnected' | 'error'
 
 export interface Session {
+  /** `new` is the S16 New Tab screen: it has no connection until a host is picked. */
+  kind: 'session' | 'new'
   /** Local id for the tab. Stable from the first moment, unlike `id`. */
   key: string
   /** Rust's session id. Empty until `session_open` answers; events can arrive before that. */
@@ -73,25 +75,49 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
   }
 
-  /** Opens a tab for a host and switches to it. A double-click must not open two. */
+  const blank = (): Session => reactive<Session>({
+    key: crypto.randomUUID(),
+    kind: 'session',
+    id: '',
+    hostId: '',
+    label: '',
+    address: '',
+    status: 'connecting',
+    prompt: null,
+    error: null,
+    disconnectedAt: null,
+  })
+
+  /** Opens a tab for a host and switches to it. A New Tab that is showing turns into the session. */
   function open(host: HostSummary) {
     const now = Date.now()
     if (now - (lastOpen.get(host.id) ?? 0) < 600) return
     lastOpen.set(host.id, now)
-    const sess = reactive<Session>({
-      key: crypto.randomUUID(),
-      id: '',
-      hostId: host.id,
-      label: host.label,
-      address: `${host.address}:${host.effective_port}`,
-      status: 'connecting',
-      prompt: null,
-      error: null,
-      disconnectedAt: null,
-    })
-    sessions.value.push(sess)
+    const newTab = active.value?.kind === 'new' ? active.value : null
+    const sess = newTab ?? blank()
+    Object.assign(sess, { kind: 'session', hostId: host.id, label: host.label, address: `${host.address}:${host.effective_port}`, status: 'connecting' })
+    if (!newTab) sessions.value.push(sess)
     activeKey.value = sess.key
     connect(sess)
+  }
+
+  /** S16. Reuses a New Tab that is already open instead of piling them up. */
+  function openNewTab() {
+    const existing = sessions.value.find(s => s.kind === 'new')
+    if (existing) {
+      activeKey.value = existing.key
+      return
+    }
+    const sess = blank()
+    Object.assign(sess, { kind: 'new', label: 'New tab', status: 'ready' })
+    sessions.value.push(sess)
+    activeKey.value = sess.key
+  }
+
+  /** 1 = the Vault view, 2.. = the open tabs in order (⌘1-⌘9). */
+  function activateNth(n: number) {
+    if (n === 1) activeKey.value = null
+    else if (sessions.value[n - 2]) activeKey.value = sessions.value[n - 2]!.key
   }
 
   /** TerminalView calls this once xterm exists; buffered output is replayed in order. */
@@ -137,7 +163,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   function close(sess: Session) {
     const i = sessions.value.findIndex(s => s.key === sess.key)
     if (i < 0) return
-    if (sess.id) api.sessionClose(sess.id)
+    if (sess.kind === 'session' && sess.id) api.sessionClose(sess.id)
     writers.delete(sess.key)
     pending.delete(sess.key)
     sessions.value.splice(i, 1)
@@ -152,5 +178,5 @@ export const useSessionsStore = defineStore('sessions', () => {
     pending.clear()
   }
 
-  return { sessions, activeKey, active, open, attach, detach, write, resize, ack, respond, reconnect, close, clear }
+  return { sessions, activeKey, active, open, openNewTab, activateNth, attach, detach, write, resize, ack, respond, reconnect, close, clear }
 })

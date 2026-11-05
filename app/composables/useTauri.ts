@@ -50,6 +50,8 @@ export function useTauri() {
     sessionRespond: (id: string, promptId: string, answer: PromptAnswer) => unwrap(commands.sessionRespond(id, promptId, answer)),
     sessionClose: (id: string) => commands.sessionClose(id),
     sessionReconnect: (id: string) => unwrap(commands.sessionReconnect(id)),
+    settingsGetAll: () => unwrap(commands.settingsGetAll()),
+    settingsSet: (key: string, value: string) => unwrap(commands.settingsSet(key, value)),
     keysList: () => unwrap(commands.keysList()),
     keyGenerate: (input: GenerateInput) => unwrap(commands.keyGenerate(input)),
     keyImport: (input: ImportInput) => unwrap(commands.keyImport(input)),

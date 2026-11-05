@@ -43,6 +43,8 @@ export const commands = {
 	 *  (host key, password) arrive on `events`, and answers go to `session_respond`.
 	 */
 	keyExportToHost: (keyId: string, hostId: string, dir: string, fileName: string, events: Channel<SessionEvent_Deserialize>) => typedError<SessionOpened, AppError>(__TAURI_INVOKE("key_export_to_host", { keyId, hostId, dir, fileName, events })),
+	settingsGetAll: () => typedError<{ [key in string]: string }, AppError>(__TAURI_INVOKE("settings_get_all")),
+	settingsSet: (key: string, value: string) => typedError<null, AppError>(__TAURI_INVOKE("settings_set", { key, value })),
 	keysList: () => typedError<KeySummary_Serialize[], AppError>(__TAURI_INVOKE("keys_list")),
 	/**
 	 *  Generating (RSA especially) is CPU work, so it runs off the async threads and before the

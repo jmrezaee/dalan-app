@@ -59,16 +59,6 @@ async function dropped(target: string) {
 function newHost() {
   hosts.editing = 'new'
 }
-// ⌘N adds a host from anywhere on this page (canvas: HostsEmpty), but not while a terminal is showing.
-function onKey(e: KeyboardEvent) {
-  if ((e.metaKey || e.ctrlKey) && e.key === 'n' && sessions.activeKey === null) {
-    e.preventDefault()
-    newHost()
-  }
-}
-onMounted(() => window.addEventListener('keydown', onKey))
-onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
-
 const empty = computed(() => hosts.loaded && !hosts.hosts.length && !hosts.groups.length)
 const nothingHere = computed(() => hosts.loaded && !empty.value && !hosts.childGroups.length && !hosts.visibleHosts.length)
 </script>

@@ -4,4 +4,5 @@ pub mod app;
 pub mod hosts;
 pub mod keychain;
 pub mod session;
+pub mod settings;
 pub mod vault;

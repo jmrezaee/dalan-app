@@ -9,11 +9,14 @@ const vault = useVaultStore()
 const hosts = useHostsStore()
 const sessions = useSessionsStore()
 const keychain = useKeychainStore()
-const section = ref<'hosts' | 'keychain' | 'known-hosts'>('hosts')
+const settings = useSettingsStore()
+const section = ref<'hosts' | 'keychain' | 'known-hosts' | 'settings'>('hosts')
+const paletteOpen = ref(false)
 const knownHosts = ref<{ refresh: () => void } | null>(null)
 onMounted(() => {
   hosts.refresh()
   keychain.refresh()
+  settings.load()
 })
 onBeforeUnmount(() => {
   hosts.clear()
@@ -39,7 +42,7 @@ function editHost(hostId: string) {
 const closing = ref<Session | null>(null)
 const closeOpen = ref(false)
 function requestClose(s: Session) {
-  if (s.status === 'ready') {
+  if (s.kind === 'session' && s.status === 'ready') {
     closing.value = s
     closeOpen.value = true
   }
@@ -53,11 +56,43 @@ const statusDot = (s: Session) => (s.status === 'ready' ? 'unread' : s.status ==
 const statusLabel = (s: Session) => ({ ready: 'Connected', error: 'Connection failed', disconnected: 'Disconnected', connecting: 'Connecting', authenticating: 'Signing in' })[s.status]
 
 
+
+// ---- Shortcuts. ⌘ on a Mac; Ctrl elsewhere, except inside a terminal where Ctrl belongs to the shell.
+function go(to: typeof section.value) {
+  sessions.activeKey = null
+  section.value = to
+  if (to === 'known-hosts') knownHosts.value?.refresh()
+}
+function newHost() {
+  go('hosts')
+  hosts.editing = 'new'
+}
+function onPaletteAction(name: string) {
+  if (name === 'new-host') newHost()
+  else if (name === 'new-tab') sessions.openNewTab()
+  else if (name === 'lock') vault.lock()
+  else go(name === 'vault' ? 'hosts' : name as typeof section.value)
+}
+function onShortcut(e: KeyboardEvent) {
+  const inTerminal = !!(e.target as HTMLElement | null)?.closest?.('.xterm')
+  if (!(e.metaKey || (e.ctrlKey && !inTerminal))) return
+  const k = e.key.toLowerCase()
+  if (k === 'k') paletteOpen.value = !paletteOpen.value
+  else if (k === 't') sessions.openNewTab()
+  else if (k === 'w' && sessions.active) requestClose(sessions.active)
+  else if (k === ',') go('settings')
+  else if (k === 'n') newHost()
+  else if (/^[1-9]$/.test(k)) sessions.activateNth(Number(k))
+  else return
+  e.preventDefault()
+}
+onMounted(() => window.addEventListener('keydown', onShortcut, true))
+onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
 </script>
 
 <template>
   <div class="flex h-screen flex-col bg-bg text-text">
-    <TabBar mac @new="sessions.activeKey = null">
+    <TabBar mac @new="sessions.openNewTab()">
       <AppTab label="Vault" :active="sessions.activeKey === null" @select="sessions.activeKey = null">
         <template #leading><Vault class="size-4" aria-hidden="true" /></template>
       </AppTab>
@@ -70,14 +105,14 @@ const statusLabel = (s: Session) => ({ ready: 'Connected', error: 'Connection fa
         @select="sessions.activeKey = s.key"
         @close="requestClose(s)"
       >
-        <template #leading><StatusDot :status="statusDot(s)" :label="statusLabel(s)" /></template>
+        <template #leading><StatusDot v-if="s.kind === 'session'" :status="statusDot(s)" :label="statusLabel(s)" /></template>
       </AppTab>
     </TabBar>
 
     <div class="relative min-h-0 flex-1">
       <!-- Terminals stay mounted (v-show), so scrollback survives switching tabs. -->
       <div v-for="s in sessions.sessions" v-show="sessions.activeKey === s.key" :key="s.key" class="absolute inset-0">
-        <SessionPane :session="s" :active="sessions.activeKey === s.key" @edit-host="editHost" />
+        <SessionPane :session="s" :active="sessions.activeKey === s.key" @edit-host="editHost" @new-host="newHost" />
       </div>
 
       <div v-show="sessions.activeKey === null" class="flex size-full">
@@ -101,7 +136,7 @@ const statusLabel = (s: Session) => ({ ready: 'Connected', error: 'Connection fa
           <div v-else class="flex-1" />
           <div class="flex flex-col gap-0.5 p-2">
             <Button variant="ghost" class="justify-start text-muted" @click="vault.lock()"><Lock />Lock</Button>
-            <Button variant="ghost" class="justify-start text-muted" disabled><Settings />Settings</Button>
+            <Button variant="ghost" :class="['justify-start text-muted', section === 'settings' && 'bg-surface-hover text-text']" @click="go('settings')"><Settings />Settings</Button>
           </div>
         </div>
 
@@ -111,10 +146,13 @@ const statusLabel = (s: Session) => ({ ready: 'Connected', error: 'Connection fa
             <KnownHostsList ref="knownHosts" />
           </template>
           <KeychainView v-else-if="section === 'keychain'" />
+          <SettingsView v-else-if="section === 'settings'" />
           <HostsView v-else />
         </main>
       </div>
     </div>
+
+    <CommandPalette v-model:open="paletteOpen" @action="onPaletteAction" />
 
     <AlertDialog v-model:open="closeOpen">
       <AlertDialogContent>

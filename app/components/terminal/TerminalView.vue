@@ -10,12 +10,15 @@ import type { Session } from '~/stores/sessions'
 
 const props = defineProps<{ session: Session, active: boolean }>()
 const sessions = useSessionsStore()
+const settings = useSettingsStore()
 const el = ref<HTMLElement | null>(null)
 
 let term: Terminal | undefined
 let fit: FitAddon | undefined
 let observer: ResizeObserver | undefined
 const encoder = new TextEncoder()
+
+const themeFor = (t: 'dark' | 'light') => terminalThemes[t === 'light' ? 'default-light' : 'default-dark']
 
 function refit() {
   // A hidden tab has no size; fitting then would collapse the terminal to 0 columns.
@@ -26,12 +29,19 @@ function refit() {
 onMounted(() => {
   term = new Terminal({
     fontFamily: '"JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace',
-    fontSize: 14,
+    fontSize: settings.terminal.font_size,
     lineHeight: 1.2,
-    cursorBlink: true,
-    scrollback: 5000,
+    cursorBlink: settings.terminal.cursor_blink,
+    cursorStyle: settings.terminal.cursor,
+    scrollback: settings.terminal.scrollback,
     allowProposedApi: true,
-    theme: terminalThemes['default-dark'],
+    theme: themeFor(settings.resolvedTheme),
+  })
+  // ⌘ shortcuts (new tab, palette, ...) belong to the app: tell xterm to ignore them so they reach the window.
+  term.attachCustomKeyEventHandler(e => !e.metaKey)
+  term.onSelectionChange(() => {
+    const sel = term?.getSelection()
+    if (settings.terminal.copy_on_select && sel) navigator.clipboard.writeText(sel).catch(() => {})
   })
   fit = new FitAddon()
   term.loadAddon(fit)
@@ -61,6 +71,17 @@ onBeforeUnmount(() => {
   sessions.detach(props.session.key)
   term?.dispose()
 })
+
+// Settings and theme changes apply to a live terminal.
+watch(() => settings.terminal, (t) => {
+  if (!term) return
+  term.options.fontSize = t.font_size
+  term.options.cursorStyle = t.cursor
+  term.options.cursorBlink = t.cursor_blink
+  term.options.scrollback = t.scrollback
+  nextTick(refit)
+}, { deep: true })
+watch(() => settings.resolvedTheme, (t) => { if (term) term.options.theme = themeFor(t) })
 
 watch(() => props.active, (a) => {
   if (!a) return

@@ -20,9 +20,9 @@ Known hosts list with delete,vault,must,yes,yes,S14
 xterm.js terminal with resize copy paste scrollback,terminal,must,yes,yes,S18
 Disconnected overlay with Reconnect,terminal,must,yes,yes,F11
 Clear errors for unreachable / auth failed / KEX failed,terminal,must,yes,yes,source 13
-Multiple session tabs (Cmd+T new tab),terminal,must,yes,no,S16
-New Tab screen with recent connections and search,terminal,must,yes,no,S16
-Command palette over hosts and tabs (Cmd+K),shell,must,yes,no,S17 F03
+Multiple session tabs (Cmd+T new tab),terminal,must,yes,yes,S16
+New Tab screen with recent connections and search,terminal,must,yes,yes,S16
+Command palette over hosts and tabs (Cmd+K),shell,must,yes,yes,S17 F03
 Jump host / host chain,hosts,must,yes,no,F05; free in Termius since 10.1.0
 Startup snippet per host,hosts,must,yes,no,source 10
 Snippets with packages,snippets,must,yes,no,S11 S12
@@ -31,7 +31,7 @@ Local / remote / dynamic port forwarding rules with start-stop,port forwarding,m
 SFTP dual pane (local or host on each side),sftp,must,yes,no,S21
 SFTP drag-and-drop transfers with progress,sftp,must,yes,no,S21 S22 F07
 SFTP rename delete new folder hidden files typed path,sftp,must,yes,no,S21; rename/delete not in Termius docs but expected
-Settings: appearance terminal font shortcuts,settings,must,yes,no,S23
+Settings: appearance terminal font shortcuts,settings,must,yes,yes,S23
 Workspaces: split view up to 16 panes,workspaces,should,yes,no,S19 F09
 Workspaces: focus mode toggle,workspaces,should,yes,no,S19
 Broadcast input to all panes (Cmd+B),workspaces,should,yes,no,S19; free in Termius since 9.17.1
