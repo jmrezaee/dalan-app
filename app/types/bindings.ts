@@ -18,6 +18,11 @@ export const commands = {
 	vaultChangePassword: (oldPassword: string, newPassword: string) => typedError<null, AppError>(__TAURI_INVOKE("vault_change_password", { oldPassword, newPassword })),
 	/**  The UI calls this on user activity (throttled) so auto-lock counts idle time, not uptime. */
 	vaultTouch: () => __TAURI_INVOKE<void>("vault_touch"),
+	hostsTree: () => typedError<HostsTree_Serialize, AppError>(__TAURI_INVOKE("hosts_tree")),
+	hostGet: (id: string) => typedError<HostSummary_Serialize, AppError>(__TAURI_INVOKE("host_get", { id })),
+	/**  Creates when `input.id` is `None`, otherwise updates. The password goes straight into `secrets`. */
+	hostSave: (input: HostInput_Deserialize) => typedError<HostSummary_Serialize, AppError>(__TAURI_INVOKE("host_save", { input })),
+	hostDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("host_delete", { id })),
 };
 
 /** Events */
@@ -45,6 +50,92 @@ export type AutoLockWarning = {
 
 /**  Codes from replica/architecture.md. Add new ones there first. */
 export type ErrorCode = "locked" | "wrong_password" | "too_many_attempts" | "not_found" | "validation" | "in_use" | "auth_failed" | "host_unreachable" | "host_key_changed" | "kex_failed" | "port_in_use" | "permission_denied" | "internal";
+
+export type GroupSummary = GroupSummary_Serialize | GroupSummary_Deserialize;
+
+export type GroupSummary_Deserialize = {
+	id: string,
+	parent_id?: string | null,
+	label: string,
+};
+
+export type GroupSummary_Serialize = {
+	id: string,
+	parent_id: string | null,
+	label: string,
+};
+
+/**  Create and update share one shape. `id` is `None` to create. */
+export type HostInput = HostInput_Serialize | HostInput_Deserialize;
+
+/**  Create and update share one shape. `id` is `None` to create. */
+export type HostInput_Deserialize = {
+	id?: string | null,
+	label: string,
+	address: string,
+	port?: number | null,
+	username?: string | null,
+	/**  `Some(non-empty)` sets or replaces the saved password. `None` leaves it alone. */
+	password?: string | null,
+	/**  Removes the saved password (only used on update). */
+	clear_password: boolean,
+};
+
+/**  Create and update share one shape. `id` is `None` to create. */
+export type HostInput_Serialize = {
+	id: string | null,
+	label: string,
+	address: string,
+	port: number | null,
+	username: string | null,
+	/**  `Some(non-empty)` sets or replaces the saved password. `None` leaves it alone. */
+	password: string | null,
+	/**  Removes the saved password (only used on update). */
+	clear_password: boolean,
+};
+
+/**  What the list needs to draw a card. No secret, only the `has_password` flag. */
+export type HostSummary = HostSummary_Serialize | HostSummary_Deserialize;
+
+/**  What the list needs to draw a card. No secret, only the `has_password` flag. */
+export type HostSummary_Deserialize = {
+	id: string,
+	label: string,
+	address: string,
+	/**  `None` = the default (22). Shown as a placeholder in the editor. */
+	port?: number | null,
+	username?: string | null,
+	has_password: boolean,
+	group_id?: string | null,
+	/**  Epoch ms. Fits a JS number safely, so it is exported as `number` rather than bigint. */
+	last_connected_at?: number | null,
+};
+
+/**  What the list needs to draw a card. No secret, only the `has_password` flag. */
+export type HostSummary_Serialize = {
+	id: string,
+	label: string,
+	address: string,
+	/**  `None` = the default (22). Shown as a placeholder in the editor. */
+	port: number | null,
+	username: string | null,
+	has_password: boolean,
+	group_id: string | null,
+	/**  Epoch ms. Fits a JS number safely, so it is exported as `number` rather than bigint. */
+	last_connected_at: number | null,
+};
+
+export type HostsTree = HostsTree_Serialize | HostsTree_Deserialize;
+
+export type HostsTree_Deserialize = {
+	groups: GroupSummary_Deserialize[],
+	hosts: HostSummary_Deserialize[],
+};
+
+export type HostsTree_Serialize = {
+	groups: GroupSummary_Serialize[],
+	hosts: HostSummary_Serialize[],
+};
 
 export type LockReason = 
 /**  The user pressed Lock. */

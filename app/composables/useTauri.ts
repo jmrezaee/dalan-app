@@ -1,6 +1,6 @@
 // The only place that talks to Rust. Stores call these wrappers, never `invoke` directly.
 import { commands } from '~/types/bindings'
-import type { AppError } from '~/types/bindings'
+import type { AppError, HostInput } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -28,5 +28,9 @@ export function useTauri() {
     vaultLock: () => unwrap(commands.vaultLock()),
     vaultChangePassword: (oldPassword: string, newPassword: string) => unwrap(commands.vaultChangePassword(oldPassword, newPassword)),
     vaultTouch: () => commands.vaultTouch(),
+    hostsTree: () => unwrap(commands.hostsTree()),
+    hostGet: (id: string) => unwrap(commands.hostGet(id)),
+    hostSave: (input: HostInput) => unwrap(commands.hostSave(input)),
+    hostDelete: (id: string) => unwrap(commands.hostDelete(id)),
   }
 }

@@ -152,7 +152,7 @@ Streams use **Tauri `Channel`s** passed as a command argument. They are ordered 
 | --- | --- | --- | --- |
 | `hosts_tree` | groups + hosts for the list (flat, client builds the tree) | `{ group_id? , query?, tag_ids? }` | `{ groups[], hosts[] }` with tag ids, `has_password` flags |
 | `host_get` | one host with its own profile and its resolved profile | `{ id }` | `{ host, profile, resolved, sources }` |
-| `host_create` / `host_update` | upsert host + profile + env + chain + tags; password goes into `secrets` | `HostInput` | `HostSummary` |
+| `host_save` (create when `id` is null, else update) | upsert host + profile + env + chain + tags; password goes into `secrets` | `HostInput { id?, label, address, port?, username?, password?, clear_password }` | `HostSummary` |
 | `host_delete` | delete; `in_use` if it is a jump hop | `{ id }` | `()` |
 | `hosts_move` | drag into a group (F04) | `{ ids[], group_id? }` | `()` |
 | `group_create` / `group_update` | upsert group + profile | `GroupInput` | `GroupSummary` |

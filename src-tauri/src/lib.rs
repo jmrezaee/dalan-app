@@ -2,6 +2,7 @@ pub mod commands;
 pub mod db;
 pub mod error;
 pub mod events;
+pub mod hosts;
 pub mod import;
 pub mod keys;
 pub mod logs;
@@ -28,6 +29,10 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::vault::vault_lock,
             commands::vault::vault_change_password,
             commands::vault::vault_touch,
+            commands::hosts::hosts_tree,
+            commands::hosts::host_get,
+            commands::hosts::host_save,
+            commands::hosts::host_delete,
         ])
         .events(collect_events![
             events::VaultLocked,

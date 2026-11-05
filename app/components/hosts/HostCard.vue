@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // S02/S16. Spec: HostCard. Selection and focus are conveyed by ring + text, not colour alone.
-import { Ellipsis, LoaderCircle } from '@lucide/vue'
+import { Ellipsis, LoaderCircle, Pencil, Trash2 } from '@lucide/vue'
 import { cn } from '@/lib/utils'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 
 defineProps<{
   label: string
@@ -16,8 +17,10 @@ defineProps<{
   dragging?: boolean
   multiSelect?: boolean
   checked?: boolean
+  /** Row layout (h 44) for the list view. */
+  list?: boolean
 }>()
-defineEmits<{ open: []; menu: [] }>()
+defineEmits<{ open: []; select: []; edit: []; delete: [] }>()
 </script>
 
 <template>
@@ -27,9 +30,11 @@ defineEmits<{ open: []; menu: [] }>()
     :aria-selected="selected"
     :class="cn(
       'group flex gap-3 rounded-lg border border-border bg-surface p-3 transition-colors duration-100 hover:border-muted/40 hover:bg-surface-raised',
+      list && 'h-11 items-center py-0',
       selected && 'ring-2 ring-accent',
       dragging && 'opacity-50',
     )"
+    @click="$emit('select')"
     @dblclick="$emit('open')"
     @keydown.enter="$emit('open')"
   >
@@ -43,9 +48,18 @@ defineEmits<{ open: []; menu: [] }>()
         <input v-if="multiSelect" type="checkbox" :checked="checked" :aria-label="`Select ${label}`" class="accent-[var(--accent)]">
         <span class="truncate text-base">{{ label }}</span>
       </div>
-      <div class="truncate text-xs text-muted">{{ user }}@<span class="font-mono">{{ address }}</span><template v-if="port && port !== 22">:{{ port }}</template></div>
-      <div v-if="tags?.length" class="mt-1.5 flex flex-wrap gap-1"><TagChip v-for="t in tags" :key="t" :label="t" /></div>
+      <div v-if="!list" class="truncate text-xs text-muted"><template v-if="user">{{ user }}@</template><span class="font-mono">{{ address }}</span><template v-if="port && port !== 22">:{{ port }}</template></div>
+      <div v-if="tags?.length && !list" class="mt-1.5 flex flex-wrap gap-1"><TagChip v-for="t in tags" :key="t" :label="t" /></div>
     </div>
-    <IconButton label="Host actions" size="xs" class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100" @click.stop="$emit('menu')"><Ellipsis /></IconButton>
+    <span v-if="list" class="hidden truncate text-xs text-muted sm:block"><template v-if="user">{{ user }}@</template><span class="font-mono">{{ address }}</span><template v-if="port && port !== 22">:{{ port }}</template></span>
+    <DropdownMenu>
+      <DropdownMenuTrigger as-child>
+        <IconButton label="Host actions" size="xs" class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100" @click.stop><Ellipsis /></IconButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem @select="$emit('edit')"><Pencil />Edit</DropdownMenuItem>
+        <DropdownMenuItem class="text-danger" @select="$emit('delete')"><Trash2 />Delete</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   </div>
 </template>

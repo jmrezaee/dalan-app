@@ -26,7 +26,8 @@ pub struct AppState {
     // connections are not Sync: one writer at a time, as architecture.md decides.
     pub db: Arc<Mutex<Connection>>,
     /// `Some` while unlocked. Dropping it wipes the key (see `Zeroizing`).
-    session: Mutex<Option<VaultSession>>,
+    // Arc for the same reason as `db`: `with_db_session` moves a clone into spawn_blocking.
+    session: Arc<Mutex<Option<VaultSession>>>,
     attempts: Mutex<Attempts>,
     /// Last user activity, epoch ms. Drives auto-lock.
     last_activity: AtomicI64,
@@ -38,7 +39,7 @@ impl AppState {
     pub fn new(conn: Connection) -> Self {
         Self {
             db: Arc::new(Mutex::new(conn)),
-            session: Mutex::new(None),
+            session: Arc::new(Mutex::new(None)),
             attempts: Mutex::new(Attempts::default()),
             last_activity: AtomicI64::new(now_ms()),
             warned: AtomicBool::new(false),
@@ -59,6 +60,24 @@ impl AppState {
             f(&mut conn)
         })
         .await?
+    }
+
+    /// Like `with_db`, but also hands the unlocked vault session to `f` (for commands that
+    /// read or write secrets). Fails with `locked` if the vault is locked. Lock order is
+    /// always db first, then session, so two callers can't deadlock.
+    pub async fn with_db_session<T, F>(&self, f: F) -> AppResult<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection, &VaultSession) -> AppResult<T> + Send + 'static,
+    {
+        let session = Arc::clone(&self.session);
+        self.with_db(move |conn| {
+            let guard = session
+                .lock()
+                .map_err(|_| AppError::internal("vault lock poisoned"))?;
+            f(conn, guard.as_ref().ok_or_else(AppError::locked)?)
+        })
+        .await
     }
 
     pub fn is_unlocked(&self) -> bool {
