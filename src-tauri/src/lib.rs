@@ -14,6 +14,7 @@ pub mod sftp;
 pub mod snippets;
 pub mod ssh;
 pub mod state;
+pub mod themes;
 pub mod tunnels;
 pub mod vault;
 pub mod workspaces;
@@ -58,6 +59,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sftp::edit_open,
             commands::sftp::edit_upload,
             commands::sftp::edit_close,
+            commands::themes::terminal_themes_list,
+            commands::themes::terminal_theme_set,
             commands::import::import_preview,
             commands::import::import_apply,
             commands::sftp::sftp_open,

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { toast } from 'vue-sonner'
-import type { GroupInput, GroupSummary, HostInput, HostSummary, Inherited } from '~/types/bindings'
+import type { ProfileTheme, GroupInput, GroupSummary, HostInput, HostSummary, Inherited } from '~/types/bindings'
 import { CommandError, useTauri } from '~/composables/useTauri'
 
 type View = 'grid' | 'list'
@@ -14,6 +14,10 @@ export const useHostsStore = defineStore('hosts', () => {
   const loaded = ref(false)
   /** S25 import dialog. */
   const importOpen = ref(false)
+  /** Terminal theme per host and group: its own, and what it inherits (with the group that sets it). */
+  const themes = ref<{ hosts: Record<string, ProfileTheme>, groups: Record<string, ProfileTheme> }>({ hosts: {}, groups: {} })
+  /** The theme name a host's terminal uses, or `null` for the app default. */
+  const themeFor = (hostId: string) => { const t = themes.value.hosts[hostId]; return t ? (t.own ?? t.inherited) : null }
   const query = ref('')
   const view = ref<View>((typeof localStorage !== 'undefined' && localStorage.getItem(VIEW_KEY) === 'list') ? 'list' : 'grid')
   /** `null` = the top level. */
@@ -95,6 +99,8 @@ export const useHostsStore = defineStore('hosts', () => {
   async function refresh() {
     try {
       const t = await api.hostsTree()
+      const th = await api.terminalThemesList()
+      themes.value = { hosts: Object.fromEntries(th.hosts.map(x => [x.id, x])), groups: Object.fromEntries(th.groups.map(x => [x.id, x])) }
       hosts.value = t.hosts
       groups.value = t.groups
       // The group you were in may have been deleted.
@@ -108,9 +114,10 @@ export const useHostsStore = defineStore('hosts', () => {
   }
 
   /** Returns an error string for the form to show, or `''` on success. */
-  async function save(input: HostInput) {
+  async function save(input: HostInput, theme?: string | null) {
     try {
-      await api.hostSave(input)
+      const saved = await api.hostSave(input)
+      if (theme !== undefined) await api.terminalThemeSet('host', saved.id, theme)
     }
     catch (e) {
       return message(e)
@@ -120,9 +127,10 @@ export const useHostsStore = defineStore('hosts', () => {
     return ''
   }
 
-  async function saveGroup(input: GroupInput) {
+  async function saveGroup(input: GroupInput, theme?: string | null) {
     try {
-      await api.groupSave(input)
+      const saved = await api.groupSave(input)
+      if (theme !== undefined) await api.terminalThemeSet('group', saved.id, theme)
     }
     catch (e) {
       return message(e)
@@ -182,7 +190,7 @@ export const useHostsStore = defineStore('hosts', () => {
   }
 
   return {
-    hosts, groups, loaded, importOpen, query, view, currentGroupId, selectedTags, editing, editingGroup,
+    hosts, groups, loaded, importOpen, themes, themeFor, query, view, currentGroupId, selectedTags, editing, editingGroup,
     allTags, searching, currentGroup, breadcrumb, childGroups, visibleHosts,
     groupLabel, groupOptions, inheritedFor, toggleTag, refresh, save, saveGroup, remove, removeGroup, move, clear,
   }

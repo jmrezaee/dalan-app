@@ -19,7 +19,7 @@ const open = computed({
 })
 const host = computed(() => (hosts.editing && hosts.editing !== 'new' ? hosts.editing : null))
 
-const blank = () => ({ label: '', address: '', port: '' as number | string, username: '', password: '', group_id: hosts.currentGroupId as string | null, tags: [] as string[], identity_id: null as string | null, key_id: null as string | null, startup_snippet_id: null as string | null, jump_mode: 'inherit', jump_host_ids: [] as string[] })
+const blank = () => ({ label: '', address: '', port: '' as number | string, username: '', password: '', group_id: hosts.currentGroupId as string | null, tags: [] as string[], identity_id: null as string | null, key_id: null as string | null, startup_snippet_id: null as string | null, jump_mode: 'inherit', jump_host_ids: [] as string[], terminal_theme: null as string | null })
 const form = reactive(blank())
 const clearPassword = ref(false)
 const error = ref('')
@@ -32,13 +32,19 @@ const dirty = computed(() => current.value !== snapshot.value)
 // Reset the form each time the sheet opens, from the host being edited (or blank, in the group you are viewing).
 watch(() => hosts.editing, (e) => {
   const h = e && e !== 'new' ? (e as HostSummary) : null
-  Object.assign(form, h ? { label: h.label, address: h.address, port: h.port ?? '', username: h.username ?? '', password: '', group_id: h.group_id, tags: [...h.tags], identity_id: h.identity_id, key_id: h.key_id, startup_snippet_id: h.startup_snippet_id, jump_mode: h.jump_mode, jump_host_ids: [...h.jump_host_ids] } : blank())
+  Object.assign(form, h ? { label: h.label, address: h.address, port: h.port ?? '', username: h.username ?? '', password: '', group_id: h.group_id, tags: [...h.tags], identity_id: h.identity_id, key_id: h.key_id, startup_snippet_id: h.startup_snippet_id, jump_mode: h.jump_mode, jump_host_ids: [...h.jump_host_ids], terminal_theme: hosts.themes.hosts[h.id]?.own ?? null } : blank())
   clearPassword.value = false
   error.value = ''
   snapshot.value = current.value
 })
 
 const inherited = computed(() => hosts.inheritedFor(form.group_id))
+/** The theme the chosen group (or its ancestors) would give this host. */
+const groupTheme = computed(() => {
+  const g = form.group_id ? hosts.themes.groups[form.group_id] : null
+  const label = form.group_id ? hosts.groupLabel(form.group_id) : null
+  return g?.own ? { inherited: g.own, inherited_from: label } : g ?? null
+})
 const hasOwnPassword = computed(() => !!host.value?.has_password && !clearPassword.value)
 
 async function submit() {
@@ -59,7 +65,7 @@ async function submit() {
     startup_snippet_id: form.startup_snippet_id,
     jump_mode: form.jump_mode,
     jump_host_ids: form.jump_host_ids,
-  })
+  }, form.terminal_theme)
   busy.value = false
   if (!error.value) hosts.editing = null
 }
@@ -155,6 +161,14 @@ async function submit() {
               :inherited-from="inherited.jump?.group"
               :target="form.label"
             />
+          </div>
+        </section>
+
+        <section class="flex flex-col gap-3">
+          <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">Terminal</h3>
+          <div class="flex flex-col gap-1.5">
+            <Label for="host-theme">Theme</Label>
+            <ThemeSelect id="host-theme" v-model="form.terminal_theme" :inherited-theme="groupTheme?.inherited" :inherited-from="groupTheme?.inherited_from" />
           </div>
         </section>
 

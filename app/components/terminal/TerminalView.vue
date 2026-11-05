@@ -18,7 +18,9 @@ let fit: FitAddon | undefined
 let observer: ResizeObserver | undefined
 const encoder = new TextEncoder()
 
-const themeFor = (t: 'dark' | 'light') => terminalThemes[t === 'light' ? 'default-light' : 'default-dark']
+const hosts = useHostsStore()
+/** The host's (or its group's) chosen theme, else the default for the app's light/dark mode. */
+const themeFor = (t: 'dark' | 'light') => terminalThemes[hosts.themeFor(props.session.hostId) ?? ''] ?? terminalThemes[t === 'light' ? 'default-light' : 'default-dark']
 
 function refit() {
   // A hidden tab has no size; fitting then would collapse the terminal to 0 columns.
@@ -81,7 +83,7 @@ watch(() => settings.terminal, (t) => {
   term.options.scrollback = t.scrollback
   nextTick(refit)
 }, { deep: true })
-watch(() => settings.resolvedTheme, (t) => { if (term) term.options.theme = themeFor(t) })
+watch([() => settings.resolvedTheme, () => hosts.themeFor(props.session.hostId)], () => { if (term) term.options.theme = themeFor(settings.resolvedTheme) })
 
 watch(() => props.active, (a) => {
   if (!a) return

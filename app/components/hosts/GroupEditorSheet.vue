@@ -18,7 +18,7 @@ const open = computed({
 })
 const group = computed(() => (hosts.editingGroup && hosts.editingGroup !== 'new' ? hosts.editingGroup : null))
 
-const blank = () => ({ label: '', parent_id: hosts.currentGroupId as string | null, port: '' as number | string, username: '', password: '', identity_id: null as string | null, key_id: null as string | null, startup_snippet_id: null as string | null, jump_mode: 'inherit', jump_host_ids: [] as string[] })
+const blank = () => ({ label: '', parent_id: hosts.currentGroupId as string | null, port: '' as number | string, username: '', password: '', identity_id: null as string | null, key_id: null as string | null, startup_snippet_id: null as string | null, jump_mode: 'inherit', jump_host_ids: [] as string[], terminal_theme: null as string | null })
 const form = reactive(blank())
 const clearPassword = ref(false)
 const error = ref('')
@@ -29,13 +29,17 @@ const dirty = computed(() => current.value !== snapshot.value)
 
 watch(() => hosts.editingGroup, (e) => {
   const g = e && e !== 'new' ? (e as GroupSummary) : null
-  Object.assign(form, g ? { label: g.label, parent_id: g.parent_id, port: g.port ?? '', username: g.username ?? '', password: '', identity_id: g.identity_id, key_id: g.key_id, startup_snippet_id: g.startup_snippet_id, jump_mode: g.jump_mode, jump_host_ids: [...g.jump_host_ids] } : blank())
+  Object.assign(form, g ? { label: g.label, parent_id: g.parent_id, port: g.port ?? '', username: g.username ?? '', password: '', identity_id: g.identity_id, key_id: g.key_id, startup_snippet_id: g.startup_snippet_id, jump_mode: g.jump_mode, jump_host_ids: [...g.jump_host_ids], terminal_theme: hosts.themes.groups[g.id]?.own ?? null } : blank())
   clearPassword.value = false
   error.value = ''
   snapshot.value = current.value
 })
 
 const inherited = computed(() => hosts.inheritedFor(form.parent_id))
+const parentTheme = computed(() => {
+  const g = form.parent_id ? hosts.themes.groups[form.parent_id] : null
+  return g?.own ? { inherited: g.own, inherited_from: hosts.groupLabel(form.parent_id!) } : g ?? null
+})
 const hasOwnPassword = computed(() => !!group.value?.has_password && !clearPassword.value)
 
 async function submit() {
@@ -54,7 +58,7 @@ async function submit() {
     startup_snippet_id: form.startup_snippet_id,
     jump_mode: form.jump_mode,
     jump_host_ids: form.jump_host_ids,
-  })
+  }, form.terminal_theme)
   busy.value = false
   if (!error.value) hosts.editingGroup = null
 }
@@ -111,6 +115,14 @@ async function submit() {
             <button v-if="hasOwnPassword" type="button" class="self-start text-xs text-muted underline-offset-2 hover:text-text hover:underline" @click="clearPassword = true">Remove saved password</button>
             <p v-else-if="clearPassword" class="text-xs text-muted">The saved password is removed when you save.</p>
             <p v-if="!hasOwnPassword && !form.password && inherited.password" class="text-xs text-muted">Uses the password from {{ inherited.password }}.</p>
+          </div>
+        </section>
+
+        <section class="flex flex-col gap-3">
+          <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">Terminal</h3>
+          <div class="flex flex-col gap-1.5">
+            <Label for="group-theme">Theme</Label>
+            <ThemeSelect id="group-theme" v-model="form.terminal_theme" :inherited-theme="parentTheme?.inherited" :inherited-from="parentTheme?.inherited_from" />
           </div>
         </section>
 

@@ -8,6 +8,7 @@ pub mod session;
 pub mod settings;
 pub mod sftp;
 pub mod snippets;
+pub mod themes;
 pub mod tunnels;
 pub mod vault;
 pub mod workspaces;

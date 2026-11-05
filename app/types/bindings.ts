@@ -59,6 +59,9 @@ export const commands = {
 	 */
 	editUpload: (editId: string, force: boolean) => typedError<EditUpload, AppError>(__TAURI_INVOKE("edit_upload", { editId, force })),
 	editClose: (editId: string) => __TAURI_INVOKE<void>("edit_close", { editId }),
+	terminalThemesList: () => typedError<Themes_Serialize, AppError>(__TAURI_INVOKE("terminal_themes_list")),
+	/**  `kind` is `host` or `group`; `theme: None` goes back to inheriting. */
+	terminalThemeSet: (kind: string, id: string, theme: string | null) => typedError<null, AppError>(__TAURI_INVOKE("terminal_theme_set", { kind, id, theme })),
 	/**
 	 *  `kind` is `ssh_config` or `csv`. `path` is a file chosen in the dialog; for `ssh_config`,
 	 *  `None` reads `~/.ssh/config`. Rust reads the file, the webview only knows the path.
@@ -721,6 +724,28 @@ export type PackageSummary = {
 	label: string,
 };
 
+export type ProfileTheme = ProfileTheme_Serialize | ProfileTheme_Deserialize;
+
+export type ProfileTheme_Deserialize = {
+	/**  Host or group id. */
+	id: string,
+	/**  Set on the host or group itself. */
+	own?: string | null,
+	/**  What it would get from the groups above, and the group that sets it. */
+	inherited?: string | null,
+	inherited_from?: string | null,
+};
+
+export type ProfileTheme_Serialize = {
+	/**  Host or group id. */
+	id: string,
+	/**  Set on the host or group itself. */
+	own: string | null,
+	/**  What it would get from the groups above, and the group that sets it. */
+	inherited: string | null,
+	inherited_from: string | null,
+};
+
 /**  The UI's answer to a prompt. `accept: false` is Cancel. `text` carries a password. */
 export type PromptAnswer = PromptAnswer_Serialize | PromptAnswer_Deserialize;
 
@@ -851,6 +876,18 @@ export type TemplateSummary = {
 	layout: string,
 	/**  JSON array: `[{ "host_id": "...", "title": "..." }]`. */
 	panes: string,
+};
+
+export type Themes = Themes_Serialize | Themes_Deserialize;
+
+export type Themes_Deserialize = {
+	hosts: ProfileTheme_Deserialize[],
+	groups: ProfileTheme_Deserialize[],
+};
+
+export type Themes_Serialize = {
+	hosts: ProfileTheme_Serialize[],
+	groups: ProfileTheme_Serialize[],
 };
 
 export type TransferEvent = TransferEvent_Serialize | TransferEvent_Deserialize;

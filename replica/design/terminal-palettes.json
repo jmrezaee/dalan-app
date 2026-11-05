@@ -1,0 +1,102 @@
+{
+ "midnight": {
+  "label": "Midnight",
+  "bg": "#0b1020",
+  "fg": "#cfd6e6",
+  "cursor": "#7aa2ff",
+  "sel": "#7aa2ff55",
+  "ansi": [
+   "#1c2438",
+   "#f2777a",
+   "#8fd694",
+   "#f0c674",
+   "#7aa2ff",
+   "#c397d8",
+   "#6fd0d8",
+   "#cfd6e6",
+   "#3a4666",
+   "#ff9a9d",
+   "#aee8b2",
+   "#ffe09a",
+   "#a4bfff",
+   "#dcb8ee",
+   "#97e6ee",
+   "#ffffff"
+  ]
+ },
+ "ember": {
+  "label": "Ember",
+  "bg": "#1a1411",
+  "fg": "#e6d8c8",
+  "cursor": "#ff9e57",
+  "sel": "#ff9e5755",
+  "ansi": [
+   "#2c231d",
+   "#ef6b5f",
+   "#a9c46c",
+   "#f2b84b",
+   "#6fa3d6",
+   "#d38fb5",
+   "#6cc4b4",
+   "#e6d8c8",
+   "#53443a",
+   "#ff8f84",
+   "#c4dc8c",
+   "#ffd075",
+   "#93bde6",
+   "#e6aecb",
+   "#92dccd",
+   "#fff6ea"
+  ]
+ },
+ "forest": {
+  "label": "Forest",
+  "bg": "#0f1a14",
+  "fg": "#d3e2d4",
+  "cursor": "#6fe39a",
+  "sel": "#6fe39a55",
+  "ansi": [
+   "#1d2d23",
+   "#e57373",
+   "#7fd48b",
+   "#e3c76b",
+   "#6aa7d9",
+   "#b58ad6",
+   "#5fd0c0",
+   "#d3e2d4",
+   "#3b5645",
+   "#ff9494",
+   "#a1ecab",
+   "#f5dd8c",
+   "#8fc2ee",
+   "#cfa9ea",
+   "#86e6d8",
+   "#f4fff5"
+  ]
+ },
+ "paper": {
+  "label": "Paper",
+  "bg": "#faf6ee",
+  "fg": "#2d2a26",
+  "cursor": "#1f7a72",
+  "sel": "#1f7a7233",
+  "ansi": [
+   "#2d2a26",
+   "#b3261e",
+   "#2f7d32",
+   "#8a5a00",
+   "#1d5fb4",
+   "#8e3b8f",
+   "#136f6a",
+   "#d9d3c7",
+   "#6b655c",
+   "#c9342b",
+   "#3f8f43",
+   "#9c6a00",
+   "#2b73cc",
+   "#a24fa3",
+   "#1f8a84",
+   "#faf6ee"
+  ]
+ }
+}

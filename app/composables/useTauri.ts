@@ -85,6 +85,8 @@ export function useTauri() {
     },
     editUpload: (editId: string, force: boolean) => unwrap(commands.editUpload(editId, force)),
     editClose: (editId: string) => commands.editClose(editId),
+    terminalThemesList: () => unwrap(commands.terminalThemesList()),
+    terminalThemeSet: (kind: 'host' | 'group', id: string, theme: string | null) => unwrap(commands.terminalThemeSet(kind, id, theme)),
     importPreview: (kind: 'ssh_config' | 'csv', path: string | null) => unwrap(commands.importPreview(kind, path)),
     importApply: (rows: ImportRow[], groupId: string | null) => unwrap(commands.importApply(rows, groupId)),
     workspacesList: () => unwrap(commands.workspacesList()),
