@@ -1,0 +1,126 @@
+# Builds installers for macOS (universal), Windows (x64) and Linux when a `v*` tag is pushed, signs
+# the updates, and uploads everything to a draft GitHub Release with checksums. Setup: replica/launch/release.md.
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches the app version
+        run: |
+          v=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v${v}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} doesn't match version ${v} in src-tauri/tauri.conf.json"; exit 1
+          fi
+      - name: Brand sweep and contrast
+        run: |
+          python3 replica/sweep.py . --config replica/brand.json
+          python3 replica/design/contrast.py replica/design/tokens.json
+      - name: Updater key is set
+        run: |
+          if grep -q REPLACE_WITH_UPDATER_PUBLIC_KEY src-tauri/tauri.release.conf.json; then
+            echo "::error::Put the updater public key in src-tauri/tauri.release.conf.json (see replica/launch/release.md)"; exit 1
+          fi
+          if [ -z "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" ]; then
+            echo "::error::Add the TAURI_SIGNING_PRIVATE_KEY secret (see replica/launch/release.md)"; exit 1
+          fi
+
+  build:
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            os: macos-latest
+            args: --target universal-apple-darwin
+          - platform: windows
+            os: windows-latest
+            args: ''
+          - platform: linux
+            os: ubuntu-22.04
+            args: ''
+    runs-on: ${{ matrix.os }}
+    env:
+      # `secrets` can't be tested in a step's `if`, so the check goes through the job's env.
+      HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux system libraries
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: pnpm install --frozen-lockfile
+
+      # The release config turns the updater on. OWNER/dalan-app becomes this repository.
+      - name: Point the updater at this repository
+        shell: bash
+        run: sed -i.bak "s#OWNER/dalan-app#${{ github.repository }}#" src-tauri/tauri.release.conf.json
+
+      # Signing is optional until the Apple Developer account exists: with no secrets, the app is
+      # built unsigned (right-click -> Open on first launch). Values are only exported when present.
+      - name: Apple signing and notarization
+        if: matrix.platform == 'macos' && env.HAS_APPLE == 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            echo "$v=${!v}" >> "$GITHUB_ENV"
+          done
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Dalan ${{ github.ref_name }}
+          releaseBody: See the assets below to download. Checksums are in SHA256SUMS.txt.
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+          projectPath: .
+          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
+
+  checksums:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: SHA256SUMS.txt on the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir assets && cd assets
+          gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+            --pattern '*.dmg' --pattern '*.exe' --pattern '*.msi' --pattern '*.AppImage' --pattern '*.deb' --pattern '*.rpm'
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          gh release upload "${GITHUB_REF_NAME}" SHA256SUMS.txt --repo "${GITHUB_REPOSITORY}" --clobber

@@ -59,6 +59,15 @@ export const commands = {
 	 */
 	editUpload: (editId: string, force: boolean) => typedError<EditUpload, AppError>(__TAURI_INVOKE("edit_upload", { editId, force })),
 	editClose: (editId: string) => __TAURI_INVOKE<void>("edit_close", { editId }),
+	/**  `None` = you are up to date. */
+	updateCheck: () => typedError<UpdateInfo_Serialize | null, AppError>(__TAURI_INVOKE("update_check")),
+	/**  Downloads the newest version, installs it and restarts the app. */
+	updateInstall: () => typedError<null, AppError>(__TAURI_INVOKE("update_install")),
+	/**
+	 *  Text to paste into an issue: version, system, and the last log lines with servers, addresses
+	 *  and usernames removed. Works while locked (then only the generic removal applies).
+	 */
+	diagnosticsText: () => typedError<string, AppError>(__TAURI_INVOKE("diagnostics_text")),
 	/**  `host_id: None` = the local terminal. Newest first. */
 	historyList: (hostId: string | null, query: string | null, limit: number) => typedError<HistoryEntry[], AppError>(__TAURI_INVOKE("history_list", { hostId, query, limit })),
 	/**  Clears one server's history, or everything when `all` is true. */
@@ -1081,6 +1090,18 @@ export type TunnelChanged_Serialize = {
 };
 
 export type TunnelState = "stopped" | "starting" | "active" | "reconnecting" | "error";
+
+export type UpdateInfo = UpdateInfo_Serialize | UpdateInfo_Deserialize;
+
+export type UpdateInfo_Deserialize = {
+	version: string,
+	notes?: string | null,
+};
+
+export type UpdateInfo_Serialize = {
+	version: string,
+	notes: string | null,
+};
 
 export type VaultLocked = {
 	reason: LockReason,

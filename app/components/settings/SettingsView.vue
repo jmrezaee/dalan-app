@@ -1,13 +1,50 @@
 <script setup lang="ts">
 // S23 (basics): appearance, terminal, shortcuts, security. Changes save as you make them.
+import { toast } from 'vue-sonner'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 
 const settings = useSettingsStore()
-const sections = ['Appearance', 'Terminal', 'Logs', 'Shortcuts', 'Security'] as const
+const sections = ['Appearance', 'Terminal', 'Logs', 'Shortcuts', 'Security', 'About'] as const
 const section = ref<typeof sections[number]>('Appearance')
 const changeOpen = ref(false)
+
+// ---- About: version, updates, diagnostics.
+const api = useTauri()
+const info = ref<{ version: string, platform: string, data_dir: string } | null>(null)
+const update = ref<{ state: 'idle' | 'checking' | 'none' | 'found' | 'installing' | 'error', version?: string, notes?: string | null, error?: string }>({ state: 'idle' })
+watch(section, async (s) => {
+  if (s === 'About' && !info.value) info.value = await api.appInfo().catch(() => null)
+})
+async function checkUpdate() {
+  update.value = { state: 'checking' }
+  try {
+    const u = await api.updateCheck()
+    update.value = u ? { state: 'found', version: u.version, notes: u.notes } : { state: 'none' }
+  }
+  catch (e) {
+    update.value = { state: 'error', error: e instanceof Error ? e.message : 'Couldn\'t check for updates.' }
+  }
+}
+async function installUpdate() {
+  update.value = { ...update.value, state: 'installing' }
+  try {
+    await api.updateInstall() // restarts the app when it works
+  }
+  catch (e) {
+    update.value = { state: 'error', error: e instanceof Error ? e.message : 'The update failed.' }
+  }
+}
+async function copyDiagnostics() {
+  try {
+    await navigator.clipboard.writeText(await api.diagnosticsText())
+    toast('Diagnostics copied. Servers, addresses and usernames are removed.')
+  }
+  catch {
+    toast.error('Couldn\'t copy the diagnostics.')
+  }
+}
 
 const THEMES = [
   { value: 'system', label: 'System', swatch: 'bg-gradient-to-r from-neutral-900 from-50% to-white to-50%' },
@@ -97,6 +134,27 @@ const num = (v: string | number, fallback: number) => (Number.isFinite(Number(v)
             <span class="flex-1">{{ name }}</span><Kbd>{{ keys }}</Kbd>
           </div>
           <p class="pt-3 text-xs text-muted">Rebinding shortcuts comes later.</p>
+        </template>
+
+        <template v-else-if="section === 'About'">
+          <div class="row"><span class="flex-1">Version</span><span class="font-mono text-sm">{{ info?.version ?? '…' }}</span></div>
+          <div class="row"><span class="flex-1">System</span><span class="text-sm text-muted">{{ info?.platform ?? '…' }}</span></div>
+          <div class="row"><span class="flex-1">Data folder</span><span class="truncate font-mono text-xs text-muted" :title="info?.data_dir">{{ info?.data_dir ?? '…' }}</span></div>
+          <div class="row">
+            <span class="flex flex-1 flex-col">Updates
+              <span v-if="update.state === 'none'" class="text-xs text-muted">You're on the newest version.</span>
+              <span v-else-if="update.state === 'found'" class="text-xs text-muted">Version {{ update.version }} is available.</span>
+              <span v-else-if="update.state === 'installing'" class="text-xs text-muted">Downloading and installing. Dalan restarts when it's done.</span>
+              <span v-else-if="update.state === 'error'" role="alert" class="text-xs text-danger">{{ update.error }}</span>
+              <span v-else class="text-xs text-muted">Checks GitHub Releases. Nothing is sent but the request itself.</span>
+            </span>
+            <Button v-if="update.state === 'found'" @click="installUpdate">Install and restart</Button>
+            <Button v-else variant="secondary" :loading="update.state === 'checking' || update.state === 'installing'" @click="checkUpdate">Check for updates</Button>
+          </div>
+          <div class="row">
+            <span class="flex flex-1 flex-col">Copy diagnostics<span class="text-xs text-muted">Version, system and the last 200 log lines, with servers, addresses and usernames removed. Paste it into an issue.</span></span>
+            <Button variant="secondary" @click="copyDiagnostics">Copy</Button>
+          </div>
         </template>
 
         <template v-else>

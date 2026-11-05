@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod commands;
 pub mod db;
+pub mod diagnostics;
 pub mod env;
 pub mod error;
 pub mod events;
@@ -63,6 +64,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sftp::edit_open,
             commands::sftp::edit_upload,
             commands::sftp::edit_close,
+            commands::release::update_check,
+            commands::release::update_install,
+            commands::release::diagnostics_text,
             commands::history::history_list,
             commands::history::history_clear,
             commands::logs::logs_list,
@@ -151,6 +155,11 @@ pub fn run() {
                 [],
             );
             app.manage(AppState::new(conn));
+            // The updater only exists in release builds, whose config carries `plugins.updater`.
+            if app.config().plugins.0.contains_key("updater") {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+            }
             vault::spawn_auto_lock(app.handle().clone());
             Ok(())
         })

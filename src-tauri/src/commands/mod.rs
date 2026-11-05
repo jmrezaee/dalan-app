@@ -9,6 +9,7 @@ pub mod import;
 pub mod keychain;
 pub mod logs;
 pub mod proxy;
+pub mod release;
 pub mod session;
 pub mod settings;
 pub mod sftp;
