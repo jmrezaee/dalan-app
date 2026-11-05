@@ -1,0 +1,978 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Dalan design preview</title><style>/*! tailwindcss v4.3.4 | MIT License | https://tailwindcss.com */
+@layer properties;
+@layer theme, base, components, utilities;
+@layer theme {
+  :root, :host {
+    --spacing: 0.25rem;
+    --font-weight-medium: 500;
+    --font-weight-semibold: 600;
+    --default-font-family: var(--font-ui);
+    --default-mono-font-family: var(--font-code);
+  }
+}
+@layer base {
+  *, ::after, ::before, ::backdrop, ::file-selector-button {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    border: 0 solid;
+  }
+  html, :host {
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
+    tab-size: 4;
+    font-family: var(--default-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji");
+    font-feature-settings: var(--default-font-feature-settings, normal);
+    font-variation-settings: var(--default-font-variation-settings, normal);
+    -webkit-tap-highlight-color: transparent;
+  }
+  hr {
+    height: 0;
+    color: inherit;
+    border-top-width: 1px;
+  }
+  abbr:where([title]) {
+    -webkit-text-decoration: underline dotted;
+    text-decoration: underline dotted;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-size: inherit;
+    font-weight: inherit;
+  }
+  a {
+    color: inherit;
+    -webkit-text-decoration: inherit;
+    text-decoration: inherit;
+  }
+  b, strong {
+    font-weight: bolder;
+  }
+  code, kbd, samp, pre {
+    font-family: var(--default-mono-font-family, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);
+    font-feature-settings: var(--default-mono-font-feature-settings, normal);
+    font-variation-settings: var(--default-mono-font-variation-settings, normal);
+    font-size: 1em;
+  }
+  small {
+    font-size: 80%;
+  }
+  sub, sup {
+    font-size: 75%;
+    line-height: 0;
+    position: relative;
+    vertical-align: baseline;
+  }
+  sub {
+    bottom: -0.25em;
+  }
+  sup {
+    top: -0.5em;
+  }
+  table {
+    text-indent: 0;
+    border-color: inherit;
+    border-collapse: collapse;
+  }
+  :-moz-focusring:where(:not(iframe)) {
+    outline: auto;
+  }
+  progress {
+    vertical-align: baseline;
+  }
+  summary {
+    display: list-item;
+  }
+  ol, ul, menu {
+    list-style: none;
+  }
+  img, svg, video, canvas, audio, iframe, embed, object {
+    display: block;
+    vertical-align: middle;
+  }
+  img, video {
+    max-width: 100%;
+    height: auto;
+  }
+  button, input, select, optgroup, textarea, ::file-selector-button {
+    font: inherit;
+    font-feature-settings: inherit;
+    font-variation-settings: inherit;
+    letter-spacing: inherit;
+    color: inherit;
+    border-radius: 0;
+    background-color: transparent;
+    opacity: 1;
+  }
+  :where(select:is([multiple], [size])) optgroup {
+    font-weight: bolder;
+  }
+  :where(select:is([multiple], [size])) optgroup option {
+    padding-inline-start: 20px;
+  }
+  ::file-selector-button {
+    margin-inline-end: 4px;
+  }
+  ::placeholder {
+    opacity: 1;
+  }
+  @supports (not (-webkit-appearance: -apple-pay-button))  or (contain-intrinsic-size: 1px) {
+    ::placeholder {
+      color: currentcolor;
+      @supports (color: color-mix(in lab, red, red)) {
+        color: color-mix(in oklab, currentcolor 50%, transparent);
+      }
+    }
+  }
+  textarea {
+    resize: vertical;
+  }
+  ::-webkit-search-decoration {
+    -webkit-appearance: none;
+  }
+  ::-webkit-date-and-time-value {
+    min-height: 1lh;
+    text-align: inherit;
+  }
+  ::-webkit-datetime-edit {
+    display: inline-flex;
+  }
+  ::-webkit-datetime-edit-fields-wrapper {
+    padding: 0;
+  }
+  ::-webkit-datetime-edit, ::-webkit-datetime-edit-year-field, ::-webkit-datetime-edit-month-field, ::-webkit-datetime-edit-day-field, ::-webkit-datetime-edit-hour-field, ::-webkit-datetime-edit-minute-field, ::-webkit-datetime-edit-second-field, ::-webkit-datetime-edit-millisecond-field, ::-webkit-datetime-edit-meridiem-field {
+    padding-block: 0;
+  }
+  ::-webkit-calendar-picker-indicator {
+    line-height: 1;
+  }
+  :-moz-ui-invalid {
+    box-shadow: none;
+  }
+  button, input:where([type="button"], [type="reset"], [type="submit"]), ::file-selector-button {
+    appearance: button;
+  }
+  ::-webkit-inner-spin-button, ::-webkit-outer-spin-button {
+    height: auto;
+  }
+  [hidden]:where(:not([hidden="until-found"])) {
+    display: none !important;
+  }
+}
+@layer utilities {
+  .absolute {
+    position: absolute;
+  }
+  .relative {
+    position: relative;
+  }
+  .top-3 {
+    top: calc(var(--spacing) * 3);
+  }
+  .right-3 {
+    right: calc(var(--spacing) * 3);
+  }
+  .col-span-2 {
+    grid-column: span 2 / span 2;
+  }
+  .mt-1 {
+    margin-top: var(--spacing);
+  }
+  .mt-2 {
+    margin-top: calc(var(--spacing) * 2);
+  }
+  .mr-auto {
+    margin-right: auto;
+  }
+  .ml-auto {
+    margin-left: auto;
+  }
+  .block {
+    display: block;
+  }
+  .flex {
+    display: flex;
+  }
+  .grid {
+    display: grid;
+  }
+  .size-2 {
+    width: calc(var(--spacing) * 2);
+    height: calc(var(--spacing) * 2);
+  }
+  .size-8 {
+    width: calc(var(--spacing) * 8);
+    height: calc(var(--spacing) * 8);
+  }
+  .h-5 {
+    height: calc(var(--spacing) * 5);
+  }
+  .h-7 {
+    height: calc(var(--spacing) * 7);
+  }
+  .h-8 {
+    height: calc(var(--spacing) * 8);
+  }
+  .h-10 {
+    height: calc(var(--spacing) * 10);
+  }
+  .h-12 {
+    height: calc(var(--spacing) * 12);
+  }
+  .w-40 {
+    width: calc(var(--spacing) * 40);
+  }
+  .w-\[150px\] {
+    width: 150px;
+  }
+  .w-\[300px\] {
+    width: 300px;
+  }
+  .min-w-0 {
+    min-width: 0px;
+  }
+  .flex-1 {
+    flex: 1;
+  }
+  .grid-cols-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .flex-wrap {
+    flex-wrap: wrap;
+  }
+  .place-items-center {
+    place-items: center;
+  }
+  .items-center {
+    align-items: center;
+  }
+  .items-end {
+    align-items: flex-end;
+  }
+  .justify-between {
+    justify-content: space-between;
+  }
+  .justify-end {
+    justify-content: flex-end;
+  }
+  .gap-1 {
+    gap: var(--spacing);
+  }
+  .gap-2 {
+    gap: calc(var(--spacing) * 2);
+  }
+  .gap-3 {
+    gap: calc(var(--spacing) * 3);
+  }
+  .gap-4 {
+    gap: calc(var(--spacing) * 4);
+  }
+  :where(.space-y-0\.5 > :not(:last-child)) {
+    --tw-space-y-reverse: 0;
+    margin-block-start: calc(calc(var(--spacing) * 0.5) * var(--tw-space-y-reverse));
+    margin-block-end: calc(calc(var(--spacing) * 0.5) * calc(1 - var(--tw-space-y-reverse)));
+  }
+  :where(.space-y-1 > :not(:last-child)) {
+    --tw-space-y-reverse: 0;
+    margin-block-start: calc(var(--spacing) * var(--tw-space-y-reverse));
+    margin-block-end: calc(var(--spacing) * calc(1 - var(--tw-space-y-reverse)));
+  }
+  :where(.space-y-4 > :not(:last-child)) {
+    --tw-space-y-reverse: 0;
+    margin-block-start: calc(calc(var(--spacing) * 4) * var(--tw-space-y-reverse));
+    margin-block-end: calc(calc(var(--spacing) * 4) * calc(1 - var(--tw-space-y-reverse)));
+  }
+  .overflow-hidden {
+    overflow: hidden;
+  }
+  .rounded-full {
+    border-radius: calc(infinity * 1px);
+  }
+  .rounded-lg {
+    border-radius: 10px;
+  }
+  .rounded-md {
+    border-radius: 6px;
+  }
+  .rounded-pill {
+    border-radius: 999px;
+  }
+  .rounded-sm {
+    border-radius: 4px;
+  }
+  .rounded-t-md {
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+  }
+  .rounded-l-md {
+    border-top-left-radius: 6px;
+    border-bottom-left-radius: 6px;
+  }
+  .rounded-r-md {
+    border-top-right-radius: 6px;
+    border-bottom-right-radius: 6px;
+  }
+  .border {
+    border-style: var(--tw-border-style);
+    border-width: 1px;
+  }
+  .border-t {
+    border-top-style: var(--tw-border-style);
+    border-top-width: 1px;
+  }
+  .border-r {
+    border-right-style: var(--tw-border-style);
+    border-right-width: 1px;
+  }
+  .border-b {
+    border-bottom-style: var(--tw-border-style);
+    border-bottom-width: 1px;
+  }
+  .border-l {
+    border-left-style: var(--tw-border-style);
+    border-left-width: 1px;
+  }
+  .border-l-2 {
+    border-left-style: var(--tw-border-style);
+    border-left-width: 2px;
+  }
+  .border-accent {
+    border-color: var(--accent);
+  }
+  .border-bg\/30 {
+    border-color: var(--bg);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--bg) 30%, transparent);
+    }
+  }
+  .border-border {
+    border-color: var(--border);
+  }
+  .border-border-input {
+    border-color: var(--border-input);
+  }
+  .border-danger {
+    border-color: var(--danger);
+  }
+  .bg-\[\#808080\] {
+    background-color: #808080;
+  }
+  .bg-accent {
+    background-color: var(--accent);
+  }
+  .bg-bg {
+    background-color: var(--bg);
+  }
+  .bg-chrome {
+    background-color: var(--chrome);
+  }
+  .bg-danger {
+    background-color: var(--danger);
+  }
+  .bg-danger-solid {
+    background-color: var(--danger-solid);
+  }
+  .bg-success {
+    background-color: var(--success);
+  }
+  .bg-surface {
+    background-color: var(--surface);
+  }
+  .bg-surface-hover {
+    background-color: var(--surface-hover);
+  }
+  .bg-surface-raised {
+    background-color: var(--surface-raised);
+  }
+  .bg-terminal-bg {
+    background-color: var(--terminal-bg);
+  }
+  .bg-terminal-cursor {
+    background-color: var(--terminal-cursor);
+  }
+  .bg-warning {
+    background-color: var(--warning);
+  }
+  .p-2 {
+    padding: calc(var(--spacing) * 2);
+  }
+  .p-3 {
+    padding: calc(var(--spacing) * 3);
+  }
+  .p-4 {
+    padding: calc(var(--spacing) * 4);
+  }
+  .px-1\.5 {
+    padding-inline: calc(var(--spacing) * 1.5);
+  }
+  .px-2 {
+    padding-inline: calc(var(--spacing) * 2);
+  }
+  .px-3 {
+    padding-inline: calc(var(--spacing) * 3);
+  }
+  .px-4 {
+    padding-inline: calc(var(--spacing) * 4);
+  }
+  .pr-2 {
+    padding-right: calc(var(--spacing) * 2);
+  }
+  .pl-3 {
+    padding-left: calc(var(--spacing) * 3);
+  }
+  .font-mono {
+    font-family: var(--font-code);
+  }
+  .font-sans {
+    font-family: var(--font-ui);
+  }
+  .text-2xs {
+    font-size: 11px;
+    line-height: var(--tw-leading, 14px);
+    font-weight: var(--tw-font-weight, 500);
+  }
+  .text-base {
+    font-size: 14px;
+    line-height: var(--tw-leading, 20px);
+    font-weight: var(--tw-font-weight, 500);
+  }
+  .text-sm {
+    font-size: 13px;
+    line-height: var(--tw-leading, 20px);
+    font-weight: var(--tw-font-weight, 400);
+  }
+  .text-xl {
+    font-size: 20px;
+    line-height: var(--tw-leading, 28px);
+    font-weight: var(--tw-font-weight, 600);
+  }
+  .text-xs {
+    font-size: 12px;
+    line-height: var(--tw-leading, 16px);
+    font-weight: var(--tw-font-weight, 400);
+  }
+  .text-\[13px\] {
+    font-size: 13px;
+  }
+  .leading-\[1\.25\] {
+    --tw-leading: 1.25;
+    line-height: 1.25;
+  }
+  .font-medium {
+    --tw-font-weight: var(--font-weight-medium);
+    font-weight: var(--font-weight-medium);
+  }
+  .font-semibold {
+    --tw-font-weight: var(--font-weight-semibold);
+    font-weight: var(--font-weight-semibold);
+  }
+  .text-ansi-blue {
+    color: var(--ansi-blue);
+  }
+  .text-ansi-bright-black {
+    color: var(--ansi-bright-black);
+  }
+  .text-ansi-cyan {
+    color: var(--ansi-cyan);
+  }
+  .text-ansi-green {
+    color: var(--ansi-green);
+  }
+  .text-ansi-magenta {
+    color: var(--ansi-magenta);
+  }
+  .text-ansi-red {
+    color: var(--ansi-red);
+  }
+  .text-ansi-yellow {
+    color: var(--ansi-yellow);
+  }
+  .text-danger {
+    color: var(--danger);
+  }
+  .text-muted {
+    color: var(--text-muted);
+  }
+  .text-on-accent {
+    color: var(--on-accent);
+  }
+  .text-on-danger {
+    color: var(--on-danger);
+  }
+  .text-terminal-fg {
+    color: var(--terminal-fg);
+  }
+  .text-text {
+    color: var(--text);
+  }
+  .italic {
+    font-style: italic;
+  }
+  .not-italic {
+    font-style: normal;
+  }
+  .opacity-50 {
+    opacity: 50%;
+  }
+  .shadow-pop {
+    --tw-shadow: var(--elev-pop);
+    box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+  }
+  .ring-2 {
+    --tw-ring-shadow: var(--tw-ring-inset, ) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor);
+    box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+  }
+  .ring-accent {
+    --tw-ring-color: var(--accent);
+  }
+  .ring-accent\/35 {
+    --tw-ring-color: var(--accent);
+    @supports (color: color-mix(in lab, red, red)) {
+      --tw-ring-color: color-mix(in oklab, var(--accent) 35%, transparent);
+    }
+  }
+  @media (hover: hover) {
+    .hover\:bg-surface-hover:hover {
+      background-color: var(--surface-hover);
+    }
+  }
+}
+:root {
+  --font-ui: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-code: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --radius: 6px;
+  --motion-fast: 100ms;
+  --motion-base: 160ms;
+  --motion-slow: 240ms;
+  --motion-ease: cubic-bezier(.2,.8,.2,1);
+  --layout-tabbar-height: 40px;
+  --layout-tabbar-inset-mac: 78px;
+  --layout-tab-min: 120px;
+  --layout-tab-max: 220px;
+  --layout-vault-nav: 220px;
+  --layout-vault-nav-collapsed: 56px;
+  --layout-vault-nav-collapse-below: 1100px;
+  --layout-toolbar-height: 48px;
+  --layout-sheet-width: 440px;
+  --layout-side-panel-width: 320px;
+  --layout-palette-width: 640px;
+  --layout-palette-max-height: 420px;
+  --layout-host-card-min: 240px;
+  --layout-row-height: 44px;
+  --layout-row-height-compact: 28px;
+  --layout-pane-header: 28px;
+  --layout-content-padding: 24px;
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-dropdown: 40;
+  --z-sheet: 50;
+  --z-dialog: 60;
+  --z-palette: 70;
+  --z-toast: 80;
+  --z-tooltip: 90;
+  color-scheme: light;
+  --bg: #ffffff;
+  --surface: #f5f6f8;
+  --surface-raised: #ffffff;
+  --surface-hover: #eceef2;
+  --chrome: #eceff3;
+  --border: #dfe3e8;
+  --border-input: #868f9c;
+  --text: #161a20;
+  --text-muted: #5a6370;
+  --accent: #0b7a76;
+  --accent-hover: #086561;
+  --on-accent: #ffffff;
+  --danger: #c42b2b;
+  --danger-solid: #c42b2b;
+  --on-danger: #ffffff;
+  --success: #3a7a1c;
+  --warning: #8a5a00;
+  --on-warning: #ffffff;
+  --terminal-bg: #fbfbfc;
+  --terminal-fg: #1f2329;
+  --terminal-cursor: #0b7a76;
+  --ansi-black: #1f2329;
+  --ansi-red: #c4313b;
+  --ansi-green: #2b7a30;
+  --ansi-yellow: #865c00;
+  --ansi-blue: #1f5fd1;
+  --ansi-magenta: #8e3fb5;
+  --ansi-cyan: #0e7680;
+  --ansi-white: #5e6672;
+  --ansi-bright-black: #6b7380;
+  --ansi-bright-red: #a3242d;
+  --ansi-bright-green: #1f6224;
+  --ansi-bright-yellow: #6e4b00;
+  --ansi-bright-blue: #1847a8;
+  --ansi-bright-magenta: #73308f;
+  --ansi-bright-cyan: #0a5f66;
+  --ansi-bright-white: #2d333b;
+  --elev-card: 0 1px 2px rgba(16,24,40,.06);
+  --elev-pop: 0 8px 24px rgba(16,24,40,.14), 0 0 0 1px rgba(16,24,40,.05);
+  --elev-drag: 0 12px 32px rgba(16,24,40,.20);
+  --sc-background: var(--bg);
+  --sc-foreground: var(--text);
+  --sc-card: var(--surface);
+  --sc-card-foreground: var(--text);
+  --sc-popover: var(--surface-raised);
+  --sc-popover-foreground: var(--text);
+  --sc-primary: var(--accent);
+  --sc-primary-foreground: var(--on-accent);
+  --sc-secondary: var(--surface-hover);
+  --sc-secondary-foreground: var(--text);
+  --sc-muted: var(--surface);
+  --sc-muted-foreground: var(--text-muted);
+  --sc-accent: var(--surface-hover);
+  --sc-accent-foreground: var(--text);
+  --sc-destructive: var(--danger-solid);
+  --sc-destructive-foreground: var(--on-danger);
+  --sc-input: var(--border-input);
+  --sc-ring: var(--accent);
+  --sc-sidebar: var(--surface);
+  --sc-sidebar-foreground: var(--text);
+  --sc-sidebar-primary: var(--accent);
+  --sc-sidebar-primary-foreground: var(--on-accent);
+  --sc-sidebar-accent: var(--surface-hover);
+  --sc-sidebar-accent-foreground: var(--text);
+  --sc-sidebar-border: var(--border);
+  --sc-sidebar-ring: var(--accent);
+  --sc-border: var(--border);
+}
+.dark {
+  color-scheme: dark;
+  --bg: #0f1115;
+  --surface: #161a20;
+  --surface-raised: #1c2128;
+  --surface-hover: #242a33;
+  --chrome: #0b0d10;
+  --border: #2a313b;
+  --border-input: #5f6979;
+  --text: #e6e9ef;
+  --text-muted: #9aa3b1;
+  --accent: #3cc8c0;
+  --accent-hover: #66d6cf;
+  --on-accent: #04201e;
+  --danger: #f07178;
+  --danger-solid: #e5484d;
+  --on-danger: #16080a;
+  --success: #86d05c;
+  --warning: #e8b85a;
+  --on-warning: #1a1305;
+  --terminal-bg: #0d0f13;
+  --terminal-fg: #d7dbe2;
+  --terminal-cursor: #3cc8c0;
+  --ansi-black: #262b33;
+  --ansi-red: #ef6b73;
+  --ansi-green: #8fd17f;
+  --ansi-yellow: #e8c46a;
+  --ansi-blue: #6aa7ff;
+  --ansi-magenta: #c99bf0;
+  --ansi-cyan: #5fd0d8;
+  --ansi-white: #c9ced8;
+  --ansi-bright-black: #7a8494;
+  --ansi-bright-red: #ff8a90;
+  --ansi-bright-green: #a9e29a;
+  --ansi-bright-yellow: #f3d58a;
+  --ansi-bright-blue: #8dbcff;
+  --ansi-bright-magenta: #dab6f6;
+  --ansi-bright-cyan: #86e0e6;
+  --ansi-bright-white: #f2f4f8;
+  --elev-card: none;
+  --elev-pop: 0 8px 24px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.04);
+  --elev-drag: 0 12px 32px rgba(0,0,0,.55);
+  --sc-background: var(--bg);
+  --sc-foreground: var(--text);
+  --sc-card: var(--surface);
+  --sc-card-foreground: var(--text);
+  --sc-popover: var(--surface-raised);
+  --sc-popover-foreground: var(--text);
+  --sc-primary: var(--accent);
+  --sc-primary-foreground: var(--on-accent);
+  --sc-secondary: var(--surface-hover);
+  --sc-secondary-foreground: var(--text);
+  --sc-muted: var(--surface);
+  --sc-muted-foreground: var(--text-muted);
+  --sc-accent: var(--surface-hover);
+  --sc-accent-foreground: var(--text);
+  --sc-destructive: var(--danger-solid);
+  --sc-destructive-foreground: var(--on-danger);
+  --sc-input: var(--border-input);
+  --sc-ring: var(--accent);
+  --sc-sidebar: var(--surface);
+  --sc-sidebar-foreground: var(--text);
+  --sc-sidebar-primary: var(--accent);
+  --sc-sidebar-primary-foreground: var(--on-accent);
+  --sc-sidebar-accent: var(--surface-hover);
+  --sc-sidebar-accent-foreground: var(--text);
+  --sc-sidebar-border: var(--border);
+  --sc-sidebar-ring: var(--accent);
+  --sc-border: var(--border);
+}
+@layer base {
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    line-height: 20px;
+    -webkit-font-smoothing: antialiased;
+  }
+  * {
+    border-color: var(--border);
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: var(--accent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background: color-mix(in srgb, var(--accent) 35%, transparent);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 1ms !important;
+      transition-duration: 1ms !important;
+    }
+  }
+}
+@property --tw-space-y-reverse {
+  syntax: "*";
+  inherits: false;
+  initial-value: 0;
+}
+@property --tw-border-style {
+  syntax: "*";
+  inherits: false;
+  initial-value: solid;
+}
+@property --tw-leading {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-font-weight {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-shadow {
+  syntax: "*";
+  inherits: false;
+  initial-value: 0 0 #0000;
+}
+@property --tw-shadow-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-shadow-alpha {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 100%;
+}
+@property --tw-inset-shadow {
+  syntax: "*";
+  inherits: false;
+  initial-value: 0 0 #0000;
+}
+@property --tw-inset-shadow-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-inset-shadow-alpha {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 100%;
+}
+@property --tw-ring-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-ring-shadow {
+  syntax: "*";
+  inherits: false;
+  initial-value: 0 0 #0000;
+}
+@property --tw-inset-ring-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-inset-ring-shadow {
+  syntax: "*";
+  inherits: false;
+  initial-value: 0 0 #0000;
+}
+@property --tw-ring-inset {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-ring-offset-width {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --tw-ring-offset-color {
+  syntax: "*";
+  inherits: false;
+  initial-value: #fff;
+}
+@property --tw-ring-offset-shadow {
+  syntax: "*";
+  inherits: false;
+  initial-value: 0 0 #0000;
+}
+@layer properties {
+  @supports ((-webkit-hyphens: none) and (not (margin-trim: block))) or ((-moz-orient: inline) and (not (color:rgb(from red r g b)))) {
+    *, ::before, ::after, ::backdrop {
+      --tw-space-y-reverse: 0;
+      --tw-border-style: solid;
+      --tw-leading: initial;
+      --tw-font-weight: initial;
+      --tw-shadow: 0 0 #0000;
+      --tw-shadow-color: initial;
+      --tw-shadow-alpha: 100%;
+      --tw-inset-shadow: 0 0 #0000;
+      --tw-inset-shadow-color: initial;
+      --tw-inset-shadow-alpha: 100%;
+      --tw-ring-color: initial;
+      --tw-ring-shadow: 0 0 #0000;
+      --tw-inset-ring-color: initial;
+      --tw-inset-ring-shadow: 0 0 #0000;
+      --tw-ring-inset: initial;
+      --tw-ring-offset-width: 0px;
+      --tw-ring-offset-color: #fff;
+      --tw-ring-offset-shadow: 0 0 #0000;
+    }
+  }
+}
+</style></head><body class="bg-[#808080] p-4"><div class="flex gap-4">
+<section class="dark bg-bg text-text flex-1 min-w-0 border border-border rounded-lg overflow-hidden">
+  <div class="h-10 bg-chrome border-b border-border flex items-end gap-1 pl-3 pr-2">
+    <div class="h-8 px-3 rounded-t-md bg-bg text-text flex items-center gap-2 text-sm">◆ Vault</div>
+    <div class="h-8 px-3 rounded-t-md text-muted flex items-center gap-2 text-sm hover:bg-surface-hover">⇅ SFTP</div>
+    <div class="h-8 px-3 rounded-t-md text-muted flex items-center gap-2 text-sm"><span class="size-2 rounded-full bg-success"></span>web-1</div>
+    <div class="h-8 px-3 rounded-t-md text-muted flex items-center gap-2 text-sm"><span class="size-2 rounded-full bg-warning"></span>db-primary</div>
+    <div class="h-8 px-3 rounded-t-md text-muted flex items-center gap-2 text-sm"><span class="size-2 rounded-full bg-danger"></span>legacy</div>
+    <div class="h-8 px-2 text-muted flex items-center">+</div>
+  </div>
+  <div class="flex">
+    <nav class="w-[150px] bg-surface border-r border-border p-2 space-y-0.5 text-sm">
+      <div class="h-8 px-2 rounded-md bg-surface-hover border-l-2 border-accent flex items-center justify-between">Hosts <span class="text-2xs text-muted">24</span></div>
+      <div class="h-8 px-2 rounded-md text-muted flex items-center">Keychain</div>
+      <div class="h-8 px-2 rounded-md text-muted flex items-center">Port forwarding</div>
+      <div class="h-8 px-2 rounded-md text-muted flex items-center">Snippets</div>
+      <div class="h-8 px-2 rounded-md text-muted flex items-center">Known hosts</div>
+      <div class="h-8 px-2 rounded-md text-muted flex items-center">Logs</div>
+    </nav>
+    <main class="flex-1 min-w-0">
+      <div class="h-12 px-4 border-b border-border flex items-center gap-2">
+        <h1 class="text-xl mr-auto">Hosts</h1>
+        <div class="h-8 w-40 rounded-md border border-border-input bg-bg px-2 flex items-center text-sm text-muted">⌕ Search</div>
+        <div class="flex"><button class="h-8 px-3 rounded-l-md bg-accent text-on-accent text-sm font-medium">New host</button><button class="h-8 px-2 rounded-r-md bg-accent text-on-accent border-l border-bg/30 text-sm">▾</button></div>
+      </div>
+      <div class="p-4 space-y-4">
+        <div class="text-xs text-muted">Production</div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="bg-surface border border-border rounded-lg p-3 flex gap-3 ring-2 ring-accent">
+            <div class="size-8 rounded-md bg-surface-hover grid place-items-center text-2xs font-semibold">U</div>
+            <div class="min-w-0"><div class="text-base">web-1</div><div class="text-xs text-muted font-mono">deploy@10.0.0.5</div>
+              <div class="mt-1 flex gap-1"><span class="h-5 px-2 rounded-pill bg-surface-hover text-xs text-muted">prod</span><span class="h-5 px-2 rounded-pill bg-surface-hover text-xs text-muted">web</span></div></div>
+          </div>
+          <div class="bg-surface border border-border rounded-lg p-3 flex gap-3">
+            <div class="size-8 rounded-md bg-surface-hover grid place-items-center text-2xs font-semibold">D</div>
+            <div class="min-w-0"><div class="text-base">db-primary</div><div class="text-xs text-muted font-mono">deploy@10.0.0.9:2222</div></div>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button class="h-8 px-3 rounded-md bg-accent text-on-accent text-sm font-medium">Trust and connect</button>
+          <button class="h-8 px-3 rounded-md bg-surface-hover border border-border text-sm">Cancel</button>
+          <button class="h-8 px-3 rounded-md text-sm text-muted">Ghost</button>
+          <button class="h-8 px-3 rounded-md bg-danger-solid text-on-danger text-sm font-medium">Delete 3 hosts</button>
+          <button class="h-8 px-3 rounded-md bg-accent text-on-accent text-sm font-medium opacity-50">Disabled</button>
+        </div>
+        <div class="grid grid-cols-2 gap-3 text-sm">
+          <label class="space-y-1"><span class="block">Username</span><span class="h-8 rounded-md border border-border-input bg-bg px-2 flex items-center italic text-muted">deploy <span class="ml-auto not-italic text-2xs bg-surface-hover px-1.5 rounded-sm">from Production</span></span></label>
+          <label class="space-y-1"><span class="block">Port</span><span class="h-8 rounded-md border border-danger bg-bg px-2 flex items-center font-mono">70000</span><span class="text-xs text-danger">Use a port between 1 and 65535.</span></label>
+          <label class="space-y-1 col-span-2"><span class="block">Address</span><span class="h-8 rounded-md border border-accent ring-2 ring-accent/35 bg-bg px-2 flex items-center font-mono">10.0.0.5</span></label>
+        </div>
+      </div>
+    </main>
+  </div>
+  <div class="relative bg-terminal-bg text-terminal-fg font-mono text-[13px] leading-[1.25] p-3 border-t border-border">
+<pre class="font-mono">deploy@web-1:~$ ls --color
+<span class="text-ansi-blue">app</span>  <span class="text-ansi-green">deploy.sh</span>  <span class="text-ansi-cyan">current</span>  logs  <span class="text-ansi-magenta">notes.md</span>
+deploy@web-1:~$ systemctl status nginx
+<span class="text-ansi-green">●</span> nginx.service - <span class="text-ansi-yellow">active (running)</span>  <span class="text-ansi-red">2 errors</span>  <span class="text-ansi-bright-black"># dim comment</span>
+deploy@web-1:~$ <span class="bg-terminal-cursor"> </span></pre>
+    <div class="absolute right-3 top-3 w-[300px] bg-surface-raised border border-border rounded-lg shadow-pop p-3 font-sans text-sm">
+      <div class="font-semibold text-danger">The server's identity changed</div>
+      <div class="text-xs text-muted mt-1">Don't continue unless you expected this.</div>
+      <div class="mt-2 flex justify-end gap-2"><button class="h-7 px-3 rounded-md bg-surface-hover border border-border text-sm">Close</button></div>
+    </div>
+  </div>
+</section>
+<section class="light bg-bg text-text flex-1 min-w-0 border border-border rounded-lg overflow-hidden">
+  <div class="h-10 bg-chrome border-b border-border flex items-end gap-1 pl-3 pr-2">
+    <div class="h-8 px-3 rounded-t-md bg-bg text-text flex items-center gap-2 text-sm">◆ Vault</div>
+    <div class="h-8 px-3 rounded-t-md text-muted flex items-center gap-2 text-sm hover:bg-surface-hover">⇅ SFTP</div>
+    <div class="h-8 px-3 rounded-t-md text-muted flex items-center gap-2 text-sm"><span class="size-2 rounded-full bg-success"></span>web-1</div>
+    <div class="h-8 px-3 rounded-t-md text-muted flex items-center gap-2 text-sm"><span class="size-2 rounded-full bg-warning"></span>db-primary</div>
+    <div class="h-8 px-3 rounded-t-md text-muted flex items-center gap-2 text-sm"><span class="size-2 rounded-full bg-danger"></span>legacy</div>
+    <div class="h-8 px-2 text-muted flex items-center">+</div>
+  </div>
+  <div class="flex">
+    <nav class="w-[150px] bg-surface border-r border-border p-2 space-y-0.5 text-sm">
+      <div class="h-8 px-2 rounded-md bg-surface-hover border-l-2 border-accent flex items-center justify-between">Hosts <span class="text-2xs text-muted">24</span></div>
+      <div class="h-8 px-2 rounded-md text-muted flex items-center">Keychain</div>
+      <div class="h-8 px-2 rounded-md text-muted flex items-center">Port forwarding</div>
+      <div class="h-8 px-2 rounded-md text-muted flex items-center">Snippets</div>
+      <div class="h-8 px-2 rounded-md text-muted flex items-center">Known hosts</div>
+      <div class="h-8 px-2 rounded-md text-muted flex items-center">Logs</div>
+    </nav>
+    <main class="flex-1 min-w-0">
+      <div class="h-12 px-4 border-b border-border flex items-center gap-2">
+        <h1 class="text-xl mr-auto">Hosts</h1>
+        <div class="h-8 w-40 rounded-md border border-border-input bg-bg px-2 flex items-center text-sm text-muted">⌕ Search</div>
+        <div class="flex"><button class="h-8 px-3 rounded-l-md bg-accent text-on-accent text-sm font-medium">New host</button><button class="h-8 px-2 rounded-r-md bg-accent text-on-accent border-l border-bg/30 text-sm">▾</button></div>
+      </div>
+      <div class="p-4 space-y-4">
+        <div class="text-xs text-muted">Production</div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="bg-surface border border-border rounded-lg p-3 flex gap-3 ring-2 ring-accent">
+            <div class="size-8 rounded-md bg-surface-hover grid place-items-center text-2xs font-semibold">U</div>
+            <div class="min-w-0"><div class="text-base">web-1</div><div class="text-xs text-muted font-mono">deploy@10.0.0.5</div>
+              <div class="mt-1 flex gap-1"><span class="h-5 px-2 rounded-pill bg-surface-hover text-xs text-muted">prod</span><span class="h-5 px-2 rounded-pill bg-surface-hover text-xs text-muted">web</span></div></div>
+          </div>
+          <div class="bg-surface border border-border rounded-lg p-3 flex gap-3">
+            <div class="size-8 rounded-md bg-surface-hover grid place-items-center text-2xs font-semibold">D</div>
+            <div class="min-w-0"><div class="text-base">db-primary</div><div class="text-xs text-muted font-mono">deploy@10.0.0.9:2222</div></div>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button class="h-8 px-3 rounded-md bg-accent text-on-accent text-sm font-medium">Trust and connect</button>
+          <button class="h-8 px-3 rounded-md bg-surface-hover border border-border text-sm">Cancel</button>
+          <button class="h-8 px-3 rounded-md text-sm text-muted">Ghost</button>
+          <button class="h-8 px-3 rounded-md bg-danger-solid text-on-danger text-sm font-medium">Delete 3 hosts</button>
+          <button class="h-8 px-3 rounded-md bg-accent text-on-accent text-sm font-medium opacity-50">Disabled</button>
+        </div>
+        <div class="grid grid-cols-2 gap-3 text-sm">
+          <label class="space-y-1"><span class="block">Username</span><span class="h-8 rounded-md border border-border-input bg-bg px-2 flex items-center italic text-muted">deploy <span class="ml-auto not-italic text-2xs bg-surface-hover px-1.5 rounded-sm">from Production</span></span></label>
+          <label class="space-y-1"><span class="block">Port</span><span class="h-8 rounded-md border border-danger bg-bg px-2 flex items-center font-mono">70000</span><span class="text-xs text-danger">Use a port between 1 and 65535.</span></label>
+          <label class="space-y-1 col-span-2"><span class="block">Address</span><span class="h-8 rounded-md border border-accent ring-2 ring-accent/35 bg-bg px-2 flex items-center font-mono">10.0.0.5</span></label>
+        </div>
+      </div>
+    </main>
+  </div>
+  <div class="relative bg-terminal-bg text-terminal-fg font-mono text-[13px] leading-[1.25] p-3 border-t border-border">
+<pre class="font-mono">deploy@web-1:~$ ls --color
+<span class="text-ansi-blue">app</span>  <span class="text-ansi-green">deploy.sh</span>  <span class="text-ansi-cyan">current</span>  logs  <span class="text-ansi-magenta">notes.md</span>
+deploy@web-1:~$ systemctl status nginx
+<span class="text-ansi-green">●</span> nginx.service - <span class="text-ansi-yellow">active (running)</span>  <span class="text-ansi-red">2 errors</span>  <span class="text-ansi-bright-black"># dim comment</span>
+deploy@web-1:~$ <span class="bg-terminal-cursor"> </span></pre>
+    <div class="absolute right-3 top-3 w-[300px] bg-surface-raised border border-border rounded-lg shadow-pop p-3 font-sans text-sm">
+      <div class="font-semibold text-danger">The server's identity changed</div>
+      <div class="text-xs text-muted mt-1">Don't continue unless you expected this.</div>
+      <div class="mt-2 flex justify-end gap-2"><button class="h-7 px-3 rounded-md bg-surface-hover border border-border text-sm">Close</button></div>
+    </div>
+  </div>
+</section>
+</div></body></html>

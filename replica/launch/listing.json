@@ -1,0 +1,32 @@
+{
+  "avoid": [
+    "Termius",
+    "Termius Corporation",
+    "Server Auditor",
+    "ServerAuditor"
+  ],
+  "_note": "Prepared for later. Dalan is distributed through GitHub Releases for now. The Mac App Store sandbox blocks the local terminal, so a store build would need that feature removed. SFTP stays in caps on purpose: it's the protocol's name.",
+  "app_store": {
+    "name": "Dalan: SSH & SFTP Client",
+    "subtitle": "Servers, keys and tunnels",
+    "promotional_text": "Connect to any server with Cmd+K. Hosts, keys, tunnels and files in one app, encrypted on this Mac. No account needed.",
+    "description": "Dalan keeps your servers, keys, tunnels and files in one calm desktop app, encrypted on your own computer.\n\nPress Cmd+K, type a few letters, press Enter, and you are connected. No account and no cloud: your vault is one encrypted file on this machine, and Dalan sends no telemetry.\n\nWhat you get:\n- Hosts in nested groups that pass down username, key and jump host\n- Jump hosts and tunnels that reconnect after sleep or a network change\n- Every server's identity checked, with a clear stop if it changes\n- Tabs, split panes and typing into many servers at once\n- Files side by side, with edit-and-upload in your own editor\n- Snippets for one server or twenty\n- Generate, import and install SSH keys in one step\n- Local, remote and SOCKS tunnels\n- Import from your SSH config\n\nFree. Built in-house.",
+    "keywords": "terminal,server,tunnel,port forwarding,jump host,devops,sysadmin,bastion,shell,remote,linux",
+    "whats_new": "First release: hosts, keys, terminal tabs, tunnels and SFTP."
+  },
+  "google_play": {
+    "title": "Dalan: SSH & SFTP Client",
+    "short_description": "Connect to your servers in one keystroke. Keys stay encrypted on your device.",
+    "full_description": "Dalan keeps your servers, keys, tunnels and files in one calm desktop app, encrypted on your own computer.\n\nPress Cmd+K, type a few letters, press Enter, and you are connected. No account and no cloud: your vault is one encrypted file on this machine, and Dalan sends no telemetry.\n\nWhat you get:\n- Hosts in nested groups that pass down username, key and jump host\n- Jump hosts and tunnels that reconnect after sleep or a network change\n- Every server's identity checked, with a clear stop if it changes\n- Tabs, split panes and typing into many servers at once\n- Files side by side, with edit-and-upload in your own editor\n- Snippets for one server or twenty\n- Generate, import and install SSH keys in one step\n- Local, remote and SOCKS tunnels\n- Import from your SSH config\n\nFree. Built in-house."
+  },
+  "desktop": {
+    "github_release_title": "Dalan v{version}",
+    "flathub_summary": "Calm SSH and SFTP client with an encrypted local vault",
+    "winget_short_description": "SSH and SFTP client with hosts, keys, tunnels and an encrypted local vault",
+    "categories": [
+      "Development",
+      "Network",
+      "Utility"
+    ]
+  }
+}
