@@ -400,6 +400,64 @@ mod tests {
         assert_eq!(*moved.data_key, *legacy.data_key, "old logs still open");
     }
 
+    /// An app updated from before migration 0005: a populated database at the first migrations keeps all its
+    /// data, unlocks with the same password, and its old plain history and old-key logs stay readable.
+    #[test]
+    fn a_populated_old_database_upgrades_without_losing_anything() {
+        use rusqlite_migration::{Migrations, M};
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::configure(&conn).unwrap();
+        // The schema as it was before the data key: 0001 only (the later ones add columns and tables).
+        Migrations::new(vec![M::up(crate::db::MIGRATION_0001)])
+            .to_latest(&mut conn)
+            .unwrap();
+        let params = KdfParams::cheap();
+        let salt = random_salt();
+        let key = derive_key(b"correct-horse-staple", &salt, &params).unwrap();
+        conn.execute(
+            "INSERT INTO vaults (id, name, kind, kdf_salt, kdf_params, key_check, created_at, updated_at) VALUES ('v1', 'Personal', 'local', ?1, ?2, ?3, 1, 1)",
+            params![salt.to_vec(), serde_json::to_string(&params).unwrap(), make_key_check(&key).unwrap()],
+        )
+        .unwrap();
+        let (nonce, ct) = crypto::seal(&key, b"sec1", b"hunter2").unwrap();
+        conn.execute(
+            "INSERT INTO secrets (id, vault_id, kind, nonce, ciphertext, created_at, updated_at) VALUES ('sec1', 'v1', 'password', ?1, ?2, 1, 1)",
+            params![nonce, ct],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO command_history (id, host_id, command, ran_at) VALUES ('h1', NULL, 'uptime', 1)",
+            [],
+        )
+        .unwrap();
+
+        // The app starts up: every newer migration runs over the populated database.
+        crate::db::migrations().to_latest(&mut conn).unwrap();
+
+        let s = unlock(&conn, "correct-horse-staple").unwrap();
+        assert_eq!(
+            *s.data_key, *s.key,
+            "an old vault adopts its key as the data key"
+        );
+        assert_eq!(
+            secrets::get(&conn, &s, "sec1").unwrap().as_slice(),
+            b"hunter2"
+        );
+        let history = crate::history::list(&conn, &s, None, None, 10).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].command, "uptime");
+        // And a password change afterwards still keeps logs readable (the data key is wrapped now).
+        let mut conn = conn;
+        let after = change_password(
+            &mut conn,
+            "correct-horse-staple",
+            "a-brand-new-password",
+            KdfParams::cheap(),
+        )
+        .unwrap();
+        assert_eq!(*after.data_key, *s.data_key);
+    }
+
     #[test]
     fn change_password_reencrypts_secrets() {
         let (mut conn, s) = fresh();

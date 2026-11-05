@@ -223,4 +223,54 @@ mod tests {
             Some("Closed")
         );
     }
+
+    /// A shell that prints without end must pause once the UI is MAX_UNACKED bytes behind, and go on after acks.
+    #[tokio::test]
+    async fn output_pauses_when_the_ui_is_behind_and_resumes_after_acks() {
+        let total = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let t = Arc::clone(&total);
+        let io = Arc::new(SessionIo {
+            event: Box::new(|_| {}),
+            data: Box::new(move |b| {
+                t.fetch_add(b.len(), Ordering::Relaxed);
+            }),
+        });
+        let (tx, rx) = mpsc::unbounded_channel();
+        let task = tokio::spawn(run(io, "/bin/sh".into(), 80, 24, rx));
+        tx.send(Cmd::Write(b"yes dalan\n".to_vec())).unwrap();
+        // Let it run, with no acks: the count must stall near the limit (the last chunk can overshoot a little).
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        let first = total.load(Ordering::Relaxed);
+        tokio::time::sleep(Duration::from_millis(700)).await;
+        let second = total.load(Ordering::Relaxed);
+        assert!(
+            first >= MAX_UNACKED,
+            "it should fill up to the limit first, got {first}"
+        );
+        assert!(
+            second - first < 256 * 1024,
+            "output must stall while nothing is acknowledged ({first} -> {second})"
+        );
+        assert!(
+            second < MAX_UNACKED + 1024 * 1024,
+            "far past the limit: {second}"
+        );
+        // The UI catches up: more output flows.
+        tx.send(Cmd::Ack(second)).unwrap();
+        tokio::time::sleep(Duration::from_millis(700)).await;
+        assert!(
+            total.load(Ordering::Relaxed) > second + 64 * 1024,
+            "output must resume after an ack"
+        );
+        // Stop the flood and end the shell, so the reader thread finishes and the test runtime can shut down.
+        tx.send(Cmd::Write(b"\x03".to_vec())).unwrap();
+        tx.send(Cmd::Ack(usize::MAX / 2)).unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        tx.send(Cmd::Write(b"exit\n".to_vec())).unwrap();
+        tx.send(Cmd::Ack(usize::MAX / 2)).unwrap();
+        tokio::time::timeout(Duration::from_secs(10), task)
+            .await
+            .expect("the shell did not stop")
+            .unwrap();
+    }
 }

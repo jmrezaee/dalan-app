@@ -1636,3 +1636,128 @@ async fn connects_with_post_quantum_key_exchange_switched_off_and_the_local_shel
         .unwrap();
     assert_eq!(shell, "/bin/sh");
 }
+
+#[tokio::test]
+async fn a_jump_hop_whose_key_changed_blocks_before_reaching_the_target() {
+    let h = harness(Some("right-pw")).await;
+    let (bastion, bastion_server) = add_bastion(&h).await;
+    set_target(&h, "custom", vec![bastion.clone()]).await;
+    // The bastion's saved key is not what it will present.
+    let bid = bastion.clone();
+    let port = h
+        .state
+        .store()
+        .with_db_session(move |c, s| hosts::get(c, &s.vault_id, &bid))
+        .await
+        .unwrap()
+        .effective_port;
+    let pattern = known_hosts::pattern("127.0.0.1", port);
+    h.state
+        .store()
+        .with_db_session(move |c, s| {
+            known_hosts::trust(
+                c,
+                &s.vault_id,
+                &pattern,
+                "ssh-ed25519",
+                "AAAAC3NzaC1lZDI1NTE5AAAAIOLDKEYOLDKEYOLDKEYOLDKEYOLDKEYOLDKEYOLDKEY",
+                "SHA256:old",
+            )
+        })
+        .await
+        .unwrap();
+
+    let mut s = start(&h);
+    let (id, kind) = s.expect_prompt().await;
+    assert!(
+        matches!(kind, PromptKind::HostKeyChanged { ref host, .. } if host == "bastion"),
+        "the block must name the hop whose key changed"
+    );
+    s.answer(&id, false, None, false); // Close
+    s.until(is_state(SessionState::Closed)).await;
+    assert!(
+        bastion_server.forwards.lock().unwrap().is_empty(),
+        "nothing may be forwarded through a hop that failed the key check"
+    );
+}
+
+#[tokio::test]
+async fn locking_the_vault_ends_live_sessions_and_every_guarded_call_refuses() {
+    use crate::ssh::Job;
+    let h = harness(Some("right-pw")).await;
+    let (etx, mut events) = mpsc::unbounded_channel();
+    let io = SessionIo {
+        event: Box::new(move |e| {
+            let _ = etx.send(e);
+        }),
+        data: Box::new(|_| {}),
+    };
+    let sid = h
+        .state
+        .sessions
+        .open(h.state.store(), h.host_id.clone(), Job::Shell, 80, 24, io)
+        .unwrap();
+    // Trust the host key when asked, then wait for the shell.
+    loop {
+        match tokio::time::timeout(Duration::from_secs(10), events.recv())
+            .await
+            .expect("timed out")
+            .expect("session ended early")
+        {
+            SessionEvent::Prompt { prompt_id, .. } => h
+                .state
+                .sessions
+                .respond(
+                    &sid,
+                    &prompt_id,
+                    PromptAnswer {
+                        accept: true,
+                        text: None,
+                        remember: true,
+                    },
+                )
+                .unwrap(),
+            SessionEvent::State {
+                state: SessionState::Ready,
+            } => break,
+            _ => {}
+        }
+    }
+    assert!(h.state.is_unlocked());
+
+    h.state.set_session(None); // lock
+
+    // The live shell is closed, not left running with the key gone.
+    let ended = tokio::time::timeout(Duration::from_secs(10), async {
+        while let Some(e) = events.recv().await {
+            if matches!(
+                e,
+                SessionEvent::State {
+                    state: SessionState::Closed
+                }
+            ) {
+                return true;
+            }
+        }
+        true // the channel closing also means it ended
+    })
+    .await
+    .expect("the session survived the lock");
+    assert!(ended);
+    // Every guarded entry point now says "locked".
+    assert_eq!(
+        h.state.require_unlocked().unwrap_err().code,
+        ErrorCode::Locked
+    );
+    assert_eq!(
+        h.state.with_session(|_| Ok(())).unwrap_err().code,
+        ErrorCode::Locked
+    );
+    let err = h
+        .state
+        .with_db_session(|c, s| hosts::tree(c, &s.vault_id))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Locked);
+    assert!(h.state.sftp.fs("no-such-endpoint").is_err());
+}

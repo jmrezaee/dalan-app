@@ -58,7 +58,9 @@
     "lint": "eslint .",
     "typecheck": "nuxt prepare && vue-tsc -b --noEmit",
     "test": "vitest run",
-    "screenshot:design": "node scripts/screenshot-design.mjs"
+    "screenshot:design": "node scripts/screenshot-design.mjs",
+    "test:e2e": "pnpm build && vitest run --config vitest.e2e.config.ts",
+    "test:e2e:only": "vitest run --config vitest.e2e.config.ts"
   },
   "pnpm": {
     "overrides": {

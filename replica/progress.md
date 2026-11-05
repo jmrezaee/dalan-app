@@ -151,7 +151,7 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
     - **Settings:** terminal font, default terminal theme, local shell path, post-quantum key exchange on/off (drops ML-KEM from the offer), "Press keys…" recorder text.
   - **Not built:** SFTP "open with" apps (needs a per-extension app list and an opener call with an app; left for the backlog).
   - **Checked in the window (fresh vault):** tab dots (green for background output, yellow while a question is open, workspace dot), ⌃Tab and ⌃⇧Tab, double-click rename, New Tab recents, workspace column handle, tunnel wizard steps and validation, the new Settings rows, S24 copy. **Not checked:** drag to reorder and drag to combine tabs (a scripted drag can't start one), middle-click close, ⌘⇧D, SFTP F2 and ⌘C/⌘V, a 500+ row folder, the new settings taking effect (font, shell, post-quantum).
-- [ ] **P19 Tests:**
+- [x] **P19 Tests:**
   - **Fake backend:** commit a Tauri-command mock, the fake Rust backend used in the browser checks, as a test fixture.
   - **End to end:** add Playwright tests for F01, F11 and F12 (overlay state machine), tab mounting (xterm survives tab switches), the shortcut dispatcher, and the import preview.
   - **Store tests:** Vitest store tests for `sessions.ts`.
@@ -162,6 +162,13 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
     - a migration upgrade on a populated 0001 database
     - backpressure pause and resume
   - **CI:** run the 5 Docker-backed `#[ignore]` tests in CI with a service container.
+  - **Built (2026-11-06):**
+    - **Fake backend:** `tests/e2e/fakeBackend.ts` stands in for Tauri's IPC in the page (commands answer from a small model; the test pushes session events and terminal bytes through `window.__fake`). `tests/e2e/harness.ts` serves `.output/public` and launches Chrome (`PW_CHANNEL=` empty uses Playwright's Chromium, as CI does).
+    - **Browser tests (`pnpm test:e2e`, builds first; `pnpm test:e2e:only` reuses the build):** wrong then right master password; F01 (connecting, first-time key, Trust sends `accept` and `remember`, ready, bytes acknowledged); F11 (Connection closed, Reconnect focused, Enter reconnects); F12 (changed key blocks, Close focused, replace needs the typed name and sends it); a live xterm node survives tab switches; ⌃Tab and ⌘/Ctrl+K; import preview (notes, duplicate unticked, imports the ticked rows). 6 tests, run in Chrome here.
+    - **Store tests:** `tests/sessionsStore.test.ts` (prompt and error, unread dots, the autorun race, broadcast skipping dead panes, closing the last pane, cycle/rename/reorder, 16-pane cap).
+    - **Rust:** jump hop with a changed key blocks before the target; populated old database upgrades through 0005 (secrets, plain history, unlock, password change); locking ends live sessions and every guarded call says `locked`; output backpressure pauses and resumes (real pty). Earlier phases already cover the key-type switch and the AI address bypasses.
+    - **CI:** new `e2e` job (Playwright Chromium) and `docker-ssh` job (`scripts/test-servers.sh up`, then `cargo test -- --ignored`, the 5 real-OpenSSH tests; they pass locally).
+  - **Not covered:** tunnels and edit copies being closed by a lock (only sessions are asserted); `locked` is checked on the shared guards, not command by command; the keyboard-interactive path is tested against an in-process server only; xterm text is not read back (it paints to a canvas), so output is proven by the acknowledgement.
 - [ ] **P20 Housekeeping and release readiness:**
   - Bring `features.csv` in line with what actually works (PuTTY/MobaXterm import is done, SecureCRT isn't; split the SSH-config row).
   - Remove the stale "arrives in P2/P7" header comments.
@@ -226,3 +233,5 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
 - 2026-11-05 P17 done (see its note above). A hand check is still open for keyboard-interactive against a real server.
 
 - 2026-11-06 P18 done in two parts; open hand checks listed in its note. `features.csv` tab-dot row can go to yes once Mehrdad has seen the dots.
+
+- 2026-11-06 P19 done. `pnpm test:e2e` needs Google Chrome locally (or `PW_CHANNEL=` plus `pnpm exec playwright install chromium`).

@@ -9,13 +9,13 @@ use rusqlite_migration::{Migrations, M};
 
 use crate::error::AppResult;
 
-const MIGRATION_0001: &str = include_str!("../../../replica/schema.sql");
+pub(crate) const MIGRATION_0001: &str = include_str!("../../../replica/schema.sql");
 const MIGRATION_0002: &str = include_str!("../../migrations/0002_protocol.sql");
 const MIGRATION_0003: &str = include_str!("../../migrations/0003_serial.sql");
 const MIGRATION_0004: &str = include_str!("../../migrations/0004_mosh.sql");
 const MIGRATION_0005: &str = include_str!("../../migrations/0005_data_key.sql");
 
-fn migrations() -> Migrations<'static> {
+pub(crate) fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
         M::up(MIGRATION_0001),
         M::up(MIGRATION_0002),
@@ -33,7 +33,7 @@ pub fn now_ms() -> i64 {
 }
 
 /// Pragmas must be set on every open, outside the migration transaction.
-fn configure(conn: &Connection) -> AppResult<()> {
+pub(crate) fn configure(conn: &Connection) -> AppResult<()> {
     conn.pragma_update(None, "foreign_keys", "ON")?;
     conn.pragma_update(None, "busy_timeout", 5000)?;
     Ok(())
