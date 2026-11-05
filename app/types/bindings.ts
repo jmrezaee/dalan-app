@@ -23,6 +23,8 @@ export const commands = {
 	/**  Creates when `input.id` is `None`, otherwise updates. The password goes straight into `secrets`. */
 	hostSave: (input: HostInput_Deserialize) => typedError<HostSummary_Serialize, AppError>(__TAURI_INVOKE("host_save", { input })),
 	hostDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("host_delete", { id })),
+	/**  Switches a host between `ssh` and `telnet`. */
+	hostSetProtocol: (id: string, protocol: string) => typedError<null, AppError>(__TAURI_INVOKE("host_set_protocol", { id, protocol })),
 	groupSave: (input: GroupInput_Deserialize) => typedError<GroupSummary_Serialize, AppError>(__TAURI_INVOKE("group_save", { input })),
 	groupDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("group_delete", { id })),
 	/**  F04: drag hosts into a group (`group_id: null` = the top level). */
@@ -520,6 +522,8 @@ export type HostSummary_Deserialize = {
 	last_connected_at?: number | null,
 	/**  Detected after the first connect: `ubuntu`, `debian`, `macos`, `linux`, ... or `unknown`. */
 	os_hint?: string | null,
+	/**  `ssh` or `telnet`. */
+	protocol: string,
 };
 
 /**  What the list needs to draw a card. No secret, only `has_password` flags. */
@@ -555,6 +559,8 @@ export type HostSummary_Serialize = {
 	last_connected_at: number | null,
 	/**  Detected after the first connect: `ubuntu`, `debian`, `macos`, `linux`, ... or `unknown`. */
 	os_hint: string | null,
+	/**  `ssh` or `telnet`. */
+	protocol: string,
 };
 
 export type HostsTree = HostsTree_Serialize | HostsTree_Deserialize;

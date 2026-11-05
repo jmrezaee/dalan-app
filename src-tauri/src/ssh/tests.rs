@@ -691,6 +691,114 @@ async fn os_hint(h: &Harness) -> Option<String> {
 }
 
 #[tokio::test]
+async fn telnet_hosts_use_plain_tcp_and_refuse_ssh_only_features() {
+    use crate::ssh::{Job, SessionManager};
+    use tokio::io::AsyncWriteExt;
+    // A "telnet server": greets with a banner and hangs up.
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = l.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let (mut c, _) = l.accept().await.unwrap();
+        c.write_all(b"hello from telnet\r\n").await.unwrap();
+    });
+    let h = harness(Some("right-pw")).await;
+    let hid = h.host_id.clone();
+    let saved = h
+        .state
+        .store()
+        .with_db_session(move |c, s| {
+            hosts::save(
+                c,
+                s,
+                &HostInput {
+                    id: Some(hid.clone()),
+                    label: "t".into(),
+                    address: "127.0.0.1".into(),
+                    port: Some(port),
+                    username: Some("test".into()),
+                    password: Some("right-pw".into()),
+                    clear_password: false,
+                    key_id: None,
+                    identity_id: None,
+                    startup_snippet_id: None,
+                    jump_mode: "inherit".into(),
+                    jump_host_ids: vec![],
+                    group_id: None,
+                    tags: vec![],
+                },
+            )?;
+            hosts::set_protocol(c, s, &hid, "telnet")?;
+            let g = hosts::get(c, &s.vault_id, &hid)?;
+            Ok((g.protocol, g.has_password))
+        })
+        .await
+        .unwrap();
+    assert_eq!(saved, ("telnet".to_string(), false)); // the saved password is dropped
+
+    // A shell tab on a Telnet host runs the Telnet job and shows the banner.
+    let shown: Arc<std::sync::Mutex<Vec<u8>>> = Arc::default();
+    let d = Arc::clone(&shown);
+    let (etx, mut events) = mpsc::unbounded_channel();
+    let io = SessionIo {
+        event: Box::new(move |e| {
+            let _ = etx.send(e);
+        }),
+        data: Box::new(move |b| d.lock().unwrap().extend(b)),
+    };
+    let mgr = SessionManager::default();
+    mgr.open(h.state.store(), h.host_id.clone(), Job::Telnet, 80, 24, io)
+        .unwrap();
+    loop {
+        if let Some(SessionEvent::State {
+            state: SessionState::Disconnected,
+        }) = events.recv().await
+        {
+            break;
+        }
+    }
+    assert_eq!(shown.lock().unwrap().as_slice(), b"hello from telnet\r\n");
+
+    // SSH-only entry points (SFTP, tunnels, key install) say so instead of speaking SSH to port 23.
+    let mut s = start(&h);
+    let e = s.until(|e| matches!(e, SessionEvent::Error { .. })).await;
+    assert!(
+        matches!(e, SessionEvent::Error { code: ErrorCode::Validation, ref message } if message.contains("Telnet"))
+    );
+    // The default port follows the protocol.
+    let hid = h.host_id.clone();
+    h.state
+        .store()
+        .with_db_session(move |c, s| {
+            hosts::save(
+                c,
+                s,
+                &HostInput {
+                    id: Some(hid.clone()),
+                    label: "t".into(),
+                    address: "127.0.0.1".into(),
+                    port: None,
+                    username: Some("test".into()),
+                    password: None,
+                    clear_password: false,
+                    key_id: None,
+                    identity_id: None,
+                    startup_snippet_id: None,
+                    jump_mode: "inherit".into(),
+                    jump_host_ids: vec![],
+                    group_id: None,
+                    tags: vec![],
+                },
+            )?;
+            assert_eq!(hosts::connect_info(c, s, &hid)?.port, 23);
+            hosts::set_protocol(c, s, &hid, "ssh")?;
+            assert_eq!(hosts::connect_info(c, s, &hid)?.port, 22);
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn os_is_detected_on_the_first_connect_only_and_can_be_switched_off() {
     let h = harness(Some("right-pw")).await;
     *h.server.uname_reply.lock().unwrap() = Some("Linux\nubuntu\n".into());

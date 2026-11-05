@@ -16,6 +16,7 @@ use crate::vault::{
 };
 
 pub const DEFAULT_PORT: u16 = 22;
+pub const TELNET_PORT: u16 = 23;
 const MAX_TAG_LEN: usize = 32;
 
 /// What the list needs to draw a card. No secret, only `has_password` flags.
@@ -53,6 +54,8 @@ pub struct HostSummary {
     pub last_connected_at: Option<i64>,
     /// Detected after the first connect: `ubuntu`, `debian`, `macos`, `linux`, ... or `unknown`.
     pub os_hint: Option<String>,
+    /// `ssh` or `telnet`.
+    pub protocol: String,
 }
 
 #[derive(Debug, Serialize, Type)]
@@ -101,11 +104,12 @@ struct HostRow {
     chain_mode: Option<String>,
     startup_snippet_id: Option<String>,
     os_hint: Option<String>,
+    protocol: String,
     /// Filled in by `with_jumps` (a separate query).
     jump_host_ids: Vec<String>,
 }
 
-const SELECT_HOST: &str = "SELECT h.id, h.label, h.address, p.ssh_port, p.username, p.password_secret_id IS NOT NULL, h.group_id, h.last_connected_at, p.key_id, p.identity_id, p.password_secret_id, h.profile_id, p.chain_mode, p.startup_snippet_id, h.os_hint
+const SELECT_HOST: &str = "SELECT h.id, h.label, h.address, p.ssh_port, p.username, p.password_secret_id IS NOT NULL, h.group_id, h.last_connected_at, p.key_id, p.identity_id, p.password_secret_id, h.profile_id, p.chain_mode, p.startup_snippet_id, h.os_hint, h.protocol
      FROM hosts h JOIN connection_profiles p ON p.id = h.profile_id";
 
 fn row_to_host(r: &rusqlite::Row) -> rusqlite::Result<HostRow> {
@@ -125,6 +129,7 @@ fn row_to_host(r: &rusqlite::Row) -> rusqlite::Result<HostRow> {
         chain_mode: r.get(12)?,
         startup_snippet_id: r.get(13)?,
         os_hint: r.get(14)?,
+        protocol: r.get(15)?,
         jump_host_ids: Vec::new(),
     })
 }
@@ -187,6 +192,7 @@ fn summarize(h: HostRow, tags: Vec<String>, groups: &GroupMap, ids: &IdentityMap
         tags,
         last_connected_at: h.last_connected_at,
         os_hint: h.os_hint,
+        protocol: h.protocol,
     }
 }
 
@@ -409,6 +415,43 @@ pub fn delete(conn: &mut Connection, s: &VaultSession, id: &str) -> AppResult<()
     Ok(())
 }
 
+/// Switches a host between `ssh` and `telnet`. A Telnet host keeps no saved password: Telnet sends
+/// it unencrypted, so you type it in the terminal instead.
+pub fn set_protocol(
+    conn: &mut Connection,
+    s: &VaultSession,
+    host_id: &str,
+    protocol: &str,
+) -> AppResult<()> {
+    if !["ssh", "telnet"].contains(&protocol) {
+        return Err(AppError::validation("Unknown protocol."));
+    }
+    let tx = conn.transaction()?;
+    let (profile_id, secret): (String, Option<String>) = tx
+        .query_row(
+            "SELECT h.profile_id, p.password_secret_id FROM hosts h JOIN connection_profiles p ON p.id = h.profile_id WHERE h.id = ?1 AND h.vault_id = ?2",
+            params![host_id, s.vault_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?
+        .ok_or_else(|| AppError::not_found("That host no longer exists."))?;
+    tx.execute(
+        "UPDATE hosts SET protocol = ?1, updated_at = ?2 WHERE id = ?3",
+        params![protocol, now_ms(), host_id],
+    )?;
+    if protocol == "telnet" {
+        if let Some(sid) = secret {
+            tx.execute(
+                "UPDATE connection_profiles SET password_secret_id = NULL WHERE id = ?1",
+                [&profile_id],
+            )?;
+            secrets::delete(&tx, s, &sid)?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 /// Everything a connection needs. The password is decrypted here, in Rust, and wiped on drop.
 pub struct ConnectInfo {
     pub id: String,
@@ -427,6 +470,8 @@ pub struct ConnectInfo {
     pub proxy: Option<crate::proxy::Proxy>,
     /// Ask the server to forward this computer's SSH agent (shells only).
     pub agent_forwarding: bool,
+    /// `ssh` or `telnet`.
+    pub protocol: String,
 }
 
 /// Resolves host -> group -> parent group per field (identities included), so a host with no
@@ -461,7 +506,14 @@ pub fn connect_info(conn: &Connection, s: &VaultSession, host_id: &str) -> AppRe
         id: h.id.clone(),
         label: h.label.clone(),
         address: h.address.clone(),
-        port: r.port.map_or(DEFAULT_PORT, |p| p.value),
+        port: r.port.map_or(
+            if h.protocol == "telnet" {
+                TELNET_PORT
+            } else {
+                DEFAULT_PORT
+            },
+            |p| p.value,
+        ),
         username: r.username.map(|u| u.value),
         password,
         key_id: r.key_id.map(|k| k.value),
@@ -472,6 +524,7 @@ pub fn connect_info(conn: &Connection, s: &VaultSession, host_id: &str) -> AppRe
         jump_host_ids: r.jump.map(|j| j.value).unwrap_or_default(),
         proxy: crate::proxy::resolve_for_host(conn, &s.vault_id, host_id)?,
         agent_forwarding: crate::agent::resolve_for_host(conn, &s.vault_id, host_id)?,
+        protocol: h.protocol.clone(),
     })
 }
 

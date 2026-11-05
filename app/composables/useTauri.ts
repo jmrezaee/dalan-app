@@ -32,6 +32,7 @@ export function useTauri() {
     hostsTree: () => unwrap(commands.hostsTree()),
     hostGet: (id: string) => unwrap(commands.hostGet(id)),
     hostSave: (input: HostInput) => unwrap(commands.hostSave(input)),
+    hostSetProtocol: (id: string, protocol: string) => unwrap(commands.hostSetProtocol(id, protocol)),
     hostDelete: (id: string) => unwrap(commands.hostDelete(id)),
     groupSave: (input: GroupInput) => unwrap(commands.groupSave(input)),
     groupDelete: (id: string) => unwrap(commands.groupDelete(id)),

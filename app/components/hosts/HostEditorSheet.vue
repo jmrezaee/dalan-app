@@ -46,7 +46,7 @@ async function loadEnv(id: string) {
   }
 }
 
-const blank = () => ({ label: '', address: '', port: '' as number | string, username: '', password: '', group_id: hosts.currentGroupId as string | null, tags: [] as string[], identity_id: null as string | null, key_id: null as string | null, startup_snippet_id: null as string | null, jump_mode: 'inherit', jump_host_ids: [] as string[], terminal_theme: null as string | null, env_mode: 'inherit', env_vars: [] as EnvVar[], proxy: { kind: 'inherit', host: '', port: null } as ProxyChoice, agent: 'inherit' })
+const blank = () => ({ label: '', address: '', port: '' as number | string, username: '', password: '', group_id: hosts.currentGroupId as string | null, tags: [] as string[], identity_id: null as string | null, key_id: null as string | null, startup_snippet_id: null as string | null, jump_mode: 'inherit', jump_host_ids: [] as string[], terminal_theme: null as string | null, env_mode: 'inherit', env_vars: [] as EnvVar[], proxy: { kind: 'inherit', host: '', port: null } as ProxyChoice, agent: 'inherit', protocol: 'ssh' })
 const form = reactive(blank())
 const clearPassword = ref(false)
 const error = ref('')
@@ -59,7 +59,7 @@ const dirty = computed(() => current.value !== snapshot.value)
 // Reset the form each time the sheet opens, from the host being edited (or blank, in the group you are viewing).
 watch(() => hosts.editing, (e) => {
   const h = e && e !== 'new' ? (e as HostSummary) : null
-  Object.assign(form, h ? { label: h.label, address: h.address, port: h.port ?? '', username: h.username ?? '', password: '', group_id: h.group_id, tags: [...h.tags], identity_id: h.identity_id, key_id: h.key_id, startup_snippet_id: h.startup_snippet_id, jump_mode: h.jump_mode, jump_host_ids: [...h.jump_host_ids], terminal_theme: hosts.themes.hosts[h.id]?.own ?? null, env_mode: 'inherit', env_vars: [], proxy: { kind: 'inherit', host: '', port: null }, agent: 'inherit' } : blank())
+  Object.assign(form, h ? { label: h.label, address: h.address, port: h.port ?? '', username: h.username ?? '', password: '', group_id: h.group_id, tags: [...h.tags], identity_id: h.identity_id, key_id: h.key_id, startup_snippet_id: h.startup_snippet_id, jump_mode: h.jump_mode, jump_host_ids: [...h.jump_host_ids], terminal_theme: hosts.themes.hosts[h.id]?.own ?? null, env_mode: 'inherit', env_vars: [], proxy: { kind: 'inherit', host: '', port: null }, agent: 'inherit', protocol: h.protocol } : blank())
   clearPassword.value = false
   error.value = ''
   snapshot.value = current.value
@@ -82,7 +82,7 @@ const hasOwnPassword = computed(() => !!host.value?.has_password && !clearPasswo
 async function submit() {
   if (busy.value) return
   // Checked here too: the proxy is saved after the item, and a late failure would leave a half-saved copy open.
-  if ((form.proxy.kind === 'socks5' || form.proxy.kind === 'http') && (!form.proxy.host.trim() || !form.proxy.port)) {
+  if (form.protocol === 'ssh' && (form.proxy.kind === 'socks5' || form.proxy.kind === 'http') && (!form.proxy.host.trim() || !form.proxy.port)) {
     error.value = 'Enter the proxy\'s address and port.'
     return
   }
@@ -93,7 +93,7 @@ async function submit() {
     address: form.address,
     port: form.port === '' ? null : Number(form.port),
     username: form.username,
-    password: form.password || null,
+    password: form.protocol === 'telnet' ? null : form.password || null,
     clear_password: clearPassword.value,
     group_id: form.group_id,
     tags: form.tags,
@@ -102,7 +102,7 @@ async function submit() {
     startup_snippet_id: form.startup_snippet_id,
     jump_mode: form.jump_mode,
     jump_host_ids: form.jump_host_ids,
-  }, form.terminal_theme, envLoaded.value ? { mode: form.env_mode, vars: form.env_vars.filter((v: EnvVar) => v.name.trim()).map((v: EnvVar) => ({ name: v.name.trim(), value: v.value })) } : undefined, envLoaded.value ? form.proxy : undefined, envLoaded.value ? { kind: form.agent } : undefined)
+  }, form.terminal_theme, envLoaded.value ? { mode: form.env_mode, vars: form.env_vars.filter((v: EnvVar) => v.name.trim()).map((v: EnvVar) => ({ name: v.name.trim(), value: v.value })) } : undefined, envLoaded.value && form.protocol === 'ssh' ? form.proxy : undefined, envLoaded.value && form.protocol === 'ssh' ? { kind: form.agent } : undefined, form.protocol)
   busy.value = false
   if (!error.value) hosts.editing = null
 }
@@ -124,6 +124,8 @@ async function submit() {
       <form class="flex flex-1 flex-col gap-6 overflow-auto p-5" @submit.prevent="submit">
         <section class="flex flex-col gap-3">
           <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">General</h3>
+          <Segmented v-model="form.protocol" label="Protocol" :options="[{ value: 'ssh', label: 'SSH' }, { value: 'telnet', label: 'Telnet' }]" />
+          <p v-if="form.protocol === 'telnet'" role="note" class="rounded-md border border-warning/40 bg-warning/10 p-2.5 text-xs">Telnet isn't encrypted. Everything you type, including passwords, can be read on the network, and Dalan won't save a password for it. Use it only for devices that have nothing better.</p>
           <div class="flex flex-col gap-1.5">
             <Label for="host-label">Label</Label>
             <Input id="host-label" v-model="form.label" placeholder="web-1" autofocus autocomplete="off" />
@@ -136,7 +138,7 @@ async function submit() {
             <div class="flex flex-col gap-1.5">
               <Label for="host-port">Port</Label>
               <div class="relative">
-                <NumberInput id="host-port" v-model="form.port" :placeholder="String(inherited.port?.value ?? 22)" />
+                <NumberInput id="host-port" v-model="form.port" :placeholder="form.protocol === 'telnet' ? '23' : String(inherited.port?.value ?? 22)" />
               </div>
               <p v-if="form.port === '' && inherited.port" class="text-2xs text-muted">from {{ inherited.port.group }}</p>
             </div>
@@ -151,7 +153,7 @@ async function submit() {
           </div>
         </section>
 
-        <section class="flex flex-col gap-3">
+        <section v-if="form.protocol === 'ssh'" class="flex flex-col gap-3">
           <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">Credentials</h3>
           <div class="flex flex-col gap-1.5">
             <Label for="host-user">Username</Label>
@@ -186,7 +188,7 @@ async function submit() {
           </div>
         </section>
 
-        <section class="flex flex-col gap-3">
+        <section v-if="form.protocol === 'ssh'" class="flex flex-col gap-3">
           <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">Connection</h3>
           <div class="flex flex-col gap-1.5">
             <Label>Jump hosts</Label>
@@ -209,22 +211,22 @@ async function submit() {
           </div>
         </section>
 
-        <section class="flex flex-col gap-3">
+        <section v-if="form.protocol === 'ssh'" class="flex flex-col gap-3">
           <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">Environment variables</h3>
           <EnvVarsEditor v-model:mode="form.env_mode" v-model:vars="form.env_vars" :inherited="envInherited" />
         </section>
 
-        <section class="flex flex-col gap-3">
+        <section v-if="form.protocol === 'ssh'" class="flex flex-col gap-3">
           <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">Proxy</h3>
           <ProxyEditor v-model="form.proxy" :inherited="proxyInherited?.inherited ?? null" :inherited-from="proxyInherited?.inherited_from ?? null" />
         </section>
 
-        <section class="flex flex-col gap-3">
+        <section v-if="form.protocol === 'ssh'" class="flex flex-col gap-3">
           <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">SSH agent</h3>
           <AgentEditor v-model="form.agent" :info="agentInfo" />
         </section>
 
-        <section class="flex flex-col gap-3">
+        <section v-if="form.protocol === 'ssh'" class="flex flex-col gap-3">
           <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">On connect</h3>
           <div class="flex flex-col gap-1.5">
             <Label for="host-startup">Startup snippet</Label>

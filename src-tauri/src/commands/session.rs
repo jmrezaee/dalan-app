@@ -69,9 +69,18 @@ pub async fn session_open(
     let tap = logs::LogTap::start(&state.store(), logs_dir(&app)?, Some(host_id.clone())).await;
     let hist = HistoryTap::start(&state.store(), Some(host_id.clone())).await;
     let io = tapped_io(tap, hist.clone(), events, data);
+    // Telnet hosts get a plain TCP session; everything else is SSH.
+    let hid = host_id.clone();
+    let telnet = state
+        .with_db_session(move |c, s| {
+            Ok(crate::hosts::get(c, &s.vault_id, &hid)?.protocol == "telnet")
+        })
+        .await
+        .unwrap_or(false);
+    let job = if telnet { Job::Telnet } else { Job::Shell };
     let session_id = state
         .sessions
-        .open(state.store(), host_id, Job::Shell, cols, rows, io)?;
+        .open(state.store(), host_id, job, cols, rows, io)?;
     if let Some(h) = hist {
         state.history.add(&session_id, h);
     }

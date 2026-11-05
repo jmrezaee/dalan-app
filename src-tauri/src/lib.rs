@@ -20,6 +20,7 @@ pub mod sftp;
 pub mod snippets;
 pub mod ssh;
 pub mod state;
+pub mod telnet;
 pub mod themes;
 pub mod tunnels;
 pub mod vault;
@@ -45,6 +46,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::hosts::host_get,
             commands::hosts::host_save,
             commands::hosts::host_delete,
+            commands::hosts::host_set_protocol,
             commands::hosts::group_save,
             commands::hosts::group_delete,
             commands::hosts::hosts_move,

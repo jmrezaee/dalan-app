@@ -284,6 +284,16 @@ pub async fn connect_authenticated(
         Err(e) => return fail(io, e.code, e.message),
     };
     let last = plan.len() - 1;
+    if plan[last].protocol == "telnet" {
+        return fail(
+            io,
+            ErrorCode::Validation,
+            format!(
+                "{} uses Telnet, which has no files, tunnels or keys.",
+                plan[last].label
+            ),
+        );
+    }
     if last > 0 {
         let via = plan[..last].iter().map(|i| i.label.clone()).collect();
         (io.event)(SessionEvent::Hop { via });

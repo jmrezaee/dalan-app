@@ -74,3 +74,16 @@ pub async fn hosts_move(
         .with_db_session(move |c, s| groups::move_hosts(c, &s.vault_id, &ids, group_id.as_deref()))
         .await
 }
+
+/// Switches a host between `ssh` and `telnet`.
+#[tauri::command]
+#[specta::specta]
+pub async fn host_set_protocol(
+    state: State<'_, AppState>,
+    id: String,
+    protocol: String,
+) -> AppResult<()> {
+    state
+        .with_db_session(move |c, s| hosts::set_protocol(c, s, &id, &protocol))
+        .await
+}

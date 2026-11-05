@@ -114,9 +114,10 @@ export const useHostsStore = defineStore('hosts', () => {
   }
 
   /** Returns an error string for the form to show, or `''` on success. */
-  async function save(input: HostInput, theme?: string | null, env?: { mode: string, vars: EnvVar[] }, proxy?: ProxyChoice, agent?: AgentChoice) {
+  async function save(input: HostInput, theme?: string | null, env?: { mode: string, vars: EnvVar[] }, proxy?: ProxyChoice, agent?: AgentChoice, protocol?: string) {
     try {
       const saved = await api.hostSave(input)
+      if (protocol) await api.hostSetProtocol(saved.id, protocol)
       if (theme !== undefined) await api.terminalThemeSet('host', saved.id, theme)
       if (env) await api.envSet('host', saved.id, env.mode, env.vars)
       if (proxy) await api.proxySet('host', saved.id, proxy)

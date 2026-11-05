@@ -151,6 +151,7 @@ const nothingHere = computed(() => hosts.loaded && !empty.value && !hosts.childG
             :tags="h.tags"
             :os-letter="osLetter(h.os_hint)"
             :os-name="osName(h.os_hint)"
+            :protocol="h.protocol"
             :list="hosts.view === 'list'"
             :selected="selected === h.id"
             :dragging="dragging === h.id"

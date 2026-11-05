@@ -191,6 +191,8 @@ pub enum Job {
     Shell,
     /// A shell on this computer (no host).
     Local,
+    /// A Telnet connection (unencrypted) to the host's address and port.
+    Telnet,
     /// S08: install a public key in `authorized_keys`.
     Export {
         key_id: String,
@@ -242,6 +244,29 @@ impl SessionManager {
                         rx,
                     )
                     .await
+                }
+                Job::Telnet => {
+                    let hid = params.host_id.clone();
+                    match store
+                        .with_db_session(move |c, s| crate::hosts::connect_info(c, s, &hid))
+                        .await
+                    {
+                        Ok(info) => {
+                            crate::telnet::run(
+                                Arc::clone(&io),
+                                info.address,
+                                info.port,
+                                params.cols,
+                                params.rows,
+                                rx,
+                            )
+                            .await
+                        }
+                        Err(e) => (io.event)(SessionEvent::Error {
+                            code: e.code,
+                            message: e.message,
+                        }),
+                    }
                 }
                 Job::Shell => {
                     client::run(store, Arc::clone(&io), Arc::clone(&prompts), params, rx).await
