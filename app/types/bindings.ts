@@ -47,6 +47,12 @@ export const commands = {
 	workspaceSave: (input: TemplateInput_Deserialize) => typedError<string, AppError>(__TAURI_INVOKE("workspace_save", { input })),
 	workspaceDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("workspace_delete", { id })),
 	/**
+	 *  `kind` is `ssh_config` or `csv`. `path` is a file chosen in the dialog; for `ssh_config`,
+	 *  `None` reads `~/.ssh/config`. Rust reads the file, the webview only knows the path.
+	 */
+	importPreview: (kind: string, path: string | null) => typedError<ImportPreview_Serialize, AppError>(__TAURI_INVOKE("import_preview", { kind, path })),
+	importApply: (rows: ImportRow_Deserialize[], groupId: string | null) => typedError<ImportResult, AppError>(__TAURI_INVOKE("import_apply", { rows, groupId })),
+	/**
 	 *  Opens an SFTP session on a host. The caller picks `open_id` so it can answer host-key and
 	 *  password questions (events on `events`, answers to `sftp_respond`) before this call returns.
 	 */
@@ -505,6 +511,57 @@ export type ImportInput_Serialize = {
 	path: string | null,
 	passphrase: string | null,
 	save_passphrase: boolean,
+};
+
+export type ImportPreview = ImportPreview_Serialize | ImportPreview_Deserialize;
+
+export type ImportPreview_Deserialize = {
+	rows: ImportRow_Deserialize[],
+	/**  File-level notes (ignored `Include`, unreadable lines). */
+	warnings: string[],
+};
+
+export type ImportPreview_Serialize = {
+	rows: ImportRow_Serialize[],
+	/**  File-level notes (ignored `Include`, unreadable lines). */
+	warnings: string[],
+};
+
+export type ImportResult = {
+	created: number,
+	skipped: number,
+};
+
+export type ImportRow = ImportRow_Serialize | ImportRow_Deserialize;
+
+export type ImportRow_Deserialize = {
+	label: string,
+	address: string,
+	port?: number | null,
+	username?: string | null,
+	/**  CSV only: a group name, created at the top level when it doesn't exist yet. */
+	group?: string | null,
+	tags: string[],
+	/**  ssh_config only: `ProxyJump` names, matched to host labels or addresses. */
+	jump: string[],
+	/**  The vault already has a host with this address, port and user. Off by default in the UI. */
+	duplicate: boolean,
+	warnings: string[],
+};
+
+export type ImportRow_Serialize = {
+	label: string,
+	address: string,
+	port: number | null,
+	username: string | null,
+	/**  CSV only: a group name, created at the top level when it doesn't exist yet. */
+	group: string | null,
+	tags: string[],
+	/**  ssh_config only: `ProxyJump` names, matched to host labels or addresses. */
+	jump: string[],
+	/**  The vault already has a host with this address, port and user. Off by default in the UI. */
+	duplicate: boolean,
+	warnings: string[],
 };
 
 /**  What this item would get if it set nothing itself. Drives the "from Production" hints. */

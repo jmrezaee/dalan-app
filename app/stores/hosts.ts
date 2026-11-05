@@ -12,6 +12,8 @@ export const useHostsStore = defineStore('hosts', () => {
   const hosts = ref<HostSummary[]>([])
   const groups = ref<GroupSummary[]>([])
   const loaded = ref(false)
+  /** S25 import dialog. */
+  const importOpen = ref(false)
   const query = ref('')
   const view = ref<View>((typeof localStorage !== 'undefined' && localStorage.getItem(VIEW_KEY) === 'list') ? 'list' : 'grid')
   /** `null` = the top level. */
@@ -180,7 +182,7 @@ export const useHostsStore = defineStore('hosts', () => {
   }
 
   return {
-    hosts, groups, loaded, query, view, currentGroupId, selectedTags, editing, editingGroup,
+    hosts, groups, loaded, importOpen, query, view, currentGroupId, selectedTags, editing, editingGroup,
     allTags, searching, currentGroup, breadcrumb, childGroups, visibleHosts,
     groupLabel, groupOptions, inheritedFor, toggleTag, refresh, save, saveGroup, remove, removeGroup, move, clear,
   }

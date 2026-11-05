@@ -45,7 +45,7 @@ Environment variables per host/group (SendEnv),hosts,should,yes,no,source 12
 SOCKS5 / HTTP proxy per host,hosts,should,yes,no,source 2
 SSH agent forwarding,hosts,should,yes,no,source 2
 Import from ~/.ssh/config and known_hosts and keys,import,should,yes,no,S25 F10
-Import hosts from CSV,import,should,yes,no,source 2
+Import hosts from CSV,import,should,yes,yes,source 2
 Terminal themes per host/group,terminal,should,yes,no,S20
 Command history side panel,terminal,should,yes,no,S20
 Local terminal tab,terminal,should,yes,no,S23 local terminal path

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // S02: groups first, then the hosts in the group you are in. Search and tag filters look at every host.
-import { ChevronRight, FolderPlus, LayoutGrid, List, Plus, Server } from '@lucide/vue'
+import { ChevronRight, Download, FolderPlus, LayoutGrid, List, Plus, Server } from '@lucide/vue'
 import type { GroupSummary, HostSummary } from '~/types/bindings'
 import { buttonVariants } from '@/components/ui/button'
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
@@ -103,7 +103,7 @@ const nothingHere = computed(() => hosts.loaded && !empty.value && !hosts.childG
       <SplitButton label="New host" @click="newHost">
         <template #icon><Plus /></template>
         <DropdownMenuItem @select="hosts.editingGroup = 'new'"><FolderPlus />New group</DropdownMenuItem>
-        <DropdownMenuItem disabled>Import from SSH config (P12)</DropdownMenuItem>
+        <DropdownMenuItem @select="hosts.importOpen = true"><Download />Import hosts…</DropdownMenuItem>
       </SplitButton>
     </template>
   </PageToolbar>
@@ -111,7 +111,7 @@ const nothingHere = computed(() => hosts.loaded && !empty.value && !hosts.childG
   <div class="flex-1 overflow-auto p-6">
     <EmptyState v-if="empty" :icon="Server" title="No servers yet" text="Add one by hand, or bring them over from your SSH config.">
       <Button @click="newHost"><Plus />Add host</Button>
-      <Button variant="secondary" disabled title="Arrives with import (P12)">Import</Button>
+      <Button variant="secondary" @click="hosts.importOpen = true"><Download />Import</Button>
     </EmptyState>
 
     <div v-else class="flex flex-col gap-5">
@@ -170,6 +170,7 @@ const nothingHere = computed(() => hosts.loaded && !empty.value && !hosts.childG
 
   <HostEditorSheet />
   <GroupEditorSheet />
+  <ImportDialog v-model:open="hosts.importOpen" />
 
   <AlertDialog v-model:open="hostConfirm">
     <AlertDialogContent>

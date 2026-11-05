@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod hosts;
+pub mod import;
 pub mod keychain;
 pub mod session;
 pub mod settings;

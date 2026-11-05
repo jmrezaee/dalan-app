@@ -54,6 +54,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::workspaces::workspaces_list,
             commands::workspaces::workspace_save,
             commands::workspaces::workspace_delete,
+            commands::import::import_preview,
+            commands::import::import_apply,
             commands::sftp::sftp_open,
             commands::sftp::sftp_respond,
             commands::sftp::sftp_close,
