@@ -218,3 +218,70 @@ Workspaces and split panes (no way to multi-select from this access level), the 
 
 ### Cleanup state after this look
 Removed from the reference app: the three test hosts and the four imported copies of the throwaway key. **Left behind (could not be removed with clicks):** 13 added entries in Known Hosts (`[127.0.0.1]:2223` and 12 from the user's own known_hosts file); a "sessions" history row in Logs for the test connections. The temporary `~/.ssh/config` and `~/.ssh/dalan_test_key` were deleted; the test server's host keys were restored.
+
+## 12. Part 4: guided session (the user did the typing, right-clicking and dragging; Claude captured)
+
+The earlier "not seen" list is now covered, except where noted. Servers were the local Docker test servers.
+
+### Password and authentication screens
+- **After a failed sign-in** the connection screen shows a **six-stage progress track** (connect, host key, password, two keyboard-interactive stages, shell) that turns fully red, with the log listing the methods the server allows (public key, keyboard-interactive, password), "authenticating using password method", "authentication failed", and "no more authentication methods to try". Buttons: Close, Edit host, **Start over**. There is no inline "try again" field.
+- **After "Start over"** the screen shows a **three-way method chooser: Password, Interactive, Public Key**, above a single password field with a show/hide eye, a Close button, and a **Continue button with a dropdown arrow**. The track is back to three stages. A correct password went straight to the shell.
+- **Compare with Dalan:** Dalan keeps the password card in place and says which host rejected it. The method chooser (letting the user pick password, keyboard-interactive or key explicitly) is new and could help with servers that offer several methods. The log-as-explanation is worth borrowing (row 18).
+
+### Key generation
+- The **Generate Key** side panel: vault, label, key type as a segmented control, a passphrase field with eye and a **"save passphrase" switch (off by default)**, and **Generate & save**. A draft card with the type appears in the list while editing.
+- **Type options and hints:** ED25519 (default, hint "OpenSSH 6.5+"); ECDSA (hint "5.7+", curve sizes 521, 384, 256); RSA (hint "legacy devices", sizes 4096, 2048 and **1024**); and **ML-DSA** (hint "only on ML-DSA-enabled servers", parameter sets 87, 65, 44), a post-quantum signature type.
+- The saved key's panel shows the **private key in the clear**, the public key (with a generated comment naming the app) and a certificate box, plus **Export to host**.
+- **Compare with Dalan:** Dalan offers Ed25519, ECDSA P-256/384/521 and RSA 4096/3072/2048. Not worth copying: 1024-bit RSA, showing the private key. Worth considering: an explanatory hint per type, and a clear note about which servers support a type.
+
+### Key export (install on a server)
+- **Key Export** panel: choose a host, a location (default `.ssh`), a file name (default `authorized_keys`), a note that only UNIX systems are supported, and an **Advanced** section with the **editable shell script** that does it (makes the folder, sets modes 700 and 600, appends a comment line and the key; the location, file name and key are passed as arguments). Button: Export and Attach.
+- The username was asked inside the panel, with a small three-stage track.
+- **Result seen on the server:** the key was appended **twice** (the script has no check for an existing copy), each time with a comment line. Dalan's installer should keep its duplicate check and strict path validation; a user-editable script is a risk Dalan avoids.
+
+### Snippets
+- The snippet editor **saves as you type** (a check mark at the top, a card appears at once). Fields: action description, package, script, share, **Targets** (list with an Edit link), and a **Run** button pinned to the bottom.
+- **Running** opened a **new tab named after the snippet** with a **left list "Terminals · N"** (one row per target with an X) and the terminal beside it. The script was typed into the shell and ran as typed (visible, and in the history). Running the same snippet again opened **a second tab** rather than reusing the first.
+- A button above the list switches the tab between that **list layout** and a **split layout** (framed panes).
+
+### Workspaces and split panes
+- **Dragging one session tab onto another merged them** into a workspace tab, with the two terminals **stacked vertically** (top and bottom), each in its own frame. Dragging the second tab onto the first needed no confirmation.
+- **Pane header:** host name, protocol label, a small dot when a pane has unread output, a **Broadcast** toggle, maximise and close. The focused pane has a solid white frame.
+- **Broadcast on:** the other pane(s) get a **dashed frame**; the toggle highlights. Off restores the frames.
+- The **host card menu has "Add to Workspace"** with a list of existing workspaces and "New Workspace", which is the click-only way to build one.
+- Layout choices seen: list plus one big terminal, or split frames. Resizable divider handles were not tested.
+
+### Right-click menus
+| Where | Entries |
+|-------|---------|
+| Tab in the tab bar | Rename, Close |
+| Inside a terminal pane | none (no menu; copy and paste on right-click is a setting, off by default) |
+| Pane header | none |
+| Host card | Quick Connect (Return), Connect (submenu: with SSH, with SFTP, in a new window while holding Option), Add to Workspace (submenu), Edit Host Details (E), Collaborate, Move to (submenu), Copy to (submenu), Duplicate, Copy Link, Remove |
+| Key card | Edit (E), Export to host, Collaborate, Move to, Copy to, Remove |
+| SFTP file or folder | Open, Open with, Copy to target directory, Rename, Delete (red), Refresh, New Folder, Edit Permissions |
+| SFTP blank space | the same list with the selection-only items greyed out; Refresh and New Folder active |
+
+- Single-letter shortcuts (E, Return) are shown next to menu items. Menus use icons, a red destructive item, and submenu arrows. The tab menu is minimal.
+- **Compare with Dalan:** Dalan has right-click menus on SFTP rows and tags but not on host cards, keys, tabs or panes. A host-card menu with Connect (SSH or SFTP), Add to Workspace, Edit, Duplicate, Copy to/Move to groups and Remove is the biggest gap here (new row 28), followed by a tab menu with Rename and Close (row 29).
+
+### Drag and drop
+- **Tab onto tab** creates a workspace (above).
+- **File from the local pane onto the remote pane** transferred a 200 MB file to the server and the remote list refreshed to show it, all within a few seconds on localhost. **No progress bar, queue or toast was visible** in the screenshots taken after the drop; on a fast local link it may have been too quick to catch. Dropping onto a folder row was not captured.
+
+### Updated gap table additions
+| # | Gap | Effort | Notes |
+|---|-----|--------|-------|
+| 28 | Right-click menu on host cards (connect via SSH or SFTP, add to workspace, edit, duplicate, move, copy, remove) | M | Needs a context-menu component plus store actions; most already exist. |
+| 29 | Tab menu with Rename and Close, and a split of "add to workspace" on a host | S | Rename exists (double-click); adding the menu is cheap. |
+| 30 | Auth method chooser (password, interactive, key) after a failed attempt | S-M | Keyboard-interactive was added in P17; the choice is currently automatic. |
+| 31 | Per-type hints in key generation ("works with OpenSSH 6.5 and newer") | S | Copy only. |
+| 32 | A snippet run that opens a list-plus-terminal tab with per-target rows | M | Dalan opens a workspace of panes; consider the list layout as an alternative. |
+| 33 | Workspace made by dragging a tab onto a tab | Done | Added in P18 (opens a workspace with fresh connections). |
+| 34 | A dashed frame on panes that receive broadcast input | S | Dalan shows a "Broadcasting to N" pill; the per-pane frame is a clearer cue. |
+
+### What is still not covered
+Transfer progress and conflict handling during a slow or large transfer (localhost was too fast), resizable splits, drop onto a folder row, terminal-side autocomplete, and anything gated by a paid plan.
+
+### Cleanup done after part 4
+Removed from the reference app by clicking (each removal confirmed by its own dialog naming the item): the two test hosts (the original and its copy), the generated key, both snippets (the original and its copy), and the workspace tabs. On the test server: the 200 MB file, the added `authorized_keys` lines (the file is back to its earlier two lines), and the local 200 MB file. **Still left in Known Hosts (no delete control reachable by clicking):** 14 added entries now, `[127.0.0.1]:2222`, `[127.0.0.1]:2223` and 12 imported from the user's own known_hosts file. A few history rows in Logs for the test sessions also remain.
