@@ -137,3 +137,45 @@ Run these against throwaway servers (`scripts/test-servers.sh up`), never real o
 - A **UI-pattern note** for the design system (`replica/design/components.md`): side-panel editor, draft card, drill-in sub-panel, wizard step with picture.
 - A short **"don't copy" list** (section 6) to keep the clean-room line clear.
 - A list of **hand checks** (section 8) to finish the picture before deciding on the larger items.
+
+## 10. Part 2: observed against the local Docker test servers
+
+Added the same day. The test servers (`scripts/test-servers.sh`) were brought in by importing a temporary `~/.ssh/config` through the reference app's Import dialog (clicks only; no typing is possible there). Only the three test hosts and the one throwaway test key were ticked; the user's real keys and known-hosts entries were left unticked. The temporary config and key file were deleted from `~/.ssh` afterwards.
+
+### Import from ~/.ssh
+- The dialog offers: ~/.ssh, CSV, SecureCRT, PuTTY, MobaXterm, and says it carries connections, SSH keys, known hosts and port forwarding.
+- It **reads `~/.ssh` immediately** (no file picker) and lists **Hosts** (config entries *and* every known_hosts entry, 15 in this case) and **Keys** (every private and public key file it finds, 4 to 5) in collapsible groups with a count and a tick per group and per row.
+- Everything is ticked by default, including real private keys. There is a filter box, Later, Back and Import. Import happens with no further confirmation and the new hosts appear straight away.
+- **Compare with Dalan:** Dalan's import shows a review list, unticks duplicates and notes ignored lines, but it never touches keys or known_hosts. The reference's "everything ticked, private keys included" default is a risk worth not copying; its group tick-boxes (select or clear a whole group) are a useful idea.
+
+### Connection screen (every connect)
+- A dedicated full-tab screen: host name with its address, a **Show logs / Copy logs** button, and a **three-stage progress track** (start, secure channel, shell) whose connectors fill as it advances and turn red on failure.
+- **Unreachable host:** the track turns red, the heading says the connection failed, and a **step-by-step connection log** is shown (starting connection, address resolution, connecting, then the failure reason with "no more addresses to try"), with a link to documentation. Buttons: **Close, Edit host, Start over.**
+- **First connection / unknown key:** the track stops at the middle stage. It states that the authenticity can't be established, shows the key type and fingerprint in plain text, and asks "add it to the list of known hosts?". Three buttons: **Close**, **Continue** (this once) and **Add and continue** (primary). So "trust once" exists and is a first-class choice.
+- **Key login:** with an imported key and no password stored, it signed in silently and went straight to the shell. No overlay, no toast.
+- After connecting, the tab shows the host name with a close X (no status dot or colour was visible), the terminal fills the tab, and the **side panel reopened on the tab it was last used on** (themes).
+- A connected host's **card in the vault shows a live badge** instead of its OS icon, and the host list reorders with recently used first.
+- **Not captured:** a changed-key screen (needs a rekeyed server, not done), a password or passphrase prompt, wrong-password error, auto-reconnect after a drop.
+
+### SFTP against a server
+- The SFTP tab is two panes. The right pane's **Select host** is a searchable picker (vault selector, host list with the live badge, a Local shortcut button and sort control). It needs a **double-click** to open a host; a single click only highlights.
+- Both panes then have the same header: place name, Filter, an **Actions** menu, back/forward and a breadcrumb; columns for name (with permissions printed under each name), date modified, size and kind. Folders sort first; sort is by the date column by default.
+- **Actions menu (this is the context menu's equivalent, reachable without right-click):** Open, Open with, Copy to target directory, Rename, Delete, Refresh, New Folder, Show Hidden Files, Edit Permissions, Select All, Close. Items that need a selection are greyed until a row is selected.
+- **Copy to target directory** copied the selected remote file into the local pane's folder immediately, with no confirmation dialog. **No transfer progress panel was visible** for a 4-byte file; whether a queue or a toast appears for bigger files was not seen. The local pane did not visibly refresh to show the new file in the screenshot taken straight after.
+- The test file written to the home folder was removed afterwards.
+
+### Workspaces and split panes
+- **Not reached.** Making a workspace needs a multi-select on the New Tab screen, which in this tier would need a modifier-click, and recent connections there only listed two older real hosts, not the two live test sessions. The File menu only offers New Local Terminal and New Serial Connection. The Window menu could not be opened because a Claude Quick Entry bar took the input. A hand check is still needed.
+
+### What is still not seen
+Right-click menus, drag and drop, typing-based flows (key generation, snippet running), workspaces/splits, broadcast, a changed host key, password prompts and reconnect after a drop. The click-only access level makes these impossible for an automated look; they need Mehrdad's hands or a screen recording.
+
+### New ideas from part 2 (add to section 5 of the gap table)
+| # | Gap | Effort | Notes |
+|---|-----|--------|-------|
+| 18 | A connection screen with a 3-stage progress track and a readable connection log with "copy logs" | S-M | Dalan's overlay has states but no live step log; a log helps support and debugging. |
+| 19 | "Continue once" next to "Add and continue" on the first-connection question | S | Dalan has trust-once in Rust (remember false) but no button for it yet. |
+| 20 | Group tick-boxes and a filter in the import review | S | Keep Dalan's no-keys-by-default behaviour. |
+| 21 | Reopening the side panel on its last tab | S | |
+| 22 | A live badge on host cards for connected hosts | S | Dalan shows the dot on tabs only. |
+| 23 | An Actions menu on each SFTP pane as the keyboard- and click-reachable twin of the context menu | S | Dalan has right-click and F2 but no visible button. |
