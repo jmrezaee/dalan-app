@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { toast } from 'vue-sonner'
-import type { ProfileTheme, GroupInput, GroupSummary, HostInput, HostSummary, Inherited } from '~/types/bindings'
+import type { EnvVar, ProfileTheme, GroupInput, GroupSummary, HostInput, HostSummary, Inherited } from '~/types/bindings'
 import { CommandError, useTauri } from '~/composables/useTauri'
 
 type View = 'grid' | 'list'
@@ -114,10 +114,11 @@ export const useHostsStore = defineStore('hosts', () => {
   }
 
   /** Returns an error string for the form to show, or `''` on success. */
-  async function save(input: HostInput, theme?: string | null) {
+  async function save(input: HostInput, theme?: string | null, env?: { mode: string, vars: EnvVar[] }) {
     try {
       const saved = await api.hostSave(input)
       if (theme !== undefined) await api.terminalThemeSet('host', saved.id, theme)
+      if (env) await api.envSet('host', saved.id, env.mode, env.vars)
     }
     catch (e) {
       return message(e)
@@ -127,10 +128,11 @@ export const useHostsStore = defineStore('hosts', () => {
     return ''
   }
 
-  async function saveGroup(input: GroupInput, theme?: string | null) {
+  async function saveGroup(input: GroupInput, theme?: string | null, env?: { mode: string, vars: EnvVar[] }) {
     try {
       const saved = await api.groupSave(input)
       if (theme !== undefined) await api.terminalThemeSet('group', saved.id, theme)
+      if (env) await api.envSet('group', saved.id, env.mode, env.vars)
     }
     catch (e) {
       return message(e)

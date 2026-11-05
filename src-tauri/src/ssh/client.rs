@@ -558,6 +558,16 @@ pub async fn run(
             )
         }
     };
+    // Variables for this host (after inheritance). Sent before the shell starts, without waiting for
+    // an answer: a server that doesn't accept a name just ignores it.
+    let hid = p.host_id.clone();
+    let vars = store
+        .with_db_session(move |c, s| crate::env::resolve_for_host(c, &s.vault_id, &hid))
+        .await
+        .unwrap_or_default();
+    for v in vars {
+        let _ = channel.set_env(false, v.name, v.value).await;
+    }
     if channel
         .request_pty(false, "xterm-256color", p.cols, p.rows, 0, 0, &[])
         .await

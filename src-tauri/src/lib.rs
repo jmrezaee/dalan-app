@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod db;
+pub mod env;
 pub mod error;
 pub mod events;
 pub mod groups;
@@ -59,6 +60,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sftp::edit_open,
             commands::sftp::edit_upload,
             commands::sftp::edit_close,
+            commands::env::env_get,
+            commands::env::env_set,
             commands::themes::terminal_themes_list,
             commands::themes::terminal_theme_set,
             commands::import::import_preview,

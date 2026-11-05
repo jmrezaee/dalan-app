@@ -4,7 +4,7 @@
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
-import type { HostSummary } from '~/types/bindings'
+import type { EnvVar, HostSummary, InheritedVar } from '~/types/bindings'
 
 const hosts = useHostsStore()
 const keychain = useKeychainStore()
@@ -19,7 +19,26 @@ const open = computed({
 })
 const host = computed(() => (hosts.editing && hosts.editing !== 'new' ? hosts.editing : null))
 
-const blank = () => ({ label: '', address: '', port: '' as number | string, username: '', password: '', group_id: hosts.currentGroupId as string | null, tags: [] as string[], identity_id: null as string | null, key_id: null as string | null, startup_snippet_id: null as string | null, jump_mode: 'inherit', jump_host_ids: [] as string[], terminal_theme: null as string | null })
+const api = useTauri()
+/** Variables from the groups above, and whether this item's own were loaded (so a failed load can't wipe them on save). */
+const envInherited = ref<InheritedVar[]>([])
+const envLoaded = ref(true)
+async function loadEnv(id: string) {
+  envLoaded.value = false
+  try {
+    const c = await api.envGet('host', id)
+    form.env_mode = c.mode
+    form.env_vars = c.vars.map(v => ({ ...v }))
+    envInherited.value = c.inherited
+    snapshot.value = current.value
+    envLoaded.value = true
+  }
+  catch {
+    error.value = 'Couldn\'t load the variables. Close and reopen to edit them.'
+  }
+}
+
+const blank = () => ({ label: '', address: '', port: '' as number | string, username: '', password: '', group_id: hosts.currentGroupId as string | null, tags: [] as string[], identity_id: null as string | null, key_id: null as string | null, startup_snippet_id: null as string | null, jump_mode: 'inherit', jump_host_ids: [] as string[], terminal_theme: null as string | null, env_mode: 'inherit', env_vars: [] as EnvVar[] })
 const form = reactive(blank())
 const clearPassword = ref(false)
 const error = ref('')
@@ -32,10 +51,13 @@ const dirty = computed(() => current.value !== snapshot.value)
 // Reset the form each time the sheet opens, from the host being edited (or blank, in the group you are viewing).
 watch(() => hosts.editing, (e) => {
   const h = e && e !== 'new' ? (e as HostSummary) : null
-  Object.assign(form, h ? { label: h.label, address: h.address, port: h.port ?? '', username: h.username ?? '', password: '', group_id: h.group_id, tags: [...h.tags], identity_id: h.identity_id, key_id: h.key_id, startup_snippet_id: h.startup_snippet_id, jump_mode: h.jump_mode, jump_host_ids: [...h.jump_host_ids], terminal_theme: hosts.themes.hosts[h.id]?.own ?? null } : blank())
+  Object.assign(form, h ? { label: h.label, address: h.address, port: h.port ?? '', username: h.username ?? '', password: '', group_id: h.group_id, tags: [...h.tags], identity_id: h.identity_id, key_id: h.key_id, startup_snippet_id: h.startup_snippet_id, jump_mode: h.jump_mode, jump_host_ids: [...h.jump_host_ids], terminal_theme: hosts.themes.hosts[h.id]?.own ?? null, env_mode: 'inherit', env_vars: [] } : blank())
   clearPassword.value = false
   error.value = ''
   snapshot.value = current.value
+  envInherited.value = []
+  envLoaded.value = true
+  if (h) loadEnv(h.id)
 })
 
 const inherited = computed(() => hosts.inheritedFor(form.group_id))
@@ -65,7 +87,7 @@ async function submit() {
     startup_snippet_id: form.startup_snippet_id,
     jump_mode: form.jump_mode,
     jump_host_ids: form.jump_host_ids,
-  }, form.terminal_theme)
+  }, form.terminal_theme, envLoaded.value ? { mode: form.env_mode, vars: form.env_vars.filter((v: EnvVar) => v.name.trim()).map((v: EnvVar) => ({ name: v.name.trim(), value: v.value })) } : undefined)
   busy.value = false
   if (!error.value) hosts.editing = null
 }
@@ -170,6 +192,11 @@ async function submit() {
             <Label for="host-theme">Theme</Label>
             <ThemeSelect id="host-theme" v-model="form.terminal_theme" :inherited-theme="groupTheme?.inherited" :inherited-from="groupTheme?.inherited_from" />
           </div>
+        </section>
+
+        <section class="flex flex-col gap-3">
+          <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">Environment variables</h3>
+          <EnvVarsEditor v-model:mode="form.env_mode" v-model:vars="form.env_vars" :inherited="envInherited" />
         </section>
 
         <section class="flex flex-col gap-3">

@@ -59,6 +59,9 @@ export const commands = {
 	 */
 	editUpload: (editId: string, force: boolean) => typedError<EditUpload, AppError>(__TAURI_INVOKE("edit_upload", { editId, force })),
 	editClose: (editId: string) => __TAURI_INVOKE<void>("edit_close", { editId }),
+	/**  `kind` is `host` or `group`. */
+	envGet: (kind: string, id: string) => typedError<EnvConfig_Serialize, AppError>(__TAURI_INVOKE("env_get", { kind, id })),
+	envSet: (kind: string, id: string, mode: string, vars: EnvVar[]) => typedError<null, AppError>(__TAURI_INVOKE("env_set", { kind, id, mode, vars })),
 	terminalThemesList: () => typedError<Themes_Serialize, AppError>(__TAURI_INVOKE("terminal_themes_list")),
 	/**  `kind` is `host` or `group`; `theme: None` goes back to inheriting. */
 	terminalThemeSet: (kind: string, id: string, theme: string | null) => typedError<null, AppError>(__TAURI_INVOKE("terminal_theme_set", { kind, id, theme })),
@@ -152,6 +155,27 @@ export type EditUpload = "uploaded" |
 "remote_changed";
 
 export type EntryKind = "file" | "dir" | "other";
+
+export type EnvConfig = EnvConfig_Serialize | EnvConfig_Deserialize;
+
+export type EnvConfig_Deserialize = {
+	/**  `inherit`, `merge` or `replace`. */
+	mode: string,
+	vars: EnvVar[],
+	inherited: InheritedVar_Deserialize[],
+};
+
+export type EnvConfig_Serialize = {
+	/**  `inherit`, `merge` or `replace`. */
+	mode: string,
+	vars: EnvVar[],
+	inherited: InheritedVar_Serialize[],
+};
+
+export type EnvVar = {
+	name: string,
+	value: string,
+};
 
 /**  Codes from replica/architecture.md. Add new ones there first. */
 export type ErrorCode = "locked" | "wrong_password" | "too_many_attempts" | 
@@ -609,6 +633,23 @@ export type InheritedText = {
 	value: string,
 	/**  Label of the group the value comes from. */
 	group: string,
+};
+
+/**  A variable the groups above supply, and which group it came from. */
+export type InheritedVar = InheritedVar_Serialize | InheritedVar_Deserialize;
+
+/**  A variable the groups above supply, and which group it came from. */
+export type InheritedVar_Deserialize = {
+	name: string,
+	value: string,
+	from?: string | null,
+};
+
+/**  A variable the groups above supply, and which group it came from. */
+export type InheritedVar_Serialize = {
+	name: string,
+	value: string,
+	from: string | null,
 };
 
 /**  What this item would get if it set nothing itself. Drives the "from Production" hints. */
