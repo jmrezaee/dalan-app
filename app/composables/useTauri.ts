@@ -1,7 +1,7 @@
 // The only place that talks to Rust. Stores call these wrappers, never `invoke` directly.
 import { Channel } from '@tauri-apps/api/core'
 import { commands } from '~/types/bindings'
-import type { AppError, ProxyChoice, EnvVar, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportRow, KeyUpdate, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
+import type { AgentChoice, AppError, ProxyChoice, EnvVar, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportRow, KeyUpdate, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -85,6 +85,8 @@ export function useTauri() {
     },
     editUpload: (editId: string, force: boolean) => unwrap(commands.editUpload(editId, force)),
     editClose: (editId: string) => commands.editClose(editId),
+    agentGet: (kind: 'host' | 'group', id: string) => unwrap(commands.agentGet(kind, id)),
+    agentSet: (kind: 'host' | 'group', id: string, choice: AgentChoice) => unwrap(commands.agentSet(kind, id, choice)),
     proxyGet: (kind: 'host' | 'group', id: string) => unwrap(commands.proxyGet(kind, id)),
     proxySet: (kind: 'host' | 'group', id: string, choice: ProxyChoice) => unwrap(commands.proxySet(kind, id, choice)),
     envGet: (kind: 'host' | 'group', id: string) => unwrap(commands.envGet(kind, id)),

@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod commands;
 pub mod db;
 pub mod env;
@@ -61,6 +62,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sftp::edit_open,
             commands::sftp::edit_upload,
             commands::sftp::edit_close,
+            commands::agent::agent_get,
+            commands::agent::agent_set,
             commands::proxy::proxy_get,
             commands::proxy::proxy_set,
             commands::env::env_get,

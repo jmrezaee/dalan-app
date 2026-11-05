@@ -420,6 +420,8 @@ pub struct ConnectInfo {
     pub jump_host_ids: Vec<String>,
     /// SOCKS5 or HTTP proxy for the TCP connection to this host (used when it is the first hop).
     pub proxy: Option<crate::proxy::Proxy>,
+    /// Ask the server to forward this computer's SSH agent (shells only).
+    pub agent_forwarding: bool,
 }
 
 /// Resolves host -> group -> parent group per field (identities included), so a host with no
@@ -464,6 +466,7 @@ pub fn connect_info(conn: &Connection, s: &VaultSession, host_id: &str) -> AppRe
         },
         jump_host_ids: r.jump.map(|j| j.value).unwrap_or_default(),
         proxy: crate::proxy::resolve_for_host(conn, &s.vault_id, host_id)?,
+        agent_forwarding: crate::agent::resolve_for_host(conn, &s.vault_id, host_id)?,
     })
 }
 

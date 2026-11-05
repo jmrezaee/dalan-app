@@ -3,7 +3,7 @@
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
-import type { EnvVar, ProxyChoice, GroupSummary, InheritedVar } from '~/types/bindings'
+import type { AgentConfig, EnvVar, ProxyChoice, GroupSummary, InheritedVar } from '~/types/bindings'
 
 const hosts = useHostsStore()
 const keychain = useKeychainStore()
@@ -21,6 +21,7 @@ const group = computed(() => (hosts.editingGroup && hosts.editingGroup !== 'new'
 const api = useTauri()
 /** Variables from the groups above, and whether this item's own were loaded (so a failed load can't wipe them on save). */
 const envInherited = ref<InheritedVar[]>([])
+const agentInfo = ref<AgentConfig | null>(null)
 const proxyInherited = ref<{ inherited: string | null, inherited_from: string | null } | null>(null)
 const envLoaded = ref(true)
 async function loadEnv(id: string) {
@@ -33,6 +34,9 @@ async function loadEnv(id: string) {
     const px = await api.proxyGet('group', id)
     form.proxy = { ...px.own }
     proxyInherited.value = px
+    const ag = await api.agentGet('group', id)
+    form.agent = ag.own.kind
+    agentInfo.value = ag
     snapshot.value = current.value
     envLoaded.value = true
   }
@@ -41,7 +45,7 @@ async function loadEnv(id: string) {
   }
 }
 
-const blank = () => ({ label: '', parent_id: hosts.currentGroupId as string | null, port: '' as number | string, username: '', password: '', identity_id: null as string | null, key_id: null as string | null, startup_snippet_id: null as string | null, jump_mode: 'inherit', jump_host_ids: [] as string[], terminal_theme: null as string | null, env_mode: 'inherit', env_vars: [] as EnvVar[], proxy: { kind: 'inherit', host: '', port: null } as ProxyChoice })
+const blank = () => ({ label: '', parent_id: hosts.currentGroupId as string | null, port: '' as number | string, username: '', password: '', identity_id: null as string | null, key_id: null as string | null, startup_snippet_id: null as string | null, jump_mode: 'inherit', jump_host_ids: [] as string[], terminal_theme: null as string | null, env_mode: 'inherit', env_vars: [] as EnvVar[], proxy: { kind: 'inherit', host: '', port: null } as ProxyChoice, agent: 'inherit' })
 const form = reactive(blank())
 const clearPassword = ref(false)
 const error = ref('')
@@ -52,12 +56,13 @@ const dirty = computed(() => current.value !== snapshot.value)
 
 watch(() => hosts.editingGroup, (e) => {
   const g = e && e !== 'new' ? (e as GroupSummary) : null
-  Object.assign(form, g ? { label: g.label, parent_id: g.parent_id, port: g.port ?? '', username: g.username ?? '', password: '', identity_id: g.identity_id, key_id: g.key_id, startup_snippet_id: g.startup_snippet_id, jump_mode: g.jump_mode, jump_host_ids: [...g.jump_host_ids], terminal_theme: hosts.themes.groups[g.id]?.own ?? null, env_mode: 'inherit', env_vars: [], proxy: { kind: 'inherit', host: '', port: null } } : blank())
+  Object.assign(form, g ? { label: g.label, parent_id: g.parent_id, port: g.port ?? '', username: g.username ?? '', password: '', identity_id: g.identity_id, key_id: g.key_id, startup_snippet_id: g.startup_snippet_id, jump_mode: g.jump_mode, jump_host_ids: [...g.jump_host_ids], terminal_theme: hosts.themes.groups[g.id]?.own ?? null, env_mode: 'inherit', env_vars: [], proxy: { kind: 'inherit', host: '', port: null }, agent: 'inherit' } : blank())
   clearPassword.value = false
   error.value = ''
   snapshot.value = current.value
   envInherited.value = []
   proxyInherited.value = null
+  agentInfo.value = null
   envLoaded.value = true
   if (g) loadEnv(g.id)
 })
@@ -90,7 +95,7 @@ async function submit() {
     startup_snippet_id: form.startup_snippet_id,
     jump_mode: form.jump_mode,
     jump_host_ids: form.jump_host_ids,
-  }, form.terminal_theme, envLoaded.value ? { mode: form.env_mode, vars: form.env_vars.filter((v: EnvVar) => v.name.trim()).map((v: EnvVar) => ({ name: v.name.trim(), value: v.value })) } : undefined, envLoaded.value ? form.proxy : undefined)
+  }, form.terminal_theme, envLoaded.value ? { mode: form.env_mode, vars: form.env_vars.filter((v: EnvVar) => v.name.trim()).map((v: EnvVar) => ({ name: v.name.trim(), value: v.value })) } : undefined, envLoaded.value ? form.proxy : undefined, envLoaded.value ? { kind: form.agent } : undefined)
   busy.value = false
   if (!error.value) hosts.editingGroup = null
 }
@@ -166,6 +171,11 @@ async function submit() {
         <section class="flex flex-col gap-3">
           <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">Proxy</h3>
           <ProxyEditor v-model="form.proxy" :inherited="proxyInherited?.inherited ?? null" :inherited-from="proxyInherited?.inherited_from ?? null" />
+        </section>
+
+        <section class="flex flex-col gap-3">
+          <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">SSH agent</h3>
+          <AgentEditor v-model="form.agent" :info="agentInfo" />
         </section>
 
         <section class="flex flex-col gap-3">

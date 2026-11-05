@@ -60,6 +60,9 @@ export const commands = {
 	editUpload: (editId: string, force: boolean) => typedError<EditUpload, AppError>(__TAURI_INVOKE("edit_upload", { editId, force })),
 	editClose: (editId: string) => __TAURI_INVOKE<void>("edit_close", { editId }),
 	/**  `kind` is `host` or `group`. */
+	agentGet: (kind: string, id: string) => typedError<AgentConfig_Serialize, AppError>(__TAURI_INVOKE("agent_get", { kind, id })),
+	agentSet: (kind: string, id: string, choice: AgentChoice) => typedError<null, AppError>(__TAURI_INVOKE("agent_set", { kind, id, choice })),
+	/**  `kind` is `host` or `group`. */
 	proxyGet: (kind: string, id: string) => typedError<ProxyConfig_Serialize, AppError>(__TAURI_INVOKE("proxy_get", { kind, id })),
 	proxySet: (kind: string, id: string, choice: ProxyChoice_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("proxy_set", { kind, id, choice })),
 	/**  `kind` is `host` or `group`. */
@@ -127,6 +130,31 @@ export const events = {
 };
 
 /* Types */
+/**  `kind`: `inherit`, `on` or `off`. */
+export type AgentChoice = {
+	kind: string,
+};
+
+export type AgentConfig = AgentConfig_Serialize | AgentConfig_Deserialize;
+
+export type AgentConfig_Deserialize = {
+	own: AgentChoice,
+	/**  What the groups above give (`None` = nothing set), and the group. */
+	inherited?: boolean | null,
+	inherited_from?: string | null,
+	/**  A system agent is running on this computer (`SSH_AUTH_SOCK` is set). */
+	available: boolean,
+};
+
+export type AgentConfig_Serialize = {
+	own: AgentChoice,
+	/**  What the groups above give (`None` = nothing set), and the group. */
+	inherited: boolean | null,
+	inherited_from: string | null,
+	/**  A system agent is running on this computer (`SSH_AUTH_SOCK` is set). */
+	available: boolean,
+};
+
 export type AppError = {
 	code: ErrorCode,
 	message: string,

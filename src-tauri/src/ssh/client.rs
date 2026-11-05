@@ -49,6 +49,8 @@ pub struct Client {
     rejected: Arc<Mutex<Option<Rejected>>>,
     /// Set for a remote (`-R`) forward: where connections the server sends us should go.
     remote: Option<Arc<crate::tunnels::RemoteHook>>,
+    /// The host asked for agent forwarding: accept the agent channels the server opens.
+    agent: bool,
 }
 
 impl Client {
@@ -87,6 +89,20 @@ impl Handler for Client {
                 channel.into_stream(),
                 Arc::clone(&hook.open),
             ));
+        }
+        Ok(())
+    }
+
+    /// The server wants to use our agent (we asked with `agent_forward`). Refused unless the host
+    /// has forwarding on and a local agent is running.
+    async fn server_channel_open_agent_forward(
+        &mut self,
+        channel: russh::Channel<russh::client::Msg>,
+        reply: russh::client::ChannelOpenHandle,
+        _session: &mut russh::client::Session,
+    ) -> Result<(), Self::Error> {
+        if self.agent && crate::agent::serve(channel.into_stream()).await {
+            reply.accept().await;
         }
         Ok(())
     }
@@ -166,6 +182,8 @@ pub struct Connected {
     pub label: String,
     /// The host's startup snippet, to type once the shell is ready.
     pub startup_script: Option<String>,
+    /// Ask for agent forwarding on the shell.
+    pub agent_forwarding: bool,
     /// The jump hosts the connection runs through. They must stay alive as long as `handle` does.
     _hops: Vec<client::Handle<Client>>,
 }
@@ -193,6 +211,7 @@ async fn handshake<R>(
     user: &str,
     pattern: &str,
     remote: Option<Arc<crate::tunnels::RemoteHook>>,
+    agent: bool,
 ) -> Option<client::Handle<Client>>
 where
     R: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
@@ -206,6 +225,7 @@ where
         pattern: pattern.to_string(),
         rejected: Arc::clone(&rejected),
         remote,
+        agent,
     };
     let config = Arc::new(client::Config {
         // Detect dead links (F11): 3 missed keepalives, 30 s apart.
@@ -310,6 +330,7 @@ pub async fn connect_authenticated(
                     &user,
                     &pattern,
                     remote.clone().filter(|_| i == last),
+                    info.agent_forwarding && i == last,
                 )
                 .await?
             }
@@ -350,6 +371,7 @@ pub async fn connect_authenticated(
                     &user,
                     &pattern,
                     remote.clone().filter(|_| i == last),
+                    info.agent_forwarding && i == last,
                 )
                 .await?
             }
@@ -359,6 +381,7 @@ pub async fn connect_authenticated(
                 handle,
                 label: info.label.clone(),
                 startup_script: info.startup_script.clone(),
+                agent_forwarding: info.agent_forwarding,
                 _hops: hops,
             });
         }
@@ -562,6 +585,9 @@ pub async fn run(
             )
         }
     };
+    if conn.agent_forwarding {
+        let _ = channel.agent_forward(false).await;
+    }
     // Variables for this host (after inheritance). Sent before the shell starts, without waiting for
     // an answer: a server that doesn't accept a name just ignores it.
     let hid = p.host_id.clone();

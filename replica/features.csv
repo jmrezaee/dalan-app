@@ -43,7 +43,7 @@ SFTP transfer conflicts (replace / keep both / skip),sftp,should,yes,yes,S22
 SFTP permissions (chmod),sftp,should,unknown,yes,not in Termius docs; expected by users
 Environment variables per host/group (SendEnv),hosts,should,yes,yes,source 12
 SOCKS5 / HTTP proxy per host,hosts,should,yes,yes,source 2
-SSH agent forwarding,hosts,should,yes,no,source 2
+SSH agent forwarding,hosts,should,yes,yes,source 2
 Import from ~/.ssh/config and known_hosts and keys,import,should,yes,no,S25 F10
 Import hosts from CSV,import,should,yes,yes,source 2
 Terminal themes per host/group,terminal,should,yes,yes,S20
