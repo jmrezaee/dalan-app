@@ -239,3 +239,5 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
 - 2026-11-06 P19 done. `pnpm test:e2e` needs Google Chrome locally (or `PW_CHANNEL=` plus `pnpm exec playwright install chromium`).
 
 - 2026-11-06 P20 done except the first draft release, which waits for the GitHub repo and the updater key. All of P0 to P20 are built; open hand checks are listed in each phase's note.
+
+- 2026-11-06 Proposed next phases P21 to P25 (connection experience, context menus, host editor, terminal side panel, settings polish) are in `replica/improvement-plan-2026-11-06.md`, built from `replica/field-report-2026-11-06.md`. Not scheduled until Mehrdad approves the order and the decisions in its section 4.
