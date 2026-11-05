@@ -48,7 +48,7 @@ Import from ~/.ssh/config and known_hosts and keys,import,should,yes,no,S25 F10
 Import hosts from CSV,import,should,yes,yes,source 2
 Terminal themes per host/group,terminal,should,yes,no,S20
 Command history side panel,terminal,should,yes,no,S20
-Local terminal tab,terminal,should,yes,no,S23 local terminal path
+Local terminal tab,terminal,should,yes,yes,S23 local terminal path
 Session logs (last per host + bookmarks + comment),logs,should,yes,no,S15 source 6; paid in Termius
 SSH certificates (key + cert as one item),keychain,could,yes,no,source 7
 FIDO2 hardware keys (sk-ed25519),keychain,could,yes,no,source 7; needs OpenSSH 8.4+ server

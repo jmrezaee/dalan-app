@@ -189,6 +189,8 @@ impl Prompts {
 #[derive(Clone)]
 pub enum Job {
     Shell,
+    /// A shell on this computer (no host).
+    Local,
     /// S08: install a public key in `authorized_keys`.
     Export {
         key_id: String,
@@ -231,6 +233,16 @@ impl SessionManager {
         let job = e.job.clone();
         tauri::async_runtime::spawn(async move {
             match job {
+                Job::Local => {
+                    crate::pty::run(
+                        Arc::clone(&io),
+                        crate::pty::default_shell(),
+                        params.cols,
+                        params.rows,
+                        rx,
+                    )
+                    .await
+                }
                 Job::Shell => {
                     client::run(store, Arc::clone(&io), Arc::clone(&prompts), params, rx).await
                 }

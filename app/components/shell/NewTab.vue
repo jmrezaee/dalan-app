@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // S16: pick a host to connect in this tab. Recent hosts first; typing searches all of them.
-import { LayoutGrid, Plus, Search } from '@lucide/vue'
+import { LayoutGrid, Plus, Search, SquareTerminal } from '@lucide/vue'
 import { Checkbox } from '@/components/ui/checkbox'
 import type { HostSummary } from '~/types/bindings'
 import { cn } from '@/lib/utils'
@@ -69,6 +69,7 @@ defineExpose({ focus: () => input.value?.focus() })
       </label>
       <div class="flex flex-wrap gap-2">
         <Button variant="secondary" @click="emit('newHost')"><Plus />New host</Button>
+        <Button variant="secondary" @click="sessions.openLocal()"><SquareTerminal />Local terminal</Button>
       </div>
       <section class="flex flex-col gap-1" aria-label="Recent">
         <div class="flex items-center px-3 pb-1.5">

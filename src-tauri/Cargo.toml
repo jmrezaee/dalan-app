@@ -16,6 +16,7 @@ tauri-build = { version = "2", features = [] }
 argon2 = "0.5.3"
 chacha20poly1305 = "0.10.1"
 log = "0.4.35"
+portable-pty = "0.9"
 rand = { version = "0.10", features = ["thread_rng"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 rusqlite_migration = "2"

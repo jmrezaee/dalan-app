@@ -44,6 +44,13 @@ export function useTauri() {
       data.onmessage = m => onData(new Uint8Array(m))
       return unwrap(commands.sessionOpen(hostId, cols, rows, events as never, data as unknown as Channel<RawBytes>))
     },
+    localSessionOpen: (cols: number, rows: number, onEvent: (e: SessionEvent) => void, onData: (b: Uint8Array) => void) => {
+      const events = new Channel<SessionEvent>()
+      events.onmessage = onEvent
+      const data = new Channel<ArrayBuffer>()
+      data.onmessage = m => onData(new Uint8Array(m))
+      return unwrap(commands.localSessionOpen(cols, rows, events as never, data as unknown as Channel<RawBytes>))
+    },
     sessionWrite: (id: string, bytes: Uint8Array) => unwrap(commands.sessionWrite(id, Array.from(bytes))),
     sessionResize: (id: string, cols: number, rows: number) => unwrap(commands.sessionResize(id, cols, rows)),
     sessionAck: (id: string, bytes: number) => unwrap(commands.sessionAck(id, bytes)),

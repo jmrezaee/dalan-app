@@ -29,6 +29,8 @@ export const commands = {
 	hostsMove: (ids: string[], groupId: string | null) => typedError<null, AppError>(__TAURI_INVOKE("hosts_move", { ids, groupId })),
 	/**  Opens a tab's connection. Returns at once; progress arrives on `events`, terminal output on `data`. */
 	sessionOpen: (hostId: string, cols: number, rows: number, events: Channel<SessionEvent_Deserialize>, data: Channel<RawBytes>) => typedError<SessionOpened, AppError>(__TAURI_INVOKE("session_open", { hostId, cols, rows, events, data })),
+	/**  A shell on this computer, shown as a tab. Same channels as `session_open`. */
+	localSessionOpen: (cols: number, rows: number, events: Channel<SessionEvent_Deserialize>, data: Channel<RawBytes>) => typedError<SessionOpened, AppError>(__TAURI_INVOKE("local_session_open", { cols, rows, events, data })),
 	sessionWrite: (sessionId: string, data: number[]) => typedError<null, AppError>(__TAURI_INVOKE("session_write", { sessionId, data })),
 	sessionResize: (sessionId: string, cols: number, rows: number) => typedError<null, AppError>(__TAURI_INVOKE("session_resize", { sessionId, cols, rows })),
 	/**  Backpressure: the terminal reports how many bytes it has finished drawing. */

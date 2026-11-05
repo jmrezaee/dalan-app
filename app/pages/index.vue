@@ -87,6 +87,7 @@ function newHost() {
 function onPaletteAction(name: string) {
   if (name === 'new-host') newHost()
   else if (name === 'new-tab') sessions.openNewTab()
+  else if (name === 'local') sessions.openLocal()
   else if (name === 'lock') vault.lock()
   else if (name === 'sftp') sessions.activeKey = 'sftp'
   else go(name === 'vault' ? 'hosts' : name as typeof section.value)

@@ -96,7 +96,10 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   async function connect(sess: Session) {
     try {
-      const { session_id } = await api.sessionOpen(sess.hostId, 80, 24, e => onEvent(sess, e), b => onData(sess, b))
+      // No host id = a shell on this computer.
+      const { session_id } = sess.hostId
+        ? await api.sessionOpen(sess.hostId, 80, 24, e => onEvent(sess, e), b => onData(sess, b))
+        : await api.localSessionOpen(80, 24, e => onEvent(sess, e), b => onData(sess, b))
       sess.id = session_id
     }
     catch (e) {
@@ -135,6 +138,16 @@ export const useSessionsStore = defineStore('sessions', () => {
     const newTab = active.value?.kind === 'new' ? active.value : null
     const sess = newTab ?? blank()
     Object.assign(sess, { kind: 'session', hostId: host.id, label: host.label, address: `${host.address}:${host.effective_port}`, status: 'connecting' })
+    if (!newTab) sessions.value.push(sess)
+    activeKey.value = sess.key
+    connect(sess)
+  }
+
+  /** A shell on this computer in its own tab. A New Tab that is showing turns into it. */
+  function openLocal() {
+    const newTab = active.value?.kind === 'new' ? active.value : null
+    const sess = newTab ?? blank()
+    Object.assign(sess, { kind: 'session', hostId: '', label: 'This computer', address: 'local shell', status: 'connecting' })
     if (!newTab) sessions.value.push(sess)
     activeKey.value = sess.key
     connect(sess)
@@ -294,5 +307,5 @@ export const useSessionsStore = defineStore('sessions', () => {
     pending.clear()
   }
 
-  return { sessions, activeKey, active, activeSession, panelOpen, open, openNewTab, openWorkspace, addPane, closePane, focusPane, setMode, toggleMode, toggleBroadcast, input, activateNth, attach, detach, write, resize, ack, respond, reconnect, close, clear }
+  return { sessions, activeKey, active, activeSession, panelOpen, open, openLocal, openNewTab, openWorkspace, addPane, closePane, focusPane, setMode, toggleMode, toggleBroadcast, input, activateNth, attach, detach, write, resize, ack, respond, reconnect, close, clear }
 })

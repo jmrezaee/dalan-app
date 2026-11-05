@@ -5,7 +5,7 @@ import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, C
 import type { HostSummary } from '~/types/bindings'
 
 const open = defineModel<boolean>('open', { required: true })
-const emit = defineEmits<{ action: [name: 'new-host' | 'new-tab' | 'sftp' | 'keychain' | 'forwards' | 'snippets' | 'known-hosts' | 'settings' | 'lock' | 'vault'] }>()
+const emit = defineEmits<{ action: [name: 'new-host' | 'new-tab' | 'local' | 'sftp' | 'keychain' | 'forwards' | 'snippets' | 'known-hosts' | 'settings' | 'lock' | 'vault'] }>()
 const hosts = useHostsStore()
 const sessions = useSessionsStore()
 const templates = useWorkspacesStore()
@@ -46,6 +46,7 @@ const openTabs = computed(() => sessions.sessions.filter(s => s.kind === 'sessio
       <CommandGroup heading="Actions">
         <CommandItem value="action new host add" @select="act('new-host')"><Plus />New host<CommandShortcut>⌘N</CommandShortcut></CommandItem>
         <CommandItem value="action new tab" @select="act('new-tab')"><Plus />New tab<CommandShortcut>⌘T</CommandShortcut></CommandItem>
+        <CommandItem value="action local terminal shell this computer" @select="act('local')"><SquareTerminal />Open local terminal</CommandItem>
         <CommandItem value="action vault hosts" @select="act('vault')"><Vault />Go to Hosts<CommandShortcut>⌘1</CommandShortcut></CommandItem>
         <CommandItem value="action sftp files transfer" @select="act('sftp')"><ArrowDownUp />Go to SFTP</CommandItem>
         <CommandItem value="action keychain keys identities" @select="act('keychain')"><KeyRound />Go to Keychain</CommandItem>

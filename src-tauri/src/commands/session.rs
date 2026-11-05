@@ -41,6 +41,32 @@ pub async fn session_open(
     Ok(SessionOpened { session_id })
 }
 
+/// A shell on this computer, shown as a tab. Same channels as `session_open`.
+#[tauri::command]
+#[specta::specta]
+pub async fn local_session_open(
+    state: State<'_, AppState>,
+    cols: u32,
+    rows: u32,
+    events: Channel<SessionEvent>,
+    data: Channel<RawBytes>,
+) -> AppResult<SessionOpened> {
+    state.require_unlocked()?;
+    let io = SessionIo {
+        event: Box::new(move |e| {
+            let _ = events.send(e);
+        }),
+        data: Box::new(move |b| {
+            let _ = data.send(RawBytes(b));
+        }),
+    };
+    let session_id =
+        state
+            .sessions
+            .open(state.store(), String::new(), Job::Local, cols, rows, io)?;
+    Ok(SessionOpened { session_id })
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn session_write(

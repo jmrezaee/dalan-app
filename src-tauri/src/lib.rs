@@ -42,6 +42,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::hosts::group_delete,
             commands::hosts::hosts_move,
             commands::session::session_open,
+            commands::session::local_session_open,
             commands::session::session_write,
             commands::session::session_resize,
             commands::session::session_ack,
