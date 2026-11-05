@@ -137,17 +137,19 @@ fn specta_builder() -> Builder<tauri::Wry> {
         ])
 }
 
-const BINDINGS_PATH: &str = "../app/types/bindings.ts";
+/// Anchored to this crate, not to the working directory: a debug app started from Finder has `/` as its cwd.
+const BINDINGS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../app/types/bindings.ts");
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = specta_builder();
 
     // In debug builds, refresh app/types/bindings.ts every time the app starts.
+    // A failure here must not stop the app (the source folder may be read-only or gone): just log it.
     #[cfg(debug_assertions)]
-    builder
-        .export(specta_typescript::Typescript::default(), BINDINGS_PATH)
-        .expect("failed to export TypeScript bindings");
+    if let Err(e) = builder.export(specta_typescript::Typescript::default(), BINDINGS_PATH) {
+        eprintln!("Couldn't refresh app/types/bindings.ts: {e}");
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())

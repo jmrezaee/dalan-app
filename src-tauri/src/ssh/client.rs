@@ -133,6 +133,8 @@ impl Handler for Client {
             .store
             .with_db_session(move |c, s| known_hosts::check(c, &s.vault_id, &pattern, &kt, &b))
             .await;
+        // Remember whether this is a replacement of a changed key (the match below consumes `check`).
+        let replacing = matches!(check, Ok(Check::Changed { .. }));
         let kind = match check {
             Ok(Check::Known) => return Ok(true),
             Ok(Check::Unknown) => PromptKind::HostKeyNew {
@@ -155,7 +157,11 @@ impl Handler for Client {
         let saved = self
             .store
             .with_db_session(move |c, s| {
-                known_hosts::trust(c, &s.vault_id, &pattern, &kt, &blob, &fingerprint)
+                if replacing {
+                    known_hosts::replace(c, &s.vault_id, &pattern, &kt, &blob, &fingerprint)
+                } else {
+                    known_hosts::trust(c, &s.vault_id, &pattern, &kt, &blob, &fingerprint)
+                }
             })
             .await;
         match saved {

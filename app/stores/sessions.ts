@@ -62,6 +62,8 @@ export const useSessionsStore = defineStore('sessions', () => {
         sess.error = null
         if (e.state === 'connecting' || e.state === 'authenticating' || e.state === 'ready') {
           sess.status = e.state
+          // The connection may have saved things (last connected, detected OS, a remembered password): reload the cards.
+          if (e.state === 'ready' && sess.hostId) setTimeout(() => useHostsStore().refresh(), 1500)
           if (e.state === 'ready' && sess.autorun) {
             write(sess, new TextEncoder().encode(`${sess.autorun.replace(/\s+$/, '')}\n`))
             sess.autorun = ''

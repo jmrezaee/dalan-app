@@ -23,6 +23,9 @@ const modelValue = useVModel(props, "modelValue", emits, {
   <input
     v-model="modelValue"
     data-slot="input"
+    autocapitalize="off"
+    autocorrect="off"
+    spellcheck="false"
     :class="cn(
       'h-8 w-full min-w-0 rounded-md border border-border-input bg-bg px-2.5 text-sm text-text outline-none transition-colors duration-100 placeholder:text-muted hover:border-muted disabled:cursor-not-allowed disabled:bg-surface disabled:opacity-60 read-only:bg-surface',
       'focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/35',

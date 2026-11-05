@@ -46,7 +46,26 @@ pub fn check(
             other => Err(other),
         })?;
     Ok(match row {
-        None => Check::Unknown,
+        None => {
+            // Nothing saved for this key type. If the host has a key of ANOTHER type saved, the server
+            // now presents something different from what we trusted (an Ed25519 key replaced by an ECDSA
+            // one), which must block just like a changed key: only a first-ever connection is "unknown".
+            let other: Option<String> = conn
+                .query_row(
+                    "SELECT fingerprint_sha256 FROM known_hosts WHERE vault_id = ?1 AND host_pattern = ?2 ORDER BY created_at LIMIT 1",
+                    params![vault_id, pattern],
+                    |r| r.get(0),
+                )
+                .map(Some)
+                .or_else(|e| match e {
+                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                    other => Err(other),
+                })?;
+            match other {
+                Some(old_fingerprint) => Check::Changed { old_fingerprint },
+                None => Check::Unknown,
+            }
+        }
         Some((saved, _)) if saved == public_key => {
             conn.execute(
                 "UPDATE known_hosts SET last_seen_at = ?1 WHERE vault_id = ?2 AND host_pattern = ?3 AND key_type = ?4",
@@ -56,6 +75,23 @@ pub fn check(
         }
         Some((_, old_fingerprint)) => Check::Changed { old_fingerprint },
     })
+}
+
+/// The user explicitly replaced a changed key: forget every key saved for this address (whatever its
+/// type) and trust the new one, so the old identity can't linger and be matched again.
+pub fn replace(
+    conn: &Connection,
+    vault_id: &str,
+    pattern: &str,
+    key_type: &str,
+    public_key: &str,
+    fingerprint: &str,
+) -> AppResult<()> {
+    conn.execute(
+        "DELETE FROM known_hosts WHERE vault_id = ?1 AND host_pattern = ?2",
+        params![vault_id, pattern],
+    )?;
+    trust(conn, vault_id, pattern, key_type, public_key, fingerprint)
 }
 
 /// Saves a key, replacing any earlier one for the same address and key type.
@@ -179,5 +215,53 @@ mod tests {
         delete(&c, &v.vault_id, &id).unwrap();
         assert!(list(&c, &v.vault_id).unwrap().is_empty());
         assert!(delete(&c, &v.vault_id, &id).is_err());
+    }
+
+    #[test]
+    fn a_different_key_type_is_a_changed_key_and_replacing_forgets_the_old_one() {
+        let c = open_in_memory().unwrap();
+        let v = vault::create(&c, "correct-horse-staple", KdfParams::cheap()).unwrap();
+        let p = pattern("10.0.0.5", 22);
+        trust(&c, &v.vault_id, &p, "ssh-ed25519", "AAAA1", "SHA256:ed").unwrap();
+        // The server now presents ECDSA where Ed25519 was saved: blocked, not a first-time prompt.
+        assert_eq!(
+            check(&c, &v.vault_id, &p, "ecdsa-sha2-nistp256", "BBBB1").unwrap(),
+            Check::Changed {
+                old_fingerprint: "SHA256:ed".into()
+            }
+        );
+        // A host never seen before is still just unknown (and so is another address).
+        assert_eq!(
+            check(
+                &c,
+                &v.vault_id,
+                &pattern("10.0.0.6", 22),
+                "ecdsa-sha2-nistp256",
+                "BBBB1"
+            )
+            .unwrap(),
+            Check::Unknown
+        );
+        // Replacing on purpose drops the old key, so only the new identity is trusted afterwards.
+        replace(
+            &c,
+            &v.vault_id,
+            &p,
+            "ecdsa-sha2-nistp256",
+            "BBBB1",
+            "SHA256:ec",
+        )
+        .unwrap();
+        assert_eq!(
+            check(&c, &v.vault_id, &p, "ecdsa-sha2-nistp256", "BBBB1").unwrap(),
+            Check::Known
+        );
+        assert_eq!(
+            check(&c, &v.vault_id, &p, "ssh-ed25519", "AAAA1").unwrap(),
+            Check::Changed {
+                old_fingerprint: "SHA256:ec".into()
+            }
+        );
+        assert_eq!(list(&c, &v.vault_id).unwrap().len(), 1);
     }
 }

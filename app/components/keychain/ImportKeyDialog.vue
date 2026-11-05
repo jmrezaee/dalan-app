@@ -69,9 +69,9 @@ async function submit() {
         <div class="flex flex-col gap-1.5">
           <Label for="imp-pem">Private key</Label>
           <Textarea id="imp-pem" v-model="form.pem" rows="6" spellcheck="false" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" class="font-mono text-xs" @input="form.path = ''" />
-          <div class="flex items-center gap-2 text-xs text-muted">
+          <div class="flex min-w-0 items-center gap-2 text-xs text-muted">
             <Button type="button" variant="secondary" size="sm" @click="choose"><FolderOpen />Choose file…</Button>
-            <span v-if="form.path" class="truncate font-mono">{{ form.path }}</span>
+            <span v-if="form.path" class="min-w-0 truncate font-mono" :title="form.path">{{ form.path }}</span>
           </div>
         </div>
         <div v-if="askPassphrase" class="flex flex-col gap-1.5">

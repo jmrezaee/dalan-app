@@ -114,7 +114,7 @@ async function clearHistory() {
 
     <div v-else-if="tab === 'ai'" class="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3">
       <label class="flex flex-col gap-1.5 text-xs text-muted">Describe what you want to do
-        <textarea v-model="ask.text" rows="3" maxlength="1000" placeholder="show the 10 biggest files in /var/log" class="resize-none rounded-md border border-border-input bg-bg p-2 text-sm text-text outline-none focus:border-accent" @keydown.enter.exact.prevent="suggest" />
+        <textarea v-model="ask.text" autocapitalize="off" autocorrect="off" rows="3" maxlength="1000" placeholder="show the 10 biggest files in /var/log" class="resize-none rounded-md border border-border-input bg-bg p-2 text-sm text-text outline-none focus:border-accent" @keydown.enter.exact.prevent="suggest" />
       </label>
       <Button :loading="ask.busy" :disabled="!ask.text.trim()" @click="suggest"><Sparkles />Suggest a command</Button>
       <p v-if="ask.error" role="alert" class="text-xs text-danger">{{ ask.error }} <span v-if="ask.error.includes('API key')">Add it under Settings, then AI.</span></p>

@@ -153,6 +153,8 @@ watch(() => props.session.status, (s) => {
         aria-label="Find in terminal"
         placeholder="Find"
         autocomplete="off"
+        autocapitalize="off"
+        autocorrect="off"
         spellcheck="false"
         :class="['h-7 w-48 rounded border bg-bg px-2 text-sm outline-none focus:border-accent', noMatch ? 'border-danger' : 'border-border-input']"
         @input="find(true, true)"

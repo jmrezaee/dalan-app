@@ -23,6 +23,11 @@ const overlay = computed<OverlayKind | null>(() => {
 })
 
 const kind = computed(() => props.session.prompt?.kind)
+/** Who the question is about: a jump hop has its own name, which can differ from the tab's. */
+const promptHost = computed(() => {
+  const k = kind.value
+  return k && 'host' in k && k.host ? k.host : props.session.label
+})
 const fingerprint = computed(() => {
   const k = kind.value
   return k?.type === 'host_key_new' ? k.fingerprint : k?.type === 'host_key_changed' ? k.new_fingerprint : undefined
@@ -36,7 +41,7 @@ const reason = computed(() => props.session.error?.message ?? '')
 // "Replace saved key…" needs the host name typed first (F12).
 const replaceOpen = ref(false)
 const typed = ref('')
-const canReplace = computed(() => typed.value.trim() === props.session.label)
+const canReplace = computed(() => typed.value.trim() === promptHost.value)
 function confirmReplace() {
   replaceOpen.value = false
   typed.value = ''
@@ -55,7 +60,7 @@ const cancel = () => sessions.respond(props.session, false)
     <StatusOverlay
       v-if="overlay"
       :kind="overlay"
-      :host="session.label"
+      :host="promptHost"
       :address="session.address"
       :hop="session.hop"
       :fingerprint="fingerprint"

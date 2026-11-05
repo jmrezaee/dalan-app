@@ -1,9 +1,6 @@
 # Sample for the F10 import check (Hosts -> Import -> SSH config -> Choose file…).
 # Points at the test servers from scripts/test-servers.sh. No real hosts.
-
-Host *
-    User test
-    Port 2222
+# As in real ssh_config, the first value wins, so specific hosts come first and `Host *` (defaults) last.
 
 Host smoke-password
     HostName 127.0.0.1
@@ -22,3 +19,7 @@ Host smoke-proxycmd
     ProxyCommand nc %h %p
 
 Include other_config
+
+Host *
+    User test
+    Port 2222

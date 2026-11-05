@@ -23,8 +23,15 @@ const remember = ref(false)
 function focusPassword() {
   if (props.kind === 'password' || props.kind === 'passphrase') nextTick(() => document.getElementById('session-password')?.focus())
 }
-onMounted(focusPassword)
-watch(() => props.kind, focusPassword)
+// Keyboard: the safe default button (Close, Reconnect, Retry, Try again) takes focus when the card appears,
+// so Enter does what the card's default says. (The `autofocus` attribute does nothing on elements added later.)
+const card = ref<HTMLElement | null>(null)
+function focusDefault() {
+  focusPassword()
+  nextTick(() => card.value?.querySelector<HTMLElement>('[data-autofocus]')?.focus())
+}
+onMounted(focusDefault)
+watch(() => props.kind, focusDefault)
 function submit() {
   emit('submit', password.value, remember.value)
   password.value = ''
@@ -35,6 +42,7 @@ function submit() {
   <!-- z-20: xterm stacks its own canvases (z-index up to 5) over anything unpositioned, which swallowed clicks. -->
   <div class="absolute inset-0 z-20 grid place-items-center bg-bg/80 backdrop-blur-[2px]">
     <div
+      ref="card"
       :role="needsAnswer ? 'alertdialog' : 'status'"
       class="flex w-[420px] flex-col gap-3 rounded-lg border border-border bg-surface-raised p-5 shadow-pop"
     >
@@ -73,7 +81,7 @@ function submit() {
         </dl>
         <div class="flex items-center justify-between">
           <Button variant="link" size="sm" @click="$emit('replace')">Replace saved key…</Button>
-          <Button autofocus @click="$emit('close')">Close</Button>
+          <Button data-autofocus @click="$emit('close')">Close</Button>
         </div>
       </template>
 
@@ -81,21 +89,21 @@ function submit() {
         <CircleAlert class="size-6 text-danger" aria-hidden="true" />
         <h2 class="text-lg">Sign-in failed</h2>
         <p class="text-muted">{{ reason }}</p>
-        <div class="flex justify-end gap-2"><Button variant="secondary" @click="$emit('edit')">Edit host</Button><Button @click="$emit('retry')">Try again</Button></div>
+        <div class="flex justify-end gap-2"><Button variant="secondary" @click="$emit('edit')">Edit host</Button><Button data-autofocus @click="$emit('retry')">Try again</Button></div>
       </template>
 
       <template v-else-if="kind === 'unreachable'">
         <PlugZap class="size-6 text-danger" aria-hidden="true" />
         <h2 class="text-lg">Can't reach {{ address }}</h2>
         <p class="text-muted">Check the address and port, your VPN, or a firewall in between.</p>
-        <div class="flex justify-end"><Button @click="$emit('retry')">Retry</Button></div>
+        <div class="flex justify-end"><Button data-autofocus @click="$emit('retry')">Retry</Button></div>
       </template>
 
       <template v-else>
         <Unplug class="size-6 text-muted" aria-hidden="true" />
         <h2 class="text-lg">Connection closed</h2>
         <p class="text-muted">{{ host }} disconnected at {{ time }}.</p>
-        <div class="flex justify-end gap-2"><Button variant="secondary" @click="$emit('close')">Close tab</Button><Button autofocus @click="$emit('reconnect')">Reconnect</Button></div>
+        <div class="flex justify-end gap-2"><Button variant="secondary" @click="$emit('close')">Close tab</Button><Button data-autofocus @click="$emit('reconnect')">Reconnect</Button></div>
       </template>
     </div>
   </div>

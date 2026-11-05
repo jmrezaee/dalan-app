@@ -198,11 +198,11 @@ const num = (v: string | number, fallback: number) => (Number.isFinite(Number(v)
           </div>
           <div class="row">
             <span class="flex-1">Model</span>
-            <input v-model="ai.model" aria-label="Model" spellcheck="false" autocomplete="off" class="h-9 w-64 rounded-md border border-border-input bg-bg px-3 font-mono text-xs outline-none focus:border-accent">
+            <input v-model="ai.model" aria-label="Model" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" class="h-9 w-64 rounded-md border border-border-input bg-bg px-3 font-mono text-xs outline-none focus:border-accent">
           </div>
           <div class="row">
             <span class="flex flex-1 flex-col">Service address<span class="text-xs text-muted">Leave as is unless you run your own gateway. Must be https.</span></span>
-            <input v-model="ai.baseUrl" aria-label="Service address" spellcheck="false" autocomplete="off" class="h-9 w-64 rounded-md border border-border-input bg-bg px-3 font-mono text-xs outline-none focus:border-accent">
+            <input v-model="ai.baseUrl" aria-label="Service address" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" class="h-9 w-64 rounded-md border border-border-input bg-bg px-3 font-mono text-xs outline-none focus:border-accent">
           </div>
           <p v-if="ai.error" role="alert" class="pt-3 text-sm text-danger">{{ ai.error }}</p>
           <div class="flex gap-2 pt-4">

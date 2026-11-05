@@ -62,9 +62,9 @@ async function submit() {
         <div class="flex flex-col gap-1.5">
           <Label for="cert-text">Certificate</Label>
           <Textarea id="cert-text" v-model="text" rows="5" spellcheck="false" placeholder="ssh-ed25519-cert-v01@openssh.com AAAA…" class="font-mono text-xs" @input="path = ''" />
-          <div class="flex items-center gap-2 text-xs text-muted">
+          <div class="flex min-w-0 items-center gap-2 text-xs text-muted">
             <Button type="button" variant="secondary" size="sm" @click="choose"><FolderOpen />Choose file…</Button>
-            <span v-if="path" class="truncate font-mono">{{ path }}</span>
+            <span v-if="path" class="min-w-0 truncate font-mono" :title="path">{{ path }}</span>
           </div>
         </div>
         <p v-if="error" role="alert" class="text-sm text-danger">{{ error }}</p>
