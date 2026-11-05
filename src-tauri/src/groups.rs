@@ -434,6 +434,49 @@ pub fn write_jumps(tx: &Transaction, profile_id: &str, ids: &[String]) -> AppRes
     Ok(())
 }
 
+/// The profile ids to read for an item, nearest first: its own, then each group above it, with the
+/// group's label (`None` for the item itself). `kind` is `host` or `group`.
+pub fn profile_chain(
+    conn: &Connection,
+    vault_id: &str,
+    kind: &str,
+    id: &str,
+) -> AppResult<Vec<(Option<String>, String)>> {
+    let sql = match kind {
+        "host" => "SELECT profile_id, group_id FROM hosts WHERE id = ?1 AND vault_id = ?2",
+        "group" => "SELECT profile_id, parent_id FROM groups WHERE id = ?1 AND vault_id = ?2",
+        _ => return Err(AppError::validation("Unknown item type.")),
+    };
+    let (profile, mut next): (String, Option<String>) = conn
+        .query_row(sql, params![id, vault_id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()?
+        .ok_or_else(|| AppError::not_found("That item no longer exists."))?;
+    let mut out = vec![(None, profile)];
+    for _ in 0..64 {
+        // the step limit guards against a cycle in corrupt data
+        let Some(gid) = next else { break };
+        let Some((pid, parent, label)) = conn
+            .query_row(
+                "SELECT profile_id, parent_id, label FROM groups WHERE id = ?1 AND vault_id = ?2",
+                params![gid, vault_id],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Option<String>>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?
+        else {
+            break;
+        };
+        out.push((Some(label), pid));
+        next = parent;
+    }
+    Ok(out)
+}
+
 /// True if `candidate` is `id` itself or sits somewhere below it (a move there would make a cycle).
 fn is_self_or_descendant(map: &GroupMap, id: &str, candidate: &str) -> bool {
     let mut cur = map.get(candidate);

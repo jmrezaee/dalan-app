@@ -11,6 +11,7 @@ use specta::Type;
 
 use crate::db::now_ms;
 use crate::error::{AppError, AppResult};
+use crate::groups;
 
 const MAX_VARS: usize = 50;
 const MAX_NAME: usize = 64;
@@ -68,46 +69,12 @@ fn load_level(conn: &Connection, profile_id: &str, label: Option<String>) -> App
     })
 }
 
-/// The item itself first, then its groups, nearest first. The step limit guards against a cycle.
+/// The item itself first, then its groups, nearest first.
 fn levels(conn: &Connection, vault_id: &str, kind: &str, id: &str) -> AppResult<Vec<Level>> {
-    let (sql, own_label) = match kind {
-        "host" => (
-            "SELECT h.profile_id, h.group_id FROM hosts h WHERE h.id = ?1 AND h.vault_id = ?2",
-            None,
-        ),
-        "group" => (
-            "SELECT g.profile_id, g.parent_id FROM groups g WHERE g.id = ?1 AND g.vault_id = ?2",
-            None::<String>,
-        ),
-        _ => return Err(AppError::validation("Unknown item type.")),
-    };
-    let (profile, mut next): (String, Option<String>) = conn
-        .query_row(sql, params![id, vault_id], |r| Ok((r.get(0)?, r.get(1)?)))
-        .optional()?
-        .ok_or_else(|| AppError::not_found("That item no longer exists."))?;
-    let mut out = vec![load_level(conn, &profile, own_label)?];
-    for _ in 0..64 {
-        let Some(gid) = next else { break };
-        let Some((pid, parent, label)) = conn
-            .query_row(
-                "SELECT profile_id, parent_id, label FROM groups WHERE id = ?1 AND vault_id = ?2",
-                params![gid, vault_id],
-                |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, Option<String>>(1)?,
-                        r.get::<_, String>(2)?,
-                    ))
-                },
-            )
-            .optional()?
-        else {
-            break;
-        };
-        out.push(load_level(conn, &pid, Some(label))?);
-        next = parent;
-    }
-    Ok(out)
+    groups::profile_chain(conn, vault_id, kind, id)?
+        .into_iter()
+        .map(|(label, pid)| load_level(conn, &pid, label))
+        .collect()
 }
 
 /// Applies levels from the farthest group down to the item, per their modes.

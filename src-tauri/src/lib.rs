@@ -9,6 +9,7 @@ pub mod import;
 pub mod keys;
 pub mod known_hosts;
 pub mod logs;
+pub mod proxy;
 pub mod pty;
 pub mod settings;
 pub mod sftp;
@@ -60,6 +61,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sftp::edit_open,
             commands::sftp::edit_upload,
             commands::sftp::edit_close,
+            commands::proxy::proxy_get,
+            commands::proxy::proxy_set,
             commands::env::env_get,
             commands::env::env_set,
             commands::themes::terminal_themes_list,

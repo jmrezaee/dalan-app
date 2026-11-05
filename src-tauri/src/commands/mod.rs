@@ -5,6 +5,7 @@ pub mod env;
 pub mod hosts;
 pub mod import;
 pub mod keychain;
+pub mod proxy;
 pub mod session;
 pub mod settings;
 pub mod sftp;

@@ -418,6 +418,8 @@ pub struct ConnectInfo {
     pub startup_script: Option<String>,
     /// Hop host ids to go through first, in order (empty = direct).
     pub jump_host_ids: Vec<String>,
+    /// SOCKS5 or HTTP proxy for the TCP connection to this host (used when it is the first hop).
+    pub proxy: Option<crate::proxy::Proxy>,
 }
 
 /// Resolves host -> group -> parent group per field (identities included), so a host with no
@@ -461,6 +463,7 @@ pub fn connect_info(conn: &Connection, s: &VaultSession, host_id: &str) -> AppRe
             None => None,
         },
         jump_host_ids: r.jump.map(|j| j.value).unwrap_or_default(),
+        proxy: crate::proxy::resolve_for_host(conn, &s.vault_id, host_id)?,
     })
 }
 

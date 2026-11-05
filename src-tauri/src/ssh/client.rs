@@ -314,12 +314,16 @@ pub async fn connect_authenticated(
                 .await?
             }
             None => {
-                let tcp = match timeout(
-                    TCP_TIMEOUT,
-                    tokio::net::TcpStream::connect((info.address.as_str(), info.port)),
-                )
-                .await
-                {
+                // Through the host's proxy if it has one, else straight to the server.
+                let dial = async {
+                    match &info.proxy {
+                        Some(p) => crate::proxy::connect(p, &info.address, info.port).await,
+                        None => {
+                            tokio::net::TcpStream::connect((info.address.as_str(), info.port)).await
+                        }
+                    }
+                };
+                let tcp = match timeout(TCP_TIMEOUT, dial).await {
                     Ok(Ok(s)) => s,
                     Ok(Err(e)) => {
                         return fail(

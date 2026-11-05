@@ -60,6 +60,9 @@ export const commands = {
 	editUpload: (editId: string, force: boolean) => typedError<EditUpload, AppError>(__TAURI_INVOKE("edit_upload", { editId, force })),
 	editClose: (editId: string) => __TAURI_INVOKE<void>("edit_close", { editId }),
 	/**  `kind` is `host` or `group`. */
+	proxyGet: (kind: string, id: string) => typedError<ProxyConfig_Serialize, AppError>(__TAURI_INVOKE("proxy_get", { kind, id })),
+	proxySet: (kind: string, id: string, choice: ProxyChoice_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("proxy_set", { kind, id, choice })),
+	/**  `kind` is `host` or `group`. */
 	envGet: (kind: string, id: string) => typedError<EnvConfig_Serialize, AppError>(__TAURI_INVOKE("env_get", { kind, id })),
 	envSet: (kind: string, id: string, mode: string, vars: EnvVar[]) => typedError<null, AppError>(__TAURI_INVOKE("env_set", { kind, id, mode, vars })),
 	terminalThemesList: () => typedError<Themes_Serialize, AppError>(__TAURI_INVOKE("terminal_themes_list")),
@@ -810,6 +813,39 @@ export type PromptKind = { type: "host_key_new"; host: string; key_type: string;
 { type: "host_key_changed"; host: string; key_type: string; old_fingerprint: string; new_fingerprint: string } | { type: "password"; host: string; user: string } | 
 /**  An encrypted private key needs its passphrase. */
 { type: "passphrase"; key_label: string };
+
+/**  What the editors show and save. `kind`: `inherit`, `none`, `socks5` or `http`. */
+export type ProxyChoice = ProxyChoice_Serialize | ProxyChoice_Deserialize;
+
+/**  What the editors show and save. `kind`: `inherit`, `none`, `socks5` or `http`. */
+export type ProxyChoice_Deserialize = {
+	kind: string,
+	host: string,
+	port?: number | null,
+};
+
+/**  What the editors show and save. `kind`: `inherit`, `none`, `socks5` or `http`. */
+export type ProxyChoice_Serialize = {
+	kind: string,
+	host: string,
+	port: number | null,
+};
+
+export type ProxyConfig = ProxyConfig_Serialize | ProxyConfig_Deserialize;
+
+export type ProxyConfig_Deserialize = {
+	own: ProxyChoice_Deserialize,
+	/**  What the groups above give: a one-line summary like `socks5 proxy.corp:1080`, and the group. */
+	inherited?: string | null,
+	inherited_from?: string | null,
+};
+
+export type ProxyConfig_Serialize = {
+	own: ProxyChoice_Serialize,
+	/**  What the groups above give: a one-line summary like `socks5 proxy.corp:1080`, and the group. */
+	inherited: string | null,
+	inherited_from: string | null,
+};
 
 /**
  *  Raw terminal bytes. Sent over the Tauri channel as a binary body (an `ArrayBuffer` in JS),
