@@ -15,6 +15,13 @@ fn migrations() -> Migrations<'static> {
     Migrations::new(vec![M::up(MIGRATION_0001)])
 }
 
+/// Time is stored as UTC epoch milliseconds everywhere.
+pub fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64)
+}
+
 /// Pragmas must be set on every open, outside the migration transaction.
 fn configure(conn: &Connection) -> AppResult<()> {
     conn.pragma_update(None, "foreign_keys", "ON")?;

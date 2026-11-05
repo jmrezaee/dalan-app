@@ -25,6 +25,7 @@ const props = withDefaults(defineProps<Props>(), { as: "button" })
     :data-size="size"
     :as="as"
     :as-child="asChild"
+    :type="as === 'button' ? 'button' : undefined"
     :aria-busy="loading || undefined"
     :disabled="as === 'button' ? (loading || undefined) : undefined"
     :class="cn(buttonVariants({ variant, size }), props.class)"

@@ -10,6 +10,7 @@ use specta::Type;
 pub enum ErrorCode {
     Locked,
     WrongPassword,
+    TooManyAttempts,
     NotFound,
     Validation,
     InUse,
@@ -40,6 +41,9 @@ impl AppError {
     }
     pub fn locked() -> Self {
         Self::new(ErrorCode::Locked, "The vault is locked.")
+    }
+    pub fn wrong_password() -> Self {
+        Self::new(ErrorCode::WrongPassword, "That password didn't work.")
     }
     pub fn not_found(what: impl Into<String>) -> Self {
         Self::new(ErrorCode::NotFound, what)

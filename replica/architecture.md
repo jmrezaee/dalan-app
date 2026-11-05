@@ -131,7 +131,7 @@ Rust folds those rows into a `ResolvedProfile` and records which group each valu
 
 ## API: Tauri commands
 
-Notation: `cmd_name(input) -> output`. Every command except `vault_status`, `vault_create` and `vault_unlock` requires an unlocked vault. Errors come back as `{ code, message }`. Codes include `locked`, `not_found`, `validation`, `in_use`, `auth_failed`, `host_unreachable`, `host_key_changed`, `kex_failed`, `port_in_use` and `permission_denied`.
+Notation: `cmd_name(input) -> output`. Every command except `vault_status`, `vault_create` and `vault_unlock` requires an unlocked vault. Errors come back as `{ code, message }`. Codes include `locked`, `wrong_password`, `too_many_attempts`, `not_found`, `validation`, `in_use`, `auth_failed`, `host_unreachable`, `host_key_changed`, `kex_failed`, `port_in_use` and `permission_denied`.
 
 Streams use **Tauri `Channel`s** passed as a command argument. They are ordered and per call, which fits a terminal better than global events.
 
@@ -139,10 +139,11 @@ Streams use **Tauri `Channel`s** passed as a command argument. They are ordered 
 
 | command | does | input | output | flow |
 | --- | --- | --- | --- | --- |
-| `vault_status` | first run? locked? | – | `{ exists, unlocked }` | F10 |
+| `vault_status` | first run? locked? | – | `{ exists, unlocked, auto_lock_minutes, cooldown_secs? }` | F10 |
 | `vault_create` | derive key, write vault row and key-check | `{ master_password }` | `()` | F10 |
 | `vault_unlock` | verify key-check, hold key in memory, autostart tunnels, sweep orphans | `{ master_password }` | `()` or `wrong_password` | all |
 | `vault_lock` | drop key, close sessions (confirm in UI) | – | `()` | – |
+| `vault_touch` | report user activity so auto-lock counts idle time | – | `()` | – |
 | `vault_change_password` | re-derive and re-encrypt all secrets in one transaction | `{ old, new }` | `()` | – |
 
 ### Hosts, groups, tags (F01, F04, F05; S02–S04)

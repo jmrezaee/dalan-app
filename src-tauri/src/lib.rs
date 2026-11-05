@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod db;
 pub mod error;
+pub mod events;
 pub mod import;
 pub mod keys;
 pub mod logs;
@@ -12,16 +13,26 @@ pub mod tunnels;
 pub mod vault;
 
 use tauri::Manager;
-use tauri_specta::{collect_commands, Builder};
+use tauri_specta::{collect_commands, collect_events, Builder};
 
 use crate::state::AppState;
 
 /// Builds the command list once. `run()` mounts it, and the test below exports TS bindings from it.
 fn specta_builder() -> Builder<tauri::Wry> {
-    Builder::<tauri::Wry>::new().commands(collect_commands![
-        commands::app::app_info,
-        commands::vault::vault_status,
-    ])
+    Builder::<tauri::Wry>::new()
+        .commands(collect_commands![
+            commands::app::app_info,
+            commands::vault::vault_status,
+            commands::vault::vault_create,
+            commands::vault::vault_unlock,
+            commands::vault::vault_lock,
+            commands::vault::vault_change_password,
+            commands::vault::vault_touch,
+        ])
+        .events(collect_events![
+            events::VaultLocked,
+            events::AutoLockWarning
+        ])
 }
 
 const BINDINGS_PATH: &str = "../app/types/bindings.ts";
@@ -48,6 +59,7 @@ pub fn run() {
             std::fs::create_dir_all(&dir)?;
             let conn = db::open(&dir.join("vault.db"))?;
             app.manage(AppState::new(conn));
+            vault::spawn_auto_lock(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())

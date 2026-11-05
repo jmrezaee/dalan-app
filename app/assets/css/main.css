@@ -5,3 +5,11 @@
 /* Fonts are bundled from node_modules, so the app works offline. */
 @import '@fontsource-variable/inter';
 @import '@fontsource-variable/jetbrains-mono';
+
+/* S24 wrong password: 160ms shake. Reduced motion is handled by the global rule in tokens.css. */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-6px); }
+  75% { transform: translateX(6px); }
+}
+.animate-shake { animation: shake 160ms var(--motion-ease); }

@@ -23,5 +23,10 @@ export function useTauri() {
   return {
     appInfo: () => unwrap(commands.appInfo()),
     vaultStatus: () => unwrap(commands.vaultStatus()),
+    vaultCreate: (masterPassword: string) => unwrap(commands.vaultCreate(masterPassword)),
+    vaultUnlock: (masterPassword: string) => unwrap(commands.vaultUnlock(masterPassword)),
+    vaultLock: () => unwrap(commands.vaultLock()),
+    vaultChangePassword: (oldPassword: string, newPassword: string) => unwrap(commands.vaultChangePassword(oldPassword, newPassword)),
+    vaultTouch: () => commands.vaultTouch(),
   }
 }
