@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { MenuItem } from '@/components/common/ItemMenuList.vue'
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
 // S11: snippets grouped by package.
 import { Code2, FolderPlus, Pencil, Play, Plus, Trash2 } from '@lucide/vue'
 import type { PackageSummary, SnippetSummary } from '~/types/bindings'
@@ -70,6 +72,14 @@ async function confirmPk() {
   pkConfirm.value = false
   if (p) await snippets.removePackage(p)
 }
+
+function snippetMenu(s: (typeof snippets.snippets)[number]): MenuItem[] {
+  return [
+    { label: 'Run…', icon: Play, onSelect: () => askRun(s) },
+    { label: 'Edit', icon: Pencil, onSelect: () => openSheet(s) },
+    { label: 'Delete', icon: Trash2, danger: true, separator: true, onSelect: () => askDelete(s) },
+  ]
+}
 </script>
 
 <template>
@@ -95,9 +105,9 @@ async function confirmPk() {
           </template>
         </h2>
         <p v-if="!g.items.length" class="px-1 text-sm text-muted">Empty. Choose this package when you edit a snippet.</p>
+        <ContextMenu v-for="s in g.items" :key="s.id">
+          <ContextMenuTrigger as-child>
         <div
-          v-for="s in g.items"
-          :key="s.id"
           class="flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5 hover:border-muted/40 hover:bg-surface-raised"
         >
           <button type="button" class="flex min-w-0 flex-1 flex-col text-left" @click="openSheet(s)">
@@ -107,6 +117,11 @@ async function confirmPk() {
           <span class="shrink-0 text-xs text-muted">{{ targets(s) }}</span>
           <Button variant="secondary" size="sm" @click="askRun(s)"><Play />Run</Button>
         </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            <ItemMenuList :items="snippetMenu(s)" mode="context" />
+          </ContextMenuContent>
+        </ContextMenu>
       </section>
     </div>
   </div>

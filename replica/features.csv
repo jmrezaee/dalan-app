@@ -79,3 +79,6 @@ Connection step log with copy details,terminal,should,yes,partial,P21; waits for
 Connect once (trust without saving),terminal,should,yes,partial,P21; waits for hand check
 Dropped sessions card and optional auto reconnect,terminal,should,yes,partial,P21; waits for hand check
 Try another sign-in method after a failure,terminal,should,yes,partial,P21; waits for hand check
+Right-click menus on host cards and tabs,shell,should,yes,partial,P22; waits for hand check
+Quick connect from the New tab (user@host:port),terminal,should,yes,partial,P22; saves the host first; waits for hand check
+Key and snippet right-click menus,keychain,should,yes,partial,P22; waits for hand check

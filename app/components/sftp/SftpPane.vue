@@ -1,9 +1,10 @@
 <script setup lang="ts">
 // One side of S21: where it is (this computer or a server), a path bar, and the files.
-import { ArrowLeftRight, ChevronDown, Eye, EyeOff, FolderPlus, KeyRound, Laptop, Lock, ServerOff, Loader, Pencil, RefreshCw, Server, Trash2 } from '@lucide/vue'
+import { ArrowLeftRight, ChevronDown, Eye, EyeOff, Ellipsis, FolderPlus, KeyRound, Laptop, Lock, ServerOff, Loader, Pencil, RefreshCw, Server, Trash2 } from '@lucide/vue'
 import type { FsEntry } from '~/types/bindings'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
+import type { MenuItem } from '@/components/common/ItemMenuList.vue'
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { formatBytes } from '~/utils/format'
 import { isRemote, parentPath } from '~/stores/sftp'
 import { toast } from 'vue-sonner'
@@ -63,6 +64,21 @@ function onKey(e: KeyboardEvent) {
   }
 }
 const dirName = computed(() => (props.index === 0 ? 'right' : 'left'))
+
+// The right-click menu and the visible "Actions" button share this list. It acts on the clicked row, or the selection.
+const fileMenu = computed<MenuItem[]>(() => {
+  const one = picked.value.length === 1 ? picked.value[0]! : null
+  return [
+    ...(ctx.value && ctx.value.kind === 'dir' ? [{ label: 'Open', onSelect: () => sftp.open(props.index, ctx.value!) }] : []),
+    ...(picked.value.length && other.value.endpoint ? [{ label: `Copy to ${dirName.value} pane`, onSelect: copyOver }] : []),
+    ...(one && remote.value && one.kind === 'file' ? [{ label: 'Edit in default app', separator: true, onSelect: () => sftp.edit(props.index, one.name) }] : []),
+    ...(one ? [{ label: 'Rename', icon: Pencil, hint: 'F2', onSelect: () => emit('rename', one.name) }] : []),
+    ...(one && remote.value ? [{ label: 'Permissions…', onSelect: () => emit('chmod', one.name) }] : []),
+    ...(picked.value.length ? [{ label: 'Delete', icon: Trash2, danger: true, onSelect: () => emit('remove', picked.value.map(p => p.name)) }] : []),
+    { label: 'New folder', icon: FolderPlus, separator: true, onSelect: () => emit('newFolder') },
+    { label: 'Refresh', icon: RefreshCw, onSelect: () => sftp.refresh(props.index) },
+  ]
+})
 </script>
 
 <template>
@@ -93,6 +109,10 @@ const dirName = computed(() => (props.index === 0 ? 'right' : 'left'))
         <IconButton :label="pane.showHidden ? 'Hide hidden files' : 'Show hidden files'" :pressed="pane.showHidden" @click="sftp.toggleHidden(index)"><EyeOff v-if="pane.showHidden" /><Eye v-else /></IconButton>
         <IconButton label="New folder" @click="emit('newFolder')"><FolderPlus /></IconButton>
         <IconButton label="Refresh" @click="sftp.refresh(index)"><RefreshCw /></IconButton>
+        <DropdownMenu>
+          <DropdownMenuTrigger as-child><IconButton label="Actions"><Ellipsis /></IconButton></DropdownMenuTrigger>
+          <DropdownMenuContent align="end"><ItemMenuList :items="fileMenu" mode="dropdown" /></DropdownMenuContent>
+        </DropdownMenu>
       </template>
     </div>
 
@@ -138,15 +158,7 @@ const dirName = computed(() => (props.index === 0 ? 'right' : 'left'))
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem v-if="ctx && ctx.kind === 'dir'" @select="sftp.open(index, ctx!)">Open</ContextMenuItem>
-        <ContextMenuItem v-if="picked.length && other.endpoint" @select="copyOver">Copy to {{ dirName }} pane</ContextMenuItem>
-        <ContextMenuSeparator v-if="picked.length" />
-        <ContextMenuItem v-if="picked.length === 1 && remote && picked[0]!.kind === 'file'" @select="sftp.edit(index, picked[0]!.name)">Edit in default app</ContextMenuItem>
-        <ContextMenuItem v-if="picked.length === 1" @select="emit('rename', picked[0]!.name)"><Pencil />Rename</ContextMenuItem>
-        <ContextMenuItem v-if="picked.length === 1 && remote" @select="emit('chmod', picked[0]!.name)">Permissions…</ContextMenuItem>
-        <ContextMenuItem v-if="picked.length" class="text-danger" @select="emit('remove', picked.map(p => p.name))"><Trash2 />Delete</ContextMenuItem>
-        <ContextMenuItem @select="emit('newFolder')"><FolderPlus />New folder</ContextMenuItem>
-        <ContextMenuItem @select="sftp.refresh(index)"><RefreshCw />Refresh</ContextMenuItem>
+        <ItemMenuList :items="fileMenu" mode="context" />
       </ContextMenuContent>
     </ContextMenu>
 

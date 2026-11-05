@@ -1,13 +1,27 @@
 <script setup lang="ts">
 // S05. Never shows secret material: only the public fingerprint.
 import { BadgeCheck, Copy, Ellipsis, KeyRound, Lock, Pencil, ServerCog, Trash2 } from '@lucide/vue'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import type { MenuItem } from '@/components/common/ItemMenuList.vue'
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 
-defineProps<{ label: string, type: string, fingerprint: string, passphraseSaved?: boolean, encrypted?: boolean, certificate?: boolean, certificateNote?: string | null }>()
-defineEmits<{ copyPublic: [], install: [], edit: [], delete: [], certificate: [], removeCertificate: [] }>()
+const props = defineProps<{ label: string, type: string, fingerprint: string, passphraseSaved?: boolean, encrypted?: boolean, certificate?: boolean, certificateNote?: string | null }>()
+const emit = defineEmits<{ copyPublic: [], install: [], edit: [], delete: [], certificate: [], removeCertificate: [] }>()
+
+// The same list on right-click and in the "…" menu.
+const menu = computed<MenuItem[]>(() => [
+  { label: 'Copy public key', icon: Copy, onSelect: () => emit('copyPublic') },
+  { label: 'Install on a server…', icon: ServerCog, onSelect: () => emit('install') },
+  { label: 'Edit', icon: Pencil, onSelect: () => emit('edit') },
+  { label: props.certificate ? 'Replace certificate…' : 'Attach certificate…', icon: BadgeCheck, onSelect: () => emit('certificate') },
+  ...(props.certificate ? [{ label: 'Remove certificate', onSelect: () => emit('removeCertificate') }] : []),
+  { label: 'Delete', icon: Trash2, danger: true, separator: true, onSelect: () => emit('delete') },
+])
 </script>
 
 <template>
+  <ContextMenu>
+    <ContextMenuTrigger as-child>
   <div class="group flex gap-3 rounded-lg border border-border bg-surface p-3 hover:border-muted/40 hover:bg-surface-raised">
     <div class="grid size-8 shrink-0 place-items-center rounded-md bg-surface-hover"><KeyRound class="size-4" aria-hidden="true" /></div>
     <div class="min-w-0 flex-1">
@@ -26,12 +40,13 @@ defineEmits<{ copyPublic: [], install: [], edit: [], delete: [], certificate: []
         <IconButton label="Key actions" size="xs" class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"><Ellipsis /></IconButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem @select="$emit('install')"><ServerCog />Install on a server…</DropdownMenuItem>
-        <DropdownMenuItem @select="$emit('edit')"><Pencil />Edit</DropdownMenuItem>
-        <DropdownMenuItem @select="$emit('certificate')"><BadgeCheck />{{ certificate ? 'Replace certificate…' : 'Attach certificate…' }}</DropdownMenuItem>
-        <DropdownMenuItem v-if="certificate" @select="$emit('removeCertificate')">Remove certificate</DropdownMenuItem>
-        <DropdownMenuItem class="text-danger" @select="$emit('delete')"><Trash2 />Delete</DropdownMenuItem>
+        <ItemMenuList :items="menu" mode="dropdown" />
       </DropdownMenuContent>
     </DropdownMenu>
   </div>
+    </ContextMenuTrigger>
+    <ContextMenuContent>
+      <ItemMenuList :items="menu" mode="context" />
+    </ContextMenuContent>
+  </ContextMenu>
 </template>

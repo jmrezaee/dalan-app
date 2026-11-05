@@ -1,9 +1,10 @@
 <script setup lang="ts">
 // The app shell: tab bar, the Vault sections (S02 Hosts and the rest), terminals kept mounted, and the global shortcuts.
-import { ScrollText, ArrowDownUp, Code2, LayoutGrid, KeyRound, Lock, Server, Settings, ShieldCheck, Trash2, Vault, Waypoints } from '@lucide/vue'
+import { ScrollText, ArrowDownUp, Code2, Copy, LayoutGrid, KeyRound, Lock, Server, Settings, ShieldCheck, Trash2, Vault, Waypoints } from '@lucide/vue'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { buttonVariants } from '@/components/ui/button'
 import type { Session } from '~/stores/sessions'
+import type { MenuItem } from '@/components/common/ItemMenuList.vue'
 
 const vault = useVaultStore()
 const hosts = useHostsStore()
@@ -79,6 +80,14 @@ function dropTab(ontoKey: string, where: 'before' | 'after' | 'onto') {
   if (!key || key === ontoKey) return
   if (where === 'onto') sessions.mergeTabs(key, ontoKey, hosts.hosts)
   else sessions.moveTab(key, ontoKey, where)
+}
+function tabMenu(s: Session): MenuItem[] {
+  const others = sessions.sessions.filter(o => o.key !== s.key)
+  const host = s.kind === 'session' && s.hostId ? hosts.hosts.find(h => h.id === s.hostId) : undefined
+  return [
+    ...(s.kind === 'session' && (host || !s.hostId) ? [{ label: 'Duplicate tab', icon: Copy, separator: true, onSelect: () => (host ? sessions.open(host) : sessions.openLocal()) }] : []),
+    { label: 'Close others', disabled: !others.length, onSelect: () => others.forEach(requestClose) },
+  ]
 }
 const closingCount = computed(() => (closing.value?.kind === 'workspace' ? closing.value.panes.length : 1))
 
@@ -168,6 +177,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
         :unsaved="s.kind === 'workspace' && s.dirty"
         closable
         movable
+        :extra="tabMenu(s)"
         @select="sessions.activeKey = s.key"
         @close="requestClose(s)"
         @rename="(name: string) => sessions.rename(s, name)"

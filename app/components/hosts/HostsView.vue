@@ -1,6 +1,8 @@
 <script setup lang="ts">
 // S02: groups first, then the hosts in the group you are in. Search and tag filters look at every host.
-import { ChevronRight, Download, FolderPlus, LayoutGrid, List, Plus, Server } from '@lucide/vue'
+import { ChevronRight, Copy, Download, FolderOpen, FolderPlus, FolderTree, LayoutGrid, List, Pencil, Plug, Plus, Server, SquareTerminal, Trash2 } from '@lucide/vue'
+import { toast } from 'vue-sonner'
+import type { MenuItem } from '@/components/common/ItemMenuList.vue'
 import type { GroupSummary, HostSummary } from '~/types/bindings'
 import { osLetter, osName } from '~/utils/os'
 import { buttonVariants } from '@/components/ui/button'
@@ -8,7 +10,50 @@ import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
 
 const hosts = useHostsStore()
 const sessions = useSessionsStore()
+const sftp = useSftpStore()
 const selected = ref<string | null>(null)
+
+// S02 right-click menu (and the "…" menu): the same list in both places.
+async function copyAddress(h: HostSummary) {
+  const port = h.effective_port && h.effective_port !== 22 ? `:${h.effective_port}` : ''
+  try {
+    await navigator.clipboard.writeText(`${h.effective_username ? `${h.effective_username}@` : ''}${h.address}${port}`)
+    toast('Address copied.')
+  }
+  catch {
+    toast.error('Could not copy the address.')
+  }
+}
+function connectWithSftp(h: HostSummary) {
+  sessions.activeKey = 'sftp'
+  void sftp.connect(1, h)
+}
+function menuFor(h: HostSummary): MenuItem[] {
+  const groups = hosts.groupOptions()
+  return [
+    { label: 'Connect', icon: Plug, onSelect: () => sessions.open(h) },
+    { label: 'Connect with SFTP', icon: FolderOpen, onSelect: () => connectWithSftp(h), disabled: h.protocol === 'serial' },
+    {
+      label: 'Add to workspace',
+      icon: SquareTerminal,
+      children: [
+        { label: 'New workspace', onSelect: () => sessions.openWorkspace([h]) },
+        ...sessions.workspaceTabs.map(ws => ({ label: ws.label, separator: false, onSelect: () => sessions.addPane(ws, h) })),
+      ],
+    },
+    { label: 'Edit', icon: Pencil, separator: true, onSelect: () => { hosts.editing = h } },
+    {
+      label: 'Move to group',
+      icon: FolderTree,
+      children: [
+        { label: 'Top level', disabled: h.group_id === null, onSelect: () => hosts.move([h.id], null) },
+        ...groups.map(g => ({ label: '\u00a0\u00a0'.repeat(g.depth) + g.label, disabled: h.group_id === g.id, onSelect: () => hosts.move([h.id], g.id) })),
+      ],
+    },
+    { label: 'Copy address', icon: Copy, onSelect: () => copyAddress(h) },
+    { label: 'Delete', icon: Trash2, danger: true, separator: true, onSelect: () => askDeleteHost(h) },
+  ]
+}
 
 // ---- delete confirmations. The target stays set while the dialog closes, so the click can still read it.
 const hostToDelete = ref<HostSummary | null>(null)
@@ -104,6 +149,7 @@ const nothingHere = computed(() => hosts.loaded && !empty.value && !hosts.childG
       <SplitButton label="New host" @click="newHost">
         <template #icon><Plus /></template>
         <DropdownMenuItem @select="hosts.editingGroup = 'new'"><FolderPlus />New group</DropdownMenuItem>
+        <DropdownMenuItem @select="sessions.openLocal()"><SquareTerminal />Local terminal</DropdownMenuItem>
         <DropdownMenuItem @select="hosts.importOpen = true"><Download />Import hosts…</DropdownMenuItem>
       </SplitButton>
     </template>
@@ -155,10 +201,10 @@ const nothingHere = computed(() => hosts.loaded && !empty.value && !hosts.childG
             :list="hosts.view === 'list'"
             :selected="selected === h.id"
             :dragging="dragging === h.id"
+            :menu="menuFor(h)"
+            :connected="sessions.liveHostIds.has(h.id)"
             @select="selected = h.id"
-            @edit="hosts.editing = h"
             @open="sessions.open(h)"
-            @delete="askDeleteHost(h)"
             @dragstart="startDrag($event, h)"
             @dragend="dragging = dropOn = null"
           />

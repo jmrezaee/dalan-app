@@ -1,10 +1,12 @@
 <script setup lang="ts">
 // S16: pick a host to connect in this tab. Recent hosts first; typing searches all of them.
-import { LayoutGrid, Plus, Search, SquareTerminal } from '@lucide/vue'
+import { toast } from 'vue-sonner'
+import { LayoutGrid, Plug, Plus, Search, SquareTerminal } from '@lucide/vue'
 import { Checkbox } from '@/components/ui/checkbox'
 import type { HostSummary } from '~/types/bindings'
 import { osLetter, osName } from '~/utils/os'
 import { cn } from '@/lib/utils'
+import { parseQuickConnect } from '~/utils/quickConnect'
 
 const emit = defineEmits<{ newHost: [] }>()
 const hosts = useHostsStore()
@@ -36,6 +38,19 @@ const results = computed<HostSummary[]>(() => {
 })
 watch(query, () => { index.value = 0 })
 
+// `user@host[:port]` that matches no saved host: connect to it. It is saved first (a connection needs a host
+// record in the vault), so it also shows up under Recent next time and can be deleted from Hosts.
+const quick = computed(() => (results.value.length ? null : parseQuickConnect(query.value)))
+const quickLabel = computed(() => (quick.value ? `${quick.value.username ? `${quick.value.username}@` : ''}${quick.value.address}${quick.value.port ? `:${quick.value.port}` : ''}` : ''))
+async function connectQuick() {
+  const q = quick.value
+  if (!q) return
+  const err = await hosts.save({ id: null, label: q.address, address: q.address, port: q.port, username: q.username, password: null, clear_password: false, group_id: null, key_id: null, identity_id: null, startup_snippet_id: null, jump_mode: 'inherit', jump_host_ids: [], tags: [] })
+  if (err) return void toast.error(err)
+  const saved = hosts.hosts.find(h => h.address === q.address && h.label === q.address && (h.effective_username ?? null) === q.username)
+  if (saved) sessions.open(saved)
+}
+
 function ago(ms: number | null | undefined) {
   if (!ms) return 'Not connected yet'
   const mins = Math.round((Date.now() - ms) / 60000)
@@ -49,6 +64,7 @@ function onKey(e: KeyboardEvent) {
   if (e.key === 'ArrowDown') { e.preventDefault(); index.value = Math.min(index.value + 1, results.value.length - 1) }
   else if (e.key === 'ArrowUp') { e.preventDefault(); index.value = Math.max(index.value - 1, 0) }
   else if (e.key === 'Enter' && checked.value.length >= 2) { e.preventDefault(); openChecked() }
+  else if (e.key === 'Enter' && quick.value) { e.preventDefault(); void connectQuick() }
   else if (e.key === 'Enter' && results.value[index.value]) { e.preventDefault(); sessions.open(results.value[index.value]!) }
   else if (e.key === ' ' && e.ctrlKey && results.value[index.value]) { e.preventDefault(); toggle(results.value[index.value]!.id) }
 }
@@ -79,7 +95,12 @@ defineExpose({ focus: () => input.value?.focus() })
           <h2 class="text-xs font-medium text-muted">{{ query ? 'Matches' : 'Recent' }}</h2>
           <Button v-if="checked.length >= 2" size="sm" class="ml-auto" @click="openChecked"><LayoutGrid />Open {{ checked.length }} as workspace</Button>
         </div>
-        <p v-if="!results.length" class="px-3 py-4 text-muted">{{ hosts.hosts.length ? 'No matches.' : 'No hosts yet. Add one to connect.' }}</p>
+        <button v-if="quick" type="button" class="flex h-11 items-center gap-3 rounded-md bg-accent/10 px-3 text-left hover:bg-surface-hover" @click="connectQuick">
+          <Plug class="size-4 text-accent" aria-hidden="true" />
+          <span class="truncate">Connect to <span class="font-mono">{{ quickLabel }}</span></span>
+          <span class="ml-auto text-xs text-muted">Saved to Hosts</span>
+        </button>
+        <p v-else-if="!results.length" class="px-3 py-4 text-muted">{{ hosts.hosts.length ? 'No matches.' : 'No hosts yet. Add one to connect.' }}</p>
         <button
           v-for="(h, i) in results"
           :key="h.id"

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 // One tab in the TabBar (S01). The close button is a separate focusable button.
-import { X } from '@lucide/vue'
+import { Pencil, X } from '@lucide/vue'
+import type { MenuItem } from '@/components/common/ItemMenuList.vue'
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
 
 const props = defineProps<{
@@ -12,6 +14,8 @@ const props = defineProps<{
   closable?: boolean
   /** Tabs that can be renamed (F2 or double-click) and dragged. */
   movable?: boolean
+  /** More actions for the right-click menu (Close others, Duplicate tab). */
+  extra?: MenuItem[]
 }>()
 const emit = defineEmits<{ select: []; close: []; rename: [label: string]; dragStart: []; dragEnd: []; dropOn: [where: 'before' | 'after' | 'onto'] }>()
 
@@ -30,6 +34,12 @@ function finishRename(save: boolean) {
   editing.value = false
   if (save && draft.value.trim() && draft.value.trim() !== props.label) emit('rename', draft.value)
 }
+
+const menu = computed<MenuItem[]>(() => [
+  ...(props.movable ? [{ label: 'Rename', icon: Pencil, hint: 'F2', onSelect: startRename }] : []),
+  ...(props.closable ? [{ label: 'Close', icon: X, onSelect: () => emit('close') }] : []),
+  ...(props.extra ?? []),
+])
 
 // ---- Drag: the middle half of a tab means "combine", the outer quarters mean "put before/after".
 const zone = ref<'before' | 'after' | 'onto' | null>(null)
@@ -53,6 +63,8 @@ function onDrop(e: DragEvent) {
 </script>
 
 <template>
+  <ContextMenu>
+    <ContextMenuTrigger as-child :disabled="!menu.length">
   <div
     :class="cn(
       'group relative flex h-8 min-w-[120px] max-w-[220px] items-center gap-2 rounded-t-md px-2.5 text-sm',
@@ -96,4 +108,9 @@ function onDrop(e: DragEvent) {
     </button>
     <span v-if="dropTarget || zone === 'onto'" class="absolute -bottom-5 left-0 text-2xs text-accent">Drop to split</span>
   </div>
+    </ContextMenuTrigger>
+    <ContextMenuContent>
+      <ItemMenuList :items="menu" mode="context" />
+    </ContextMenuContent>
+  </ContextMenu>
 </template>

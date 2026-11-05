@@ -93,6 +93,10 @@ export const useSessionsStore = defineStore('sessions', () => {
     retries.set(sess.key, r)
   }
 
+  /** Hosts with a live shell right now (tabs and workspace panes), for the "connected" dot on host cards. */
+  const liveHostIds = computed(() => new Set(sessions.value.flatMap(s => (s.kind === 'workspace' ? s.panes : [s])).filter(s => s.kind === 'session' && s.hostId && s.status === 'ready').map(s => s.hostId)))
+  /** Open workspaces, for "Add to workspace". */
+  const workspaceTabs = computed(() => sessions.value.filter(s => s.kind === 'workspace'))
   /** Sessions whose connection dropped (tabs and workspace panes). */
   const dropped = computed(() => sessions.value.flatMap(s => (s.kind === 'workspace' ? s.panes : [s])).filter(s => s.kind === 'session' && s.status === 'disconnected'))
   const dismissedDrops = ref<Set<string>>(new Set())
@@ -445,5 +449,5 @@ export const useSessionsStore = defineStore('sessions', () => {
     pending.clear()
   }
 
-  return { sessions, activeKey, active, activeSession, panelOpen, open, openLocal, openNewTab, openWorkspace, addPane, closePane, focusPane, setMode, toggleMode, toggleBroadcast, input, activateNth, cycle, rename, moveTab, mergeTabs, attach, detach, write, resize, ack, respond, reconnect, reconnectWith, close, clear, dropped, droppedCard, dismissDropped, reconnectAll }
+  return { sessions, activeKey, active, activeSession, panelOpen, open, openLocal, openNewTab, openWorkspace, addPane, closePane, focusPane, setMode, toggleMode, toggleBroadcast, input, activateNth, cycle, rename, moveTab, mergeTabs, attach, detach, write, resize, ack, respond, reconnect, reconnectWith, liveHostIds, workspaceTabs, close, clear, dropped, droppedCard, dismissDropped, reconnectAll }
 })

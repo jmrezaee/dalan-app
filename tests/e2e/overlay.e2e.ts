@@ -77,6 +77,22 @@ describe('unlock and the connection overlay (F01, F11, F12)', () => {
     await page.close()
   })
 
+  it('S02: right-click on a host card opens the menu; Connect opens a session; the tab menu closes others', async () => {
+    const page = await openApp(browser, url, { unlocked: true })
+    await page.getByText('web-1').click({ button: 'right' })
+    for (const name of ['Connect', 'Connect with SFTP', 'Add to workspace', 'Edit', 'Move to group', 'Copy address', 'Delete'])
+      await seen(page.getByRole('menuitem', { name, exact: true }))
+    await page.getByRole('menuitem', { name: 'Connect', exact: true }).click()
+    await seen(page.getByRole('heading', { name: 'Connecting to web-1…' }))
+    expect(await sessionIds(page)).toHaveLength(1)
+    // Right-click the tab: Rename, Close, Duplicate tab, Close others.
+    await page.getByRole('tab', { name: 'web-1' }).click({ button: 'right' })
+    await seen(page.getByRole('menuitem', { name: /^Rename/ }))
+    for (const name of ['Close', 'Duplicate tab', 'Close others'])
+      await seen(page.getByRole('menuitem', { name, exact: true }))
+    await page.close()
+  })
+
   it('F12: a changed key blocks; Close is the default and replacing needs the typed name', async () => {
     const page = await openApp(browser, url, { unlocked: true })
     await page.getByText('web-1').dblclick()

@@ -1,8 +1,10 @@
 <script setup lang="ts">
 // S02/S16. Spec: HostCard. Selection and focus are conveyed by ring + text, not colour alone.
-import { Ellipsis, LoaderCircle, Pencil, Plug, Trash2 } from '@lucide/vue'
+import { Ellipsis, LoaderCircle } from '@lucide/vue'
 import { cn } from '@/lib/utils'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import type { MenuItem } from '@/components/common/ItemMenuList.vue'
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 
 defineProps<{
   label: string
@@ -23,11 +25,15 @@ defineProps<{
   checked?: boolean
   /** Row layout (h 44) for the list view. */
   list?: boolean
+  /** The actions, shown on right-click and in the "…" menu. */
+  menu?: MenuItem[]
 }>()
-defineEmits<{ open: []; select: []; edit: []; delete: []; dragstart: [event: DragEvent]; dragend: [] }>()
+defineEmits<{ open: []; select: []; dragstart: [event: DragEvent]; dragend: [] }>()
 </script>
 
 <template>
+  <ContextMenu>
+    <ContextMenuTrigger as-child>
   <div
     role="row"
     draggable="true"
@@ -67,10 +73,13 @@ defineEmits<{ open: []; select: []; edit: []; delete: []; dragstart: [event: Dra
         <IconButton label="Host actions" size="xs" class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100" @click.stop><Ellipsis /></IconButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem @select="$emit('open')"><Plug />Connect</DropdownMenuItem>
-        <DropdownMenuItem @select="$emit('edit')"><Pencil />Edit</DropdownMenuItem>
-        <DropdownMenuItem class="text-danger" @select="$emit('delete')"><Trash2 />Delete</DropdownMenuItem>
+        <ItemMenuList :items="menu ?? []" mode="dropdown" />
       </DropdownMenuContent>
     </DropdownMenu>
   </div>
+    </ContextMenuTrigger>
+    <ContextMenuContent>
+      <ItemMenuList :items="menu ?? []" mode="context" />
+    </ContextMenuContent>
+  </ContextMenu>
 </template>
