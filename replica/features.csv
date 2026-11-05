@@ -1,6 +1,6 @@
 feature,area,priority,original,clone,notes
 Master password unlock for local encrypted vault,security,must,yes,yes,S24; clone design choice standing in for Termius account encryption password
-Horizontal tab bar with Vault and SFTP fixed tabs,shell,must,yes,no,S01
+Horizontal tab bar with Vault and SFTP fixed tabs,shell,must,yes,yes,S01
 Tab status dots (unread / needs input / error),shell,must,yes,no,S01 S19
 Hosts list with grid/list view and search,hosts,must,yes,yes,S02
 Create and edit host (address port username password),hosts,must,yes,yes,S03
@@ -28,9 +28,9 @@ Startup snippet per host,hosts,must,yes,yes,source 10
 Snippets with packages,snippets,must,yes,yes,S11 S12
 Run snippet in current session from side panel,snippets,must,yes,yes,S20
 Local / remote / dynamic port forwarding rules with start-stop,port forwarding,must,yes,yes,S09 S10 F06
-SFTP dual pane (local or host on each side),sftp,must,yes,no,S21
-SFTP drag-and-drop transfers with progress,sftp,must,yes,no,S21 S22 F07
-SFTP rename delete new folder hidden files typed path,sftp,must,yes,no,S21; rename/delete not in Termius docs but expected
+SFTP dual pane (local or host on each side),sftp,must,yes,yes,S21
+SFTP drag-and-drop transfers with progress,sftp,must,yes,yes,S21 S22 F07
+SFTP rename delete new folder hidden files typed path,sftp,must,yes,yes,S21; rename/delete not in Termius docs but expected
 Settings: appearance terminal font shortcuts,settings,must,yes,yes,S23
 Workspaces: split view up to 16 panes,workspaces,should,yes,no,S19 F09
 Workspaces: focus mode toggle,workspaces,should,yes,no,S19
@@ -39,8 +39,8 @@ Save workspace as template and reopen,workspaces,should,yes,no,S19 source 11
 Drag a tab onto another to make a workspace,workspaces,should,yes,no,source 11
 Run snippet on multiple hosts (opens workspace),snippets,should,yes,no,S13 F08
 SFTP edit remote file locally and prompt to re-upload,sftp,should,yes,no,F07 source 5
-SFTP transfer conflicts (replace / keep both / skip),sftp,should,yes,no,S22
-SFTP permissions (chmod),sftp,should,unknown,no,not in Termius docs; expected by users
+SFTP transfer conflicts (replace / keep both / skip),sftp,should,yes,yes,S22
+SFTP permissions (chmod),sftp,should,unknown,yes,not in Termius docs; expected by users
 Environment variables per host/group (SendEnv),hosts,should,yes,no,source 12
 SOCKS5 / HTTP proxy per host,hosts,should,yes,no,source 2
 SSH agent forwarding,hosts,should,yes,no,source 2

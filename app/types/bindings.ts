@@ -43,6 +43,23 @@ export const commands = {
 	 *  (host key, password) arrive on `events`, and answers go to `session_respond`.
 	 */
 	keyExportToHost: (keyId: string, hostId: string, dir: string, fileName: string, events: Channel<SessionEvent_Deserialize>) => typedError<SessionOpened, AppError>(__TAURI_INVOKE("key_export_to_host", { keyId, hostId, dir, fileName, events })),
+	/**
+	 *  Opens an SFTP session on a host. The caller picks `open_id` so it can answer host-key and
+	 *  password questions (events on `events`, answers to `sftp_respond`) before this call returns.
+	 */
+	sftpOpen: (openId: string, hostId: string, events: Channel<SessionEvent_Deserialize>) => typedError<SftpOpened, AppError>(__TAURI_INVOKE("sftp_open", { openId, hostId, events })),
+	sftpRespond: (openId: string, promptId: string, answer: PromptAnswer_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("sftp_respond", { openId, promptId, answer })),
+	sftpClose: (sftpId: string) => __TAURI_INVOKE<void>("sftp_close", { sftpId }),
+	fsHome: (endpoint: string) => typedError<string, AppError>(__TAURI_INVOKE("fs_home", { endpoint })),
+	fsList: (endpoint: string, path: string, showHidden: boolean) => typedError<FsEntry_Serialize[], AppError>(__TAURI_INVOKE("fs_list", { endpoint, path, showHidden })),
+	fsMkdir: (endpoint: string, path: string) => typedError<null, AppError>(__TAURI_INVOKE("fs_mkdir", { endpoint, path })),
+	fsRename: (endpoint: string, from: string, to: string) => typedError<null, AppError>(__TAURI_INVOKE("fs_rename", { endpoint, from, to })),
+	fsRemove: (endpoint: string, path: string) => typedError<null, AppError>(__TAURI_INVOKE("fs_remove", { endpoint, path })),
+	fsChmod: (endpoint: string, path: string, mode: number) => typedError<null, AppError>(__TAURI_INVOKE("fs_chmod", { endpoint, path, mode })),
+	/**  Queues copies between any two places. Progress, conflicts and the end arrive on `events`. */
+	transferStart: (items: TransferItem[], events: Channel<TransferEvent_Deserialize>) => typedError<TransferStarted, AppError>(__TAURI_INVOKE("transfer_start", { items, events })),
+	transferResolve: (transferId: string, choice: Choice, applyToAll: boolean) => typedError<null, AppError>(__TAURI_INVOKE("transfer_resolve", { transferId, choice, applyToAll })),
+	transferCancel: (transferId: string) => typedError<null, AppError>(__TAURI_INVOKE("transfer_cancel", { transferId })),
 	forwardsList: () => typedError<ForwardSummary_Serialize[], AppError>(__TAURI_INVOKE("forwards_list")),
 	forwardSave: (input: ForwardInput_Deserialize) => typedError<ForwardSummary_Serialize, AppError>(__TAURI_INVOKE("forward_save", { input })),
 	forwardDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("forward_delete", { id })),
@@ -94,6 +111,10 @@ export type AppInfo = {
 export type AutoLockWarning = {
 	seconds_left: number,
 };
+
+export type Choice = "replace" | "keep_both" | "skip";
+
+export type EntryKind = "file" | "dir" | "other";
 
 /**  Codes from replica/architecture.md. Add new ones there first. */
 export type ErrorCode = "locked" | "wrong_password" | "too_many_attempts" | 
@@ -168,6 +189,37 @@ export type ForwardSummary_Serialize = {
 	state: TunnelState,
 	connections: number,
 	error: string | null,
+};
+
+/**  One row in a file pane. */
+export type FsEntry = FsEntry_Serialize | FsEntry_Deserialize;
+
+/**  One row in a file pane. */
+export type FsEntry_Deserialize = {
+	name: string,
+	kind: EntryKind,
+	/**  A symbolic link (`kind` describes what it points at). */
+	symlink: boolean,
+	/**  Bytes. Exported as `number`: file sizes stay far below 2^53. */
+	size: number | null,
+	/**  Modified time, epoch ms. */
+	mtime?: number | null,
+	/**  Unix permission bits (e.g. 0o644), if the place reports them. */
+	mode?: number | null,
+};
+
+/**  One row in a file pane. */
+export type FsEntry_Serialize = {
+	name: string,
+	kind: EntryKind,
+	/**  A symbolic link (`kind` describes what it points at). */
+	symlink: boolean,
+	/**  Bytes. Exported as `number`: file sizes stay far below 2^53. */
+	size: number | null,
+	/**  Modified time, epoch ms. */
+	mtime: number | null,
+	/**  Unix permission bits (e.g. 0o644), if the place reports them. */
+	mode: number | null,
 };
 
 export type GenerateInput = GenerateInput_Serialize | GenerateInput_Deserialize;
@@ -630,6 +682,13 @@ export type SessionOpened = {
 
 export type SessionState = "connecting" | "authenticating" | "ready" | "disconnected" | "closed";
 
+export type SftpOpened = {
+	sftp_id: string,
+	/**  The folder a new pane starts in. */
+	home: string,
+	label: string,
+};
+
 export type SnippetInput = SnippetInput_Serialize | SnippetInput_Deserialize;
 
 export type SnippetInput_Deserialize = {
@@ -678,6 +737,31 @@ export type SnippetsAll_Deserialize = {
 export type SnippetsAll_Serialize = {
 	packages: PackageSummary[],
 	snippets: SnippetSummary_Serialize[],
+};
+
+export type TransferEvent = TransferEvent_Serialize | TransferEvent_Deserialize;
+
+export type TransferEvent_Deserialize = 
+/**  An item (a file, or a whole folder) is about to be copied. `total` is its size in bytes. */
+{ type: "started"; item: number; name: string; total: number | null } | { type: "progress"; item: number; bytes: number | null; total: number | null } | 
+/**  The destination already has a file with this name. Answer with `transfer_resolve`. */
+{ type: "conflict"; item: number; name: string; src_size: number | null; src_mtime?: number | null; dest_size: number | null; dest_mtime?: number | null } | { type: "item_done"; item: number } | { type: "item_failed"; item: number; message: string } | { type: "done"; cancelled: boolean };
+
+export type TransferEvent_Serialize = 
+/**  An item (a file, or a whole folder) is about to be copied. `total` is its size in bytes. */
+{ type: "started"; item: number; name: string; total: number | null } | { type: "progress"; item: number; bytes: number | null; total: number | null } | 
+/**  The destination already has a file with this name. Answer with `transfer_resolve`. */
+{ type: "conflict"; item: number; name: string; src_size: number | null; src_mtime: number | null; dest_size: number | null; dest_mtime: number | null } | { type: "item_done"; item: number } | { type: "item_failed"; item: number; message: string } | { type: "done"; cancelled: boolean };
+
+export type TransferItem = {
+	src_endpoint: string,
+	src_path: string,
+	dst_endpoint: string,
+	dst_dir: string,
+};
+
+export type TransferStarted = {
+	transfer_id: string,
 };
 
 /**  A port-forward rule changed state or connection count (S09). */

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // S02 Hosts. The full app shell (tabs, all vault sections) arrives in P7; until then this page
 // carries a small Hosts-only sidebar so the layout already matches the canvas.
-import { Code2, KeyRound, Lock, Server, Settings, ShieldCheck, Vault, Waypoints } from '@lucide/vue'
+import { ArrowDownUp, Code2, KeyRound, Lock, Server, Settings, ShieldCheck, Vault, Waypoints } from '@lucide/vue'
 import { buttonVariants } from '@/components/ui/button'
 import type { Session } from '~/stores/sessions'
 
@@ -11,6 +11,7 @@ const sessions = useSessionsStore()
 const keychain = useKeychainStore()
 const snippetsStore = useSnippetsStore()
 const forwardsStore = useForwardsStore()
+const sftpStore = useSftpStore()
 const settings = useSettingsStore()
 const section = ref<'hosts' | 'keychain' | 'forwards' | 'snippets' | 'known-hosts' | 'settings'>('hosts')
 const paletteOpen = ref(false)
@@ -28,6 +29,7 @@ onBeforeUnmount(() => {
   keychain.clear()
   snippetsStore.clear()
   forwardsStore.clear()
+  sftpStore.clear()
   sessions.clear()
 })
 
@@ -80,6 +82,7 @@ function onPaletteAction(name: string) {
   if (name === 'new-host') newHost()
   else if (name === 'new-tab') sessions.openNewTab()
   else if (name === 'lock') vault.lock()
+  else if (name === 'sftp') sessions.activeKey = 'sftp'
   else go(name === 'vault' ? 'hosts' : name as typeof section.value)
 }
 function onShortcut(e: KeyboardEvent) {
@@ -106,6 +109,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
       <AppTab label="Vault" :active="sessions.activeKey === null" @select="sessions.activeKey = null">
         <template #leading><Vault class="size-4" aria-hidden="true" /></template>
       </AppTab>
+      <AppTab label="SFTP" :active="sessions.activeKey === 'sftp'" @select="sessions.activeKey = 'sftp'">
+        <template #leading><ArrowDownUp class="size-4" aria-hidden="true" /></template>
+      </AppTab>
       <AppTab
         v-for="s in sessions.sessions"
         :key="s.key"
@@ -124,6 +130,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
       <div v-for="s in sessions.sessions" v-show="sessions.activeKey === s.key" :key="s.key" class="absolute inset-0">
         <SessionPane :session="s" :active="sessions.activeKey === s.key" @edit-host="editHost" @new-host="newHost" />
       </div>
+
+      <div v-show="sessions.activeKey === 'sftp'" class="absolute inset-0"><SftpView /></div>
 
       <div v-show="sessions.activeKey === null" class="flex size-full">
         <div class="flex w-[220px] shrink-0 flex-col border-r border-border bg-surface">

@@ -27,7 +27,7 @@ export interface Session {
 export const useSessionsStore = defineStore('sessions', () => {
   const api = useTauri()
   const sessions = ref<Session[]>([])
-  /** `null` = the Vault view is showing. */
+  /** `null` = the Vault view is showing, `'sftp'` = the SFTP tab. */
   const activeKey = ref<string | null>(null)
 
   // Output that arrives before its terminal is mounted waits here. Not reactive on purpose.
@@ -122,10 +122,11 @@ export const useSessionsStore = defineStore('sessions', () => {
     activeKey.value = sess.key
   }
 
-  /** 1 = the Vault view, 2.. = the open tabs in order (⌘1-⌘9). */
+  /** 1 = the Vault view, 2 = SFTP, 3.. = the open tabs in order (⌘1-⌘9). */
   function activateNth(n: number) {
     if (n === 1) activeKey.value = null
-    else if (sessions.value[n - 2]) activeKey.value = sessions.value[n - 2]!.key
+    else if (n === 2) activeKey.value = 'sftp'
+    else if (sessions.value[n - 3]) activeKey.value = sessions.value[n - 3]!.key
   }
 
   /** TerminalView calls this once xterm exists; buffered output is replayed in order. */

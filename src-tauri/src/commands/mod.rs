@@ -5,6 +5,7 @@ pub mod hosts;
 pub mod keychain;
 pub mod session;
 pub mod settings;
+pub mod sftp;
 pub mod snippets;
 pub mod tunnels;
 pub mod vault;

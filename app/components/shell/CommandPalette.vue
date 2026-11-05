@@ -1,11 +1,11 @@
 <script setup lang="ts">
 // S17: jump to a host, a tab or an action. Built on the shadcn Command (Reka listbox) dialog.
-import { Code2, KeyRound, Waypoints, Lock, Plus, Server, Settings, ShieldCheck, SquareTerminal, Vault } from '@lucide/vue'
+import { ArrowDownUp, Code2, KeyRound, Waypoints, Lock, Plus, Server, Settings, ShieldCheck, SquareTerminal, Vault } from '@lucide/vue'
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator, CommandShortcut } from '@/components/ui/command'
 import type { HostSummary } from '~/types/bindings'
 
 const open = defineModel<boolean>('open', { required: true })
-const emit = defineEmits<{ action: [name: 'new-host' | 'new-tab' | 'keychain' | 'forwards' | 'snippets' | 'known-hosts' | 'settings' | 'lock' | 'vault'] }>()
+const emit = defineEmits<{ action: [name: 'new-host' | 'new-tab' | 'sftp' | 'keychain' | 'forwards' | 'snippets' | 'known-hosts' | 'settings' | 'lock' | 'vault'] }>()
 const hosts = useHostsStore()
 const sessions = useSessionsStore()
 
@@ -42,6 +42,7 @@ const openTabs = computed(() => sessions.sessions.filter(s => s.kind === 'sessio
         <CommandItem value="action new host add" @select="act('new-host')"><Plus />New host<CommandShortcut>⌘N</CommandShortcut></CommandItem>
         <CommandItem value="action new tab" @select="act('new-tab')"><Plus />New tab<CommandShortcut>⌘T</CommandShortcut></CommandItem>
         <CommandItem value="action vault hosts" @select="act('vault')"><Vault />Go to Hosts<CommandShortcut>⌘1</CommandShortcut></CommandItem>
+        <CommandItem value="action sftp files transfer" @select="act('sftp')"><ArrowDownUp />Go to SFTP</CommandItem>
         <CommandItem value="action keychain keys identities" @select="act('keychain')"><KeyRound />Go to Keychain</CommandItem>
         <CommandItem value="action port forwarding tunnels" @select="act('forwards')"><Waypoints />Go to Port forwarding</CommandItem>
         <CommandItem value="action snippets scripts" @select="act('snippets')"><Code2 />Go to Snippets</CommandItem>

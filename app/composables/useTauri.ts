@@ -1,7 +1,7 @@
 // The only place that talks to Rust. Stores call these wrappers, never `invoke` directly.
 import { Channel } from '@tauri-apps/api/core'
 import { commands } from '~/types/bindings'
-import type { AppError, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, KeyUpdate, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
+import type { AppError, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, KeyUpdate, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -50,6 +50,27 @@ export function useTauri() {
     sessionRespond: (id: string, promptId: string, answer: PromptAnswer) => unwrap(commands.sessionRespond(id, promptId, answer)),
     sessionClose: (id: string) => commands.sessionClose(id),
     sessionReconnect: (id: string) => unwrap(commands.sessionReconnect(id)),
+    /** The caller picks `openId` so it can answer host-key and password questions while this runs. */
+    sftpOpen: (openId: string, hostId: string, onEvent: (e: SessionEvent) => void) => {
+      const events = new Channel<SessionEvent>()
+      events.onmessage = onEvent
+      return unwrap(commands.sftpOpen(openId, hostId, events as never))
+    },
+    sftpRespond: (openId: string, promptId: string, answer: PromptAnswer) => unwrap(commands.sftpRespond(openId, promptId, answer)),
+    sftpClose: (sftpId: string) => commands.sftpClose(sftpId),
+    fsHome: (endpoint: string) => unwrap(commands.fsHome(endpoint)),
+    fsList: (endpoint: string, path: string, showHidden: boolean) => unwrap(commands.fsList(endpoint, path, showHidden)),
+    fsMkdir: (endpoint: string, path: string) => unwrap(commands.fsMkdir(endpoint, path)),
+    fsRename: (endpoint: string, from: string, to: string) => unwrap(commands.fsRename(endpoint, from, to)),
+    fsRemove: (endpoint: string, path: string) => unwrap(commands.fsRemove(endpoint, path)),
+    fsChmod: (endpoint: string, path: string, mode: number) => unwrap(commands.fsChmod(endpoint, path, mode)),
+    transferStart: (items: TransferItem[], onEvent: (e: TransferEvent) => void) => {
+      const events = new Channel<TransferEvent>()
+      events.onmessage = onEvent
+      return unwrap(commands.transferStart(items, events as never))
+    },
+    transferResolve: (id: string, choice: Choice, applyToAll: boolean) => unwrap(commands.transferResolve(id, choice, applyToAll)),
+    transferCancel: (id: string) => unwrap(commands.transferCancel(id)),
     forwardsList: () => unwrap(commands.forwardsList()),
     forwardSave: (input: ForwardInput) => unwrap(commands.forwardSave(input)),
     forwardDelete: (id: string) => unwrap(commands.forwardDelete(id)),

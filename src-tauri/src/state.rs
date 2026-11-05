@@ -81,6 +81,8 @@ pub struct AppState {
     pub sessions: crate::ssh::SessionManager,
     /// Running port-forward rules (P9). Stopped when the vault locks.
     pub tunnels: crate::tunnels::TunnelManager,
+    /// Open SFTP sessions and running transfers (P10). Ended when the vault locks.
+    pub sftp: crate::sftp::SftpManager,
 }
 
 impl AppState {
@@ -93,6 +95,7 @@ impl AppState {
             warned: AtomicBool::new(false),
             sessions: crate::ssh::SessionManager::default(),
             tunnels: crate::tunnels::TunnelManager::default(),
+            sftp: crate::sftp::SftpManager::default(),
         }
     }
 
@@ -143,6 +146,7 @@ impl AppState {
         if locking {
             self.sessions.close_all(); // locking ends every live session
             self.tunnels.stop_all(); // ...and every tunnel
+            self.sftp.close_all(); // ...and every file session
         }
         self.touch();
     }
