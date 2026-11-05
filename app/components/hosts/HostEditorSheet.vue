@@ -20,11 +20,10 @@ const open = computed({
 const host = computed(() => (hosts.editing && hosts.editing !== 'new' ? hosts.editing : null))
 
 const api = useTauri()
-/** Variables from the groups above, and whether this item's own were loaded (so a failed load can't wipe them on save). */
 /** SSH and Mosh both sign in over SSH, so they share the credential, connection and proxy sections. */
 const sshLike = computed(() => form.protocol === 'ssh' || form.protocol === 'mosh')
 const serialPorts = ref<string[]>([])
-watch(() => form.protocol, async (p) => { if (p === 'serial' && !serialPorts.value.length) serialPorts.value = await api.serialPorts().catch(() => []) })
+/** Variables from the groups above, and whether this item's own were loaded (so a failed load can't wipe them on save). */
 const envInherited = ref<InheritedVar[]>([])
 const agentInfo = ref<AgentConfig | null>(null)
 const proxyInherited = ref<{ inherited: string | null, inherited_from: string | null } | null>(null)
@@ -52,6 +51,8 @@ async function loadEnv(id: string) {
 
 const blank = () => ({ label: '', address: '', port: '' as number | string, username: '', password: '', group_id: hosts.currentGroupId as string | null, tags: [] as string[], identity_id: null as string | null, key_id: null as string | null, startup_snippet_id: null as string | null, jump_mode: 'inherit', jump_host_ids: [] as string[], terminal_theme: null as string | null, env_mode: 'inherit', env_vars: [] as EnvVar[], proxy: { kind: 'inherit', host: '', port: null } as ProxyChoice, agent: 'inherit', protocol: 'ssh', serial: { baud: 9600, data_bits: 8, stop_bits: 1, parity: 'none', flow: 'none' } as SerialConfig })
 const form = reactive(blank())
+// Must come after `form`: a watch reads its getter straight away.
+watch(() => form.protocol, async (p) => { if (p === 'serial' && !serialPorts.value.length) serialPorts.value = await api.serialPorts().catch(() => []) })
 const clearPassword = ref(false)
 const error = ref('')
 const busy = ref(false)
