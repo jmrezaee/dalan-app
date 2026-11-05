@@ -194,6 +194,7 @@ Prompt     { prompt_id, kind: host_key_new    { host, key_type, fingerprint }
                              | password | passphrase { key_label } | keyboard_interactive { name, instructions, fields[] } }
 Error      { code, message }                         (auth_failed, host_unreachable, kex_failed, ...)
 Exit       { status? }
+Hop        { via: ["bastion", ...] }                 (jump hosts in order, once, before the first hop connects)
 OsDetected { os }
 ```
 

@@ -8,6 +8,8 @@ import type { HostSummary } from '~/types/bindings'
 
 const hosts = useHostsStore()
 const keychain = useKeychainStore()
+const snippets = useSnippetsStore()
+const snippetOptions = computed(() => snippets.snippets.map(s => ({ value: s.id, label: s.label })))
 const identityOptions = computed(() => keychain.identities.map(i => ({ value: i.id, label: `${i.label}  ·  ${i.username}` })))
 const keyOptions = computed(() => keychain.keys.map(k => ({ value: k.id, label: `${k.label}  ·  ${k.key_type}` })))
 
@@ -17,7 +19,7 @@ const open = computed({
 })
 const host = computed(() => (hosts.editing && hosts.editing !== 'new' ? hosts.editing : null))
 
-const blank = () => ({ label: '', address: '', port: '' as number | string, username: '', password: '', group_id: hosts.currentGroupId as string | null, tags: [] as string[], identity_id: null as string | null, key_id: null as string | null })
+const blank = () => ({ label: '', address: '', port: '' as number | string, username: '', password: '', group_id: hosts.currentGroupId as string | null, tags: [] as string[], identity_id: null as string | null, key_id: null as string | null, startup_snippet_id: null as string | null, jump_mode: 'inherit', jump_host_ids: [] as string[] })
 const form = reactive(blank())
 const clearPassword = ref(false)
 const error = ref('')
@@ -30,7 +32,7 @@ const dirty = computed(() => current.value !== snapshot.value)
 // Reset the form each time the sheet opens, from the host being edited (or blank, in the group you are viewing).
 watch(() => hosts.editing, (e) => {
   const h = e && e !== 'new' ? (e as HostSummary) : null
-  Object.assign(form, h ? { label: h.label, address: h.address, port: h.port ?? '', username: h.username ?? '', password: '', group_id: h.group_id, tags: [...h.tags], identity_id: h.identity_id, key_id: h.key_id } : blank())
+  Object.assign(form, h ? { label: h.label, address: h.address, port: h.port ?? '', username: h.username ?? '', password: '', group_id: h.group_id, tags: [...h.tags], identity_id: h.identity_id, key_id: h.key_id, startup_snippet_id: h.startup_snippet_id, jump_mode: h.jump_mode, jump_host_ids: [...h.jump_host_ids] } : blank())
   clearPassword.value = false
   error.value = ''
   snapshot.value = current.value
@@ -54,6 +56,9 @@ async function submit() {
     tags: form.tags,
     identity_id: form.identity_id,
     key_id: form.key_id,
+    startup_snippet_id: form.startup_snippet_id,
+    jump_mode: form.jump_mode,
+    jump_host_ids: form.jump_host_ids,
   })
   busy.value = false
   if (!error.value) hosts.editing = null
@@ -135,6 +140,30 @@ async function submit() {
             </button>
             <p v-else-if="clearPassword" class="text-xs text-muted">The saved password is removed when you save.</p>
             <p v-if="!hasOwnPassword && !form.password && inherited.password" class="text-xs text-muted">Uses the password from {{ inherited.password }}. Type one here to override it.</p>
+          </div>
+        </section>
+
+        <section class="flex flex-col gap-3">
+          <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">Connection</h3>
+          <div class="flex flex-col gap-1.5">
+            <Label>Jump hosts</Label>
+            <ChainPicker
+              v-model:mode="form.jump_mode"
+              v-model:ids="form.jump_host_ids"
+              :options="hosts.hosts.filter(h => h.id !== host?.id)"
+              :inherited-ids="inherited.jump?.host_ids ?? []"
+              :inherited-from="inherited.jump?.group"
+              :target="form.label"
+            />
+          </div>
+        </section>
+
+        <section class="flex flex-col gap-3">
+          <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">On connect</h3>
+          <div class="flex flex-col gap-1.5">
+            <Label for="host-startup">Startup snippet</Label>
+            <OptionSelect id="host-startup" v-model="form.startup_snippet_id" :options="snippetOptions" none-label="None" />
+            <p v-if="!form.startup_snippet_id && inherited.startup_snippet" class="text-xs text-muted">Runs {{ snippets.snippetLabel(inherited.startup_snippet.value) ?? 'a snippet' }} from {{ inherited.startup_snippet.group }}.</p>
           </div>
         </section>
 

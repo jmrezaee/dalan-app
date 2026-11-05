@@ -23,13 +23,18 @@ pub struct GroupRow {
     pub password_secret_id: Option<String>,
     pub key_id: Option<String>,
     pub identity_id: Option<String>,
+    pub profile_id: String,
+    /// `custom` / `none`, or `None` = inherit.
+    pub chain_mode: Option<String>,
+    pub jump_host_ids: Vec<String>,
+    pub startup_snippet_id: Option<String>,
 }
 
 pub type GroupMap = HashMap<String, GroupRow>;
 
 pub fn load(conn: &Connection, vault_id: &str) -> AppResult<GroupMap> {
     let mut st = conn.prepare(
-        "SELECT g.id, g.parent_id, g.label, p.username, p.ssh_port, p.password_secret_id, p.key_id, p.identity_id
+        "SELECT g.id, g.parent_id, g.label, p.username, p.ssh_port, p.password_secret_id, p.key_id, p.identity_id, g.profile_id, p.chain_mode, p.startup_snippet_id
          FROM groups g JOIN connection_profiles p ON p.id = g.profile_id WHERE g.vault_id = ?1",
     )?;
     let rows = st
@@ -43,10 +48,36 @@ pub fn load(conn: &Connection, vault_id: &str) -> AppResult<GroupMap> {
                 password_secret_id: r.get(5)?,
                 key_id: r.get(6)?,
                 identity_id: r.get(7)?,
+                profile_id: r.get(8)?,
+                chain_mode: r.get(9)?,
+                jump_host_ids: Vec::new(),
+                startup_snippet_id: r.get(10)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(rows.into_iter().map(|g| (g.id.clone(), g)).collect())
+    let mut jumps = load_jumps(conn, vault_id)?;
+    Ok(rows
+        .into_iter()
+        .map(|mut g| {
+            g.jump_host_ids = jumps.remove(&g.profile_id).unwrap_or_default();
+            (g.id.clone(), g)
+        })
+        .collect())
+}
+
+/// Ordered jump-host ids per profile id.
+pub fn load_jumps(conn: &Connection, vault_id: &str) -> AppResult<HashMap<String, Vec<String>>> {
+    let mut st = conn.prepare(
+        "SELECT j.profile_id, j.jump_host_id FROM profile_jump_hosts j JOIN connection_profiles p ON p.id = j.profile_id WHERE p.vault_id = ?1 ORDER BY j.profile_id, j.position",
+    )?;
+    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    for row in st.query_map([vault_id], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+    })? {
+        let (p, h) = row?;
+        out.entry(p).or_default().push(h);
+    }
+    Ok(out)
 }
 
 /// What an identity (S07) contributes at the level where it is chosen.
@@ -88,6 +119,9 @@ pub struct Level<'a> {
     pub password_secret_id: Option<&'a str>,
     pub key_id: Option<&'a str>,
     pub identity_id: Option<&'a str>,
+    pub chain_mode: Option<&'a str>,
+    pub jump: &'a [String],
+    pub startup_snippet_id: Option<&'a str>,
 }
 
 impl<'a> From<&'a GroupRow> for Level<'a> {
@@ -99,6 +133,9 @@ impl<'a> From<&'a GroupRow> for Level<'a> {
             password_secret_id: g.password_secret_id.as_deref(),
             key_id: g.key_id.as_deref(),
             identity_id: g.identity_id.as_deref(),
+            chain_mode: g.chain_mode.as_deref(),
+            jump: &g.jump_host_ids,
+            startup_snippet_id: g.startup_snippet_id.as_deref(),
         }
     }
 }
@@ -116,6 +153,9 @@ pub struct Resolved {
     pub port: Option<Sourced<u16>>,
     pub password_secret_id: Option<Sourced<String>>,
     pub key_id: Option<Sourced<String>>,
+    /// The jump chain in force (empty = connect directly), and where it was set.
+    pub jump: Option<Sourced<Vec<String>>>,
+    pub startup_snippet_id: Option<Sourced<String>>,
 }
 
 /// The groups above `start`, nearest first. The step limit stops a corrupt cycle from looping forever.
@@ -161,6 +201,29 @@ pub fn resolve(levels: &[Level], identities: &IdentityMap) -> Resolved {
                 .or(ident.and_then(|i| i.password_secret_id.clone()))
                 .map(src);
         }
+        if r.jump.is_none() {
+            match l.chain_mode {
+                Some("custom") => {
+                    r.jump = Some(Sourced {
+                        value: l.jump.to_vec(),
+                        from: from.clone(),
+                    })
+                }
+                Some("none") => {
+                    r.jump = Some(Sourced {
+                        value: Vec::new(),
+                        from: from.clone(),
+                    })
+                }
+                _ => {}
+            }
+        }
+        if r.startup_snippet_id.is_none() {
+            r.startup_snippet_id = l.startup_snippet_id.map(|s| Sourced {
+                value: s.to_string(),
+                from: from.clone(),
+            });
+        }
         if r.key_id.is_none() {
             r.key_id = l
                 .key_id
@@ -194,6 +257,15 @@ pub struct Inherited {
     pub password: Option<String>,
     /// The inherited key: `value` is the key's id (the UI looks up its label).
     pub key: Option<InheritedText>,
+    pub jump: Option<InheritedJump>,
+    /// The inherited startup snippet: `value` is the snippet's id.
+    pub startup_snippet: Option<InheritedText>,
+}
+
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct InheritedJump {
+    pub host_ids: Vec<String>,
+    pub group: String,
 }
 
 impl From<&Resolved> for Inherited {
@@ -212,6 +284,13 @@ impl From<&Resolved> for Inherited {
             }),
             password: r.password_secret_id.as_ref().and_then(|p| p.from.clone()),
             key: text(&r.key_id),
+            jump: r.jump.as_ref().and_then(|j| {
+                Some(InheritedJump {
+                    host_ids: j.value.clone(),
+                    group: j.from.clone()?,
+                })
+            }),
+            startup_snippet: text(&r.startup_snippet_id),
         }
     }
 }
@@ -226,6 +305,10 @@ pub struct GroupSummary {
     pub has_password: bool,
     pub key_id: Option<String>,
     pub identity_id: Option<String>,
+    pub startup_snippet_id: Option<String>,
+    /// `inherit`, `none` or `custom`.
+    pub jump_mode: String,
+    pub jump_host_ids: Vec<String>,
     /// Hosts in this group and everything below it.
     pub host_count: u32,
     pub group_count: u32,
@@ -273,6 +356,9 @@ pub fn list(conn: &Connection, vault_id: &str) -> AppResult<Vec<GroupSummary>> {
             group_count: children.get(g.id.as_str()).copied().unwrap_or(0),
             key_id: g.key_id.clone(),
             identity_id: g.identity_id.clone(),
+            startup_snippet_id: g.startup_snippet_id.clone(),
+            jump_mode: g.chain_mode.clone().unwrap_or_else(|| "inherit".into()),
+            jump_host_ids: g.jump_host_ids.clone(),
             inherited: Inherited::from(&resolve(&chain(&map, g.parent_id.as_deref()), &identities)),
         })
         .collect();
@@ -291,6 +377,61 @@ pub struct GroupInput {
     pub clear_password: bool,
     pub key_id: Option<String>,
     pub identity_id: Option<String>,
+    pub startup_snippet_id: Option<String>,
+    /// `inherit`, `none` or `custom`.
+    pub jump_mode: String,
+    pub jump_host_ids: Vec<String>,
+}
+
+/// Checks a jump chain and returns what to store: the mode column (`None` = inherit) and the hops.
+/// `self_host` is the host being edited, which can't be its own jump host.
+pub fn check_jump(
+    conn: &Connection,
+    vault_id: &str,
+    mode: &str,
+    ids: &[String],
+    self_host: Option<&str>,
+) -> AppResult<(Option<&'static str>, Vec<String>)> {
+    match mode {
+        "inherit" => Ok((None, Vec::new())),
+        "none" => Ok((Some("none"), Vec::new())),
+        "custom" => {
+            let mut seen = std::collections::HashSet::new();
+            for id in ids {
+                if Some(id.as_str()) == self_host {
+                    return Err(AppError::validation("A host can't be its own jump host."));
+                }
+                if !seen.insert(id) {
+                    return Err(AppError::validation("Each jump host can appear once."));
+                }
+                let ok: bool = conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM hosts WHERE id = ?1 AND vault_id = ?2)",
+                    params![id, vault_id],
+                    |r| r.get(0),
+                )?;
+                if !ok {
+                    return Err(AppError::validation("A jump host no longer exists."));
+                }
+            }
+            Ok((Some("custom"), ids.to_vec()))
+        }
+        _ => Err(AppError::validation("Unknown jump host setting.")),
+    }
+}
+
+/// Replaces a profile's jump rows.
+pub fn write_jumps(tx: &Transaction, profile_id: &str, ids: &[String]) -> AppResult<()> {
+    tx.execute(
+        "DELETE FROM profile_jump_hosts WHERE profile_id = ?1",
+        [profile_id],
+    )?;
+    for (i, id) in ids.iter().enumerate() {
+        tx.execute(
+            "INSERT INTO profile_jump_hosts (profile_id, position, jump_host_id) VALUES (?1, ?2, ?3)",
+            params![profile_id, i as i64, id],
+        )?;
+    }
+    Ok(())
 }
 
 /// True if `candidate` is `id` itself or sits somewhere below it (a move there would make a cycle).
@@ -353,6 +494,13 @@ pub fn save(
         .filter(|u| !u.is_empty())
         .map(String::from);
     let password = input.password.as_deref().filter(|p| !p.is_empty());
+    let (chain_mode, jumps) = check_jump(
+        conn,
+        &s.vault_id,
+        &input.jump_mode,
+        &input.jump_host_ids,
+        None,
+    )?;
     let map = load(conn, &s.vault_id)?;
     if let Some(p) = &input.parent_id {
         if !map.contains_key(p) {
@@ -376,13 +524,14 @@ pub fn save(
             );
             let (secret, _) = next_secret(&tx, s, None, password, false)?;
             tx.execute(
-                "INSERT INTO connection_profiles (id, vault_id, username, password_secret_id, ssh_port, key_id, identity_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
-                params![pid, s.vault_id, username, secret, input.port, input.key_id, input.identity_id, now],
+                "INSERT INTO connection_profiles (id, vault_id, username, password_secret_id, ssh_port, key_id, identity_id, chain_mode, startup_snippet_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+                params![pid, s.vault_id, username, secret, input.port, input.key_id, input.identity_id, chain_mode, input.startup_snippet_id, now],
             )?;
             tx.execute(
                 "INSERT INTO groups (id, vault_id, parent_id, profile_id, label, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
                 params![gid, s.vault_id, input.parent_id, pid, label, now],
             )?;
+            write_jumps(&tx, &pid, &jumps)?;
             gid
         }
         Some(id) => {
@@ -396,12 +545,13 @@ pub fn save(
                 .ok_or_else(|| AppError::not_found("That group no longer exists."))?;
             let (secret, orphan) = next_secret(&tx, s, old, password, input.clear_password)?;
             tx.execute(
-                "UPDATE connection_profiles SET username = ?1, password_secret_id = ?2, ssh_port = ?3, key_id = ?4, identity_id = ?5, updated_at = ?6 WHERE id = ?7",
-                params![username, secret, input.port, input.key_id, input.identity_id, now, pid],
+                "UPDATE connection_profiles SET username = ?1, password_secret_id = ?2, ssh_port = ?3, key_id = ?4, identity_id = ?5, chain_mode = ?6, startup_snippet_id = ?7, updated_at = ?8 WHERE id = ?9",
+                params![username, secret, input.port, input.key_id, input.identity_id, chain_mode, input.startup_snippet_id, now, pid],
             )?;
             if let Some(o) = orphan {
                 secrets::delete(&tx, s, &o)?;
             }
+            write_jumps(&tx, &pid, &jumps)?;
             tx.execute(
                 "UPDATE groups SET label = ?1, parent_id = ?2, updated_at = ?3 WHERE id = ?4",
                 params![label, input.parent_id, now, id],
@@ -501,6 +651,9 @@ mod tests {
                 clear_password: false,
                 key_id: None,
                 identity_id: None,
+                startup_snippet_id: None,
+                jump_mode: "inherit".into(),
+                jump_host_ids: vec![],
             },
         )
         .unwrap()
@@ -526,6 +679,9 @@ mod tests {
                 group_id: group.map(String::from),
                 key_id: None,
                 identity_id: None,
+                startup_snippet_id: None,
+                jump_mode: "inherit".into(),
+                jump_host_ids: vec![],
                 tags: vec![],
             },
         )
@@ -556,6 +712,9 @@ mod tests {
                 clear_password: false,
                 key_id: None,
                 identity_id: None,
+                startup_snippet_id: None,
+                jump_mode: "inherit".into(),
+                jump_host_ids: vec![],
             },
         )
         .unwrap();
@@ -588,6 +747,9 @@ mod tests {
             clear_password: false,
             key_id: None,
             identity_id: None,
+            startup_snippet_id: None,
+            jump_mode: "inherit".into(),
+            jump_host_ids: vec![],
             group_id: Some(web.id.clone()),
             tags: vec![],
         };
@@ -629,6 +791,9 @@ mod tests {
                 clear_password: false,
                 key_id: None,
                 identity_id: None,
+                startup_snippet_id: None,
+                jump_mode: "inherit".into(),
+                jump_host_ids: vec![],
             },
         );
         assert!(err.is_err());
@@ -645,6 +810,9 @@ mod tests {
                 clear_password: false,
                 key_id: None,
                 identity_id: None,
+                startup_snippet_id: None,
+                jump_mode: "inherit".into(),
+                jump_host_ids: vec![],
             },
         );
         assert!(err.is_err());
@@ -727,6 +895,9 @@ mod tests {
             clear_password: false,
             key_id: None,
             identity_id: None,
+            startup_snippet_id: None,
+            jump_mode: "inherit".into(),
+            jump_host_ids: vec![],
             group_id: None,
             tags: vec!["Prod".into(), " prod ".into(), "web".into(), "".into()],
         };

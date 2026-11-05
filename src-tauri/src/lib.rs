@@ -11,6 +11,7 @@ pub mod logs;
 pub mod pty;
 pub mod settings;
 pub mod sftp;
+pub mod snippets;
 pub mod ssh;
 pub mod state;
 pub mod tunnels;
@@ -49,6 +50,11 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::session::known_hosts_list,
             commands::session::known_host_delete,
             commands::session::key_export_to_host,
+            commands::snippets::snippets_list,
+            commands::snippets::snippet_save,
+            commands::snippets::snippet_delete,
+            commands::snippets::package_save,
+            commands::snippets::package_delete,
             commands::settings::settings_get_all,
             commands::settings::settings_set,
             commands::keychain::keys_list,

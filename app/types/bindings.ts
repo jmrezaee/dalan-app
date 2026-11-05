@@ -43,6 +43,11 @@ export const commands = {
 	 *  (host key, password) arrive on `events`, and answers go to `session_respond`.
 	 */
 	keyExportToHost: (keyId: string, hostId: string, dir: string, fileName: string, events: Channel<SessionEvent_Deserialize>) => typedError<SessionOpened, AppError>(__TAURI_INVOKE("key_export_to_host", { keyId, hostId, dir, fileName, events })),
+	snippetsList: () => typedError<SnippetsAll_Serialize, AppError>(__TAURI_INVOKE("snippets_list")),
+	snippetSave: (input: SnippetInput_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("snippet_save", { input })),
+	snippetDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("snippet_delete", { id })),
+	packageSave: (id: string | null, label: string) => typedError<null, AppError>(__TAURI_INVOKE("package_save", { id, label })),
+	packageDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("package_delete", { id })),
 	settingsGetAll: () => typedError<{ [key in string]: string }, AppError>(__TAURI_INVOKE("settings_get_all")),
 	settingsSet: (key: string, value: string) => typedError<null, AppError>(__TAURI_INVOKE("settings_set", { key, value })),
 	keysList: () => typedError<KeySummary_Serialize[], AppError>(__TAURI_INVOKE("keys_list")),
@@ -117,6 +122,10 @@ export type GroupInput_Deserialize = {
 	clear_password: boolean,
 	key_id?: string | null,
 	identity_id?: string | null,
+	startup_snippet_id?: string | null,
+	/**  `inherit`, `none` or `custom`. */
+	jump_mode: string,
+	jump_host_ids: string[],
 };
 
 export type GroupInput_Serialize = {
@@ -129,6 +138,10 @@ export type GroupInput_Serialize = {
 	clear_password: boolean,
 	key_id: string | null,
 	identity_id: string | null,
+	startup_snippet_id: string | null,
+	/**  `inherit`, `none` or `custom`. */
+	jump_mode: string,
+	jump_host_ids: string[],
 };
 
 export type GroupSummary = GroupSummary_Serialize | GroupSummary_Deserialize;
@@ -142,6 +155,10 @@ export type GroupSummary_Deserialize = {
 	has_password: boolean,
 	key_id?: string | null,
 	identity_id?: string | null,
+	startup_snippet_id?: string | null,
+	/**  `inherit`, `none` or `custom`. */
+	jump_mode: string,
+	jump_host_ids: string[],
 	/**  Hosts in this group and everything below it. */
 	host_count: number,
 	group_count: number,
@@ -158,6 +175,10 @@ export type GroupSummary_Serialize = {
 	has_password: boolean,
 	key_id: string | null,
 	identity_id: string | null,
+	startup_snippet_id: string | null,
+	/**  `inherit`, `none` or `custom`. */
+	jump_mode: string,
+	jump_host_ids: string[],
 	/**  Hosts in this group and everything below it. */
 	host_count: number,
 	group_count: number,
@@ -182,6 +203,11 @@ export type HostInput_Deserialize = {
 	group_id?: string | null,
 	key_id?: string | null,
 	identity_id?: string | null,
+	startup_snippet_id?: string | null,
+	/**  `inherit`, `none` or `custom`. */
+	jump_mode: string,
+	/**  Hops in order, for `custom`. */
+	jump_host_ids: string[],
 	/**  Tag names. Missing tags are created, and tags no host uses any more are removed. */
 	tags: string[],
 };
@@ -200,6 +226,11 @@ export type HostInput_Serialize = {
 	group_id: string | null,
 	key_id: string | null,
 	identity_id: string | null,
+	startup_snippet_id: string | null,
+	/**  `inherit`, `none` or `custom`. */
+	jump_mode: string,
+	/**  Hops in order, for `custom`. */
+	jump_host_ids: string[],
 	/**  Tag names. Missing tags are created, and tags no host uses any more are removed. */
 	tags: string[],
 };
@@ -228,6 +259,12 @@ export type HostSummary_Deserialize = {
 	key_id?: string | null,
 	identity_id?: string | null,
 	effective_key_id?: string | null,
+	startup_snippet_id?: string | null,
+	/**  `inherit`, `none` or `custom`. */
+	jump_mode: string,
+	jump_host_ids: string[],
+	/**  The chain actually used, after inheritance (empty = direct). */
+	effective_jump_host_ids: string[],
 	/**  What the host would get from its groups if it set nothing itself ("from Production"). */
 	inherited: Inherited_Deserialize,
 	/**  Epoch ms. Fits a JS number safely, so it is exported as `number` rather than bigint. */
@@ -255,6 +292,12 @@ export type HostSummary_Serialize = {
 	key_id: string | null,
 	identity_id: string | null,
 	effective_key_id: string | null,
+	startup_snippet_id: string | null,
+	/**  `inherit`, `none` or `custom`. */
+	jump_mode: string,
+	jump_host_ids: string[],
+	/**  The chain actually used, after inheritance (empty = direct). */
+	effective_jump_host_ids: string[],
 	/**  What the host would get from its groups if it set nothing itself ("from Production"). */
 	inherited: Inherited_Serialize,
 	/**  Epoch ms. Fits a JS number safely, so it is exported as `number` rather than bigint. */
@@ -336,6 +379,11 @@ export type ImportInput_Serialize = {
 /**  What this item would get if it set nothing itself. Drives the "from Production" hints. */
 export type Inherited = Inherited_Serialize | Inherited_Deserialize;
 
+export type InheritedJump = {
+	host_ids: string[],
+	group: string,
+};
+
 export type InheritedPort = {
 	value: number,
 	group: string,
@@ -355,6 +403,9 @@ export type Inherited_Deserialize = {
 	password?: string | null,
 	/**  The inherited key: `value` is the key's id (the UI looks up its label). */
 	key?: InheritedText | null,
+	jump?: InheritedJump | null,
+	/**  The inherited startup snippet: `value` is the snippet's id. */
+	startup_snippet?: InheritedText | null,
 };
 
 /**  What this item would get if it set nothing itself. Drives the "from Production" hints. */
@@ -365,6 +416,9 @@ export type Inherited_Serialize = {
 	password: string | null,
 	/**  The inherited key: `value` is the key's id (the UI looks up its label). */
 	key: InheritedText | null,
+	jump: InheritedJump | null,
+	/**  The inherited startup snippet: `value` is the snippet's id. */
+	startup_snippet: InheritedText | null,
 };
 
 export type KeyKind = "ed25519" | "ecdsa_p256" | "ecdsa_p384" | "ecdsa_p521" | "rsa4096";
@@ -449,6 +503,11 @@ export type LockReason =
 /**  Idle for longer than the auto-lock setting. */
 "idle";
 
+export type PackageSummary = {
+	id: string,
+	label: string,
+};
+
 /**  The UI's answer to a prompt. `accept: false` is Cancel. `text` carries a password. */
 export type PromptAnswer = PromptAnswer_Serialize | PromptAnswer_Deserialize;
 
@@ -481,15 +540,69 @@ export type RawBytes = number[];
 
 export type SessionEvent = SessionEvent_Serialize | SessionEvent_Deserialize;
 
-export type SessionEvent_Deserialize = { type: "state"; state: SessionState } | { type: "prompt"; prompt_id: string; kind: PromptKind } | { type: "error"; code: ErrorCode; message: string } | { type: "exit"; status?: number | null };
+export type SessionEvent_Deserialize = { type: "state"; state: SessionState } | { type: "prompt"; prompt_id: string; kind: PromptKind } | { type: "error"; code: ErrorCode; message: string } | { type: "exit"; status?: number | null } | 
+/**  The jump hosts this connection goes through, in order ("via bastion"). */
+{ type: "hop"; via: string[] };
 
-export type SessionEvent_Serialize = { type: "state"; state: SessionState } | { type: "prompt"; prompt_id: string; kind: PromptKind } | { type: "error"; code: ErrorCode; message: string } | { type: "exit"; status: number | null };
+export type SessionEvent_Serialize = { type: "state"; state: SessionState } | { type: "prompt"; prompt_id: string; kind: PromptKind } | { type: "error"; code: ErrorCode; message: string } | { type: "exit"; status: number | null } | 
+/**  The jump hosts this connection goes through, in order ("via bastion"). */
+{ type: "hop"; via: string[] };
 
 export type SessionOpened = {
 	session_id: string,
 };
 
 export type SessionState = "connecting" | "authenticating" | "ready" | "disconnected" | "closed";
+
+export type SnippetInput = SnippetInput_Serialize | SnippetInput_Deserialize;
+
+export type SnippetInput_Deserialize = {
+	id?: string | null,
+	label: string,
+	script: string,
+	package_id?: string | null,
+	target_host_ids: string[],
+};
+
+export type SnippetInput_Serialize = {
+	id: string | null,
+	label: string,
+	script: string,
+	package_id: string | null,
+	target_host_ids: string[],
+};
+
+export type SnippetSummary = SnippetSummary_Serialize | SnippetSummary_Deserialize;
+
+export type SnippetSummary_Deserialize = {
+	id: string,
+	label: string,
+	script: string,
+	package_id?: string | null,
+	/**  Hosts this snippet is normally run on (pre-ticked in the multi-host picker, P11). */
+	target_host_ids: string[],
+};
+
+export type SnippetSummary_Serialize = {
+	id: string,
+	label: string,
+	script: string,
+	package_id: string | null,
+	/**  Hosts this snippet is normally run on (pre-ticked in the multi-host picker, P11). */
+	target_host_ids: string[],
+};
+
+export type SnippetsAll = SnippetsAll_Serialize | SnippetsAll_Deserialize;
+
+export type SnippetsAll_Deserialize = {
+	packages: PackageSummary[],
+	snippets: SnippetSummary_Deserialize[],
+};
+
+export type SnippetsAll_Serialize = {
+	packages: PackageSummary[],
+	snippets: SnippetSummary_Serialize[],
+};
 
 export type VaultLocked = {
 	reason: LockReason,

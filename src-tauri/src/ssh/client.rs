@@ -134,6 +134,10 @@ fn emit_error(io: &SessionIo, code: ErrorCode, message: impl Into<String>) {
 pub struct Connected {
     pub handle: client::Handle<Client>,
     pub label: String,
+    /// The host's startup snippet, to type once the shell is ready.
+    pub startup_script: Option<String>,
+    /// The jump hosts the connection runs through. They must stay alive as long as `handle` does.
+    _hops: Vec<client::Handle<Client>>,
 }
 
 /// Reports a failure to the UI and gives back `None`, so callers can `return fail(...)`.
@@ -147,66 +151,27 @@ fn closed<T>(io: &SessionIo) -> Option<T> {
     None
 }
 
-/// Steps shared by shells and key export: resolve the host, TCP, handshake (with the host-key
-/// prompt), then sign in (key first, then password). Failures are reported through `io`.
-pub async fn connect_authenticated(
+/// One SSH handshake over any byte stream (a TCP socket, or a channel through a jump host), then sign in.
+/// The host-key prompt happens inside `connect_stream`; sign-in failures are reported through `io`.
+async fn handshake<R>(
+    stream: R,
     store: &Store,
     io: &Arc<SessionIo>,
     prompts: &Arc<Prompts>,
-    host_id: &str,
-) -> Option<Connected> {
-    emit_state(io, SessionState::Connecting);
-
-    let hid = host_id.to_string();
-    let info = match store
-        .with_db_session(move |c, s| hosts::connect_info(c, s, &hid))
-        .await
-    {
-        Ok(i) => i,
-        Err(e) => return fail(io, e.code, e.message),
-    };
-    let Some(user) = info.username.clone() else {
-        return fail(
-            io,
-            ErrorCode::AuthFailed,
-            format!("{} has no username. Edit the host to add one.", info.label),
-        );
-    };
-    let pattern = known_hosts::pattern(&info.address, info.port);
-
-    // 1. TCP.
-    let tcp = match timeout(
-        TCP_TIMEOUT,
-        tokio::net::TcpStream::connect((info.address.as_str(), info.port)),
-    )
-    .await
-    {
-        Ok(Ok(s)) => s,
-        Ok(Err(e)) => {
-            return fail(
-                io,
-                ErrorCode::HostUnreachable,
-                format!("Can't reach {pattern}: {e}"),
-            )
-        }
-        Err(_) => {
-            return fail(
-                io,
-                ErrorCode::HostUnreachable,
-                format!("Can't reach {pattern}: timed out"),
-            )
-        }
-    };
-    let _ = tcp.set_nodelay(true);
-
-    // 2. SSH handshake. The host-key prompt happens inside this call.
+    info: &hosts::ConnectInfo,
+    user: &str,
+    pattern: &str,
+) -> Option<client::Handle<Client>>
+where
+    R: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
     let rejected = Arc::new(Mutex::new(None));
     let handler = Client {
         store: store.clone(),
         io: Arc::clone(io),
         prompts: Arc::clone(prompts),
         label: info.label.clone(),
-        pattern: pattern.clone(),
+        pattern: pattern.to_string(),
         rejected: Arc::clone(&rejected),
     };
     let config = Arc::new(client::Config {
@@ -215,7 +180,7 @@ pub async fn connect_authenticated(
         keepalive_max: 3,
         ..Default::default()
     });
-    let mut handle = match client::connect_stream(config, tcp, handler).await {
+    let mut handle = match client::connect_stream(config, stream, handler).await {
         Ok(h) => h,
         Err(e) => {
             let why = rejected.lock().ok().and_then(|r| r.clone());
@@ -235,19 +200,113 @@ pub async fn connect_authenticated(
             };
         }
     };
-
-    // 3. Sign in.
     emit_state(io, SessionState::Authenticating);
-    if !authenticate(&mut handle, store, io, prompts, &info, &user, host_id).await {
+    if !authenticate(&mut handle, store, io, prompts, info, user, &info.id).await {
         let _ = handle
             .disconnect(russh::Disconnect::ByApplication, "", "en")
             .await;
         return None;
     }
-    Some(Connected {
-        handle,
-        label: info.label,
-    })
+    Some(handle)
+}
+
+/// Steps shared by shells and key export: resolve the host and its jump chain, then for each hop
+/// (TCP for the first, a forwarded channel for the rest) handshake, check the host key and sign in.
+/// Every hop asks its own questions. Failures are reported through `io`.
+pub async fn connect_authenticated(
+    store: &Store,
+    io: &Arc<SessionIo>,
+    prompts: &Arc<Prompts>,
+    host_id: &str,
+) -> Option<Connected> {
+    emit_state(io, SessionState::Connecting);
+
+    let hid = host_id.to_string();
+    let plan = match store
+        .with_db_session(move |c, s| hosts::connect_plan(c, s, &hid))
+        .await
+    {
+        Ok(p) => p,
+        Err(e) => return fail(io, e.code, e.message),
+    };
+    let last = plan.len() - 1;
+    if last > 0 {
+        let via = plan[..last].iter().map(|i| i.label.clone()).collect();
+        (io.event)(SessionEvent::Hop { via });
+    }
+
+    let mut hops: Vec<client::Handle<Client>> = Vec::new();
+    for (i, info) in plan.iter().enumerate() {
+        let Some(user) = info.username.clone() else {
+            return fail(
+                io,
+                ErrorCode::AuthFailed,
+                format!("{} has no username. Edit the host to add one.", info.label),
+            );
+        };
+        let pattern = known_hosts::pattern(&info.address, info.port);
+
+        let handle = match hops.last() {
+            // Later hops ride a direct-tcpip channel opened on the previous hop.
+            Some(prev) => {
+                let ch = match prev
+                    .channel_open_direct_tcpip(
+                        info.address.clone(),
+                        u32::from(info.port),
+                        "127.0.0.1",
+                        0,
+                    )
+                    .await
+                {
+                    Ok(ch) => ch,
+                    Err(e) => {
+                        return fail(
+                            io,
+                            ErrorCode::HostUnreachable,
+                            format!("Can't reach {pattern} through {}: {e}", plan[i - 1].label),
+                        )
+                    }
+                };
+                handshake(ch.into_stream(), store, io, prompts, info, &user, &pattern).await?
+            }
+            None => {
+                let tcp = match timeout(
+                    TCP_TIMEOUT,
+                    tokio::net::TcpStream::connect((info.address.as_str(), info.port)),
+                )
+                .await
+                {
+                    Ok(Ok(s)) => s,
+                    Ok(Err(e)) => {
+                        return fail(
+                            io,
+                            ErrorCode::HostUnreachable,
+                            format!("Can't reach {pattern}: {e}"),
+                        )
+                    }
+                    Err(_) => {
+                        return fail(
+                            io,
+                            ErrorCode::HostUnreachable,
+                            format!("Can't reach {pattern}: timed out"),
+                        )
+                    }
+                };
+                let _ = tcp.set_nodelay(true);
+                handshake(tcp, store, io, prompts, info, &user, &pattern).await?
+            }
+        };
+        if i == last {
+            return Some(Connected {
+                handle,
+                label: info.label.clone(),
+                startup_script: info.startup_script.clone(),
+                _hops: hops,
+            });
+        }
+        hops.push(handle);
+    }
+    None
 }
 
 enum KeyResult {
@@ -429,13 +488,12 @@ pub async fn run(
     p: Params,
     mut cmds: mpsc::UnboundedReceiver<Cmd>,
 ) {
-    let Some(Connected { handle, .. }) =
-        connect_authenticated(&store, &io, &prompts, &p.host_id).await
-    else {
+    let Some(conn) = connect_authenticated(&store, &io, &prompts, &p.host_id).await else {
         return;
     };
 
     // 4. PTY + shell.
+    let handle = &conn.handle;
     let mut channel = match handle.channel_open_session().await {
         Ok(c) => c,
         Err(e) => {
@@ -459,6 +517,12 @@ pub async fn run(
         );
     }
     emit_state(&io, SessionState::Ready);
+    // The host's startup snippet runs as if typed. A failure to send is not worth ending the session over.
+    if let Some(script) = &conn.startup_script {
+        let mut bytes = script.trim_end().as_bytes().to_vec();
+        bytes.push(b'\n');
+        let _ = channel.data_bytes(bytes).await;
+    }
     let hid = p.host_id.clone();
     let _ = store
         .with_db_session(move |c, s| hosts::mark_connected(c, &s.vault_id, &hid))

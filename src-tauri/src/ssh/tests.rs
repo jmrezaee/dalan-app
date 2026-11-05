@@ -24,6 +24,10 @@ use crate::vault::{self, kdf::KdfParams};
 struct TestServer {
     accepted_key: Arc<std::sync::Mutex<Option<String>>>,
     execs: Arc<std::sync::Mutex<Vec<String>>>,
+    /// Targets this server was asked to forward to (direct-tcpip), i.e. hops made through it.
+    forwards: Arc<std::sync::Mutex<Vec<String>>>,
+    /// Channels that carry forwarded traffic: their data belongs to the tunnel, not to our echo shell.
+    tunnel_channels: Arc<std::sync::Mutex<Vec<ChannelId>>>,
 }
 
 impl server::Server for TestServer {
@@ -54,6 +58,30 @@ impl server::Handler for TestServer {
         let ok =
             user == "test" && self.accepted_key.lock().unwrap().as_deref() == Some(fp.as_str());
         Ok(if ok { Auth::Accept } else { Auth::reject() })
+    }
+    async fn channel_open_direct_tcpip(
+        &mut self,
+        channel: Channel<Msg>,
+        host: &str,
+        port: u32,
+        _oa: &str,
+        _op: u32,
+        reply: server::ChannelOpenHandle,
+        _s: &mut Session,
+    ) -> Result<(), Self::Error> {
+        self.forwards.lock().unwrap().push(format!("{host}:{port}"));
+        match tokio::net::TcpStream::connect((host, port as u16)).await {
+            Ok(mut tcp) => {
+                self.tunnel_channels.lock().unwrap().push(channel.id());
+                reply.accept().await;
+                tokio::spawn(async move {
+                    let mut stream = channel.into_stream();
+                    let _ = tokio::io::copy_bidirectional(&mut stream, &mut tcp).await;
+                });
+            }
+            Err(_) => drop(reply), // dropping the handle rejects the channel
+        }
+        Ok(())
     }
     async fn exec_request(
         &mut self,
@@ -104,6 +132,9 @@ impl server::Handler for TestServer {
         data: &[u8],
         s: &mut Session,
     ) -> Result<(), Self::Error> {
+        if self.tunnel_channels.lock().unwrap().contains(&c) {
+            return Ok(()); // the channel's own reader forwards it
+        }
         let mut out = b"echo: ".to_vec();
         out.extend_from_slice(data);
         s.data(c, out)?;
@@ -163,6 +194,9 @@ async fn harness(saved_password: Option<&str>) -> Harness {
                     clear_password: false,
                     key_id: None,
                     identity_id: None,
+                    startup_snippet_id: None,
+                    jump_mode: "inherit".into(),
+                    jump_host_ids: vec![],
                     group_id: None,
                     tags: vec![],
                 },
@@ -222,6 +256,13 @@ fn start(h: &Harness) -> Running {
 
 impl Running {
     async fn next(&mut self) -> SessionEvent {
+        let e = self.next_inner().await;
+        if std::env::var("DALAN_TEST_EVENTS").is_ok() {
+            eprintln!("event: {e:?}");
+        }
+        e
+    }
+    async fn next_inner(&mut self) -> SessionEvent {
         tokio::time::timeout(Duration::from_secs(10), self.events.recv())
             .await
             .expect("timed out waiting for an event")
@@ -445,6 +486,9 @@ async fn unreachable_host_reports_host_unreachable() {
                     clear_password: false,
                     key_id: None,
                     identity_id: None,
+                    startup_snippet_id: None,
+                    jump_mode: "inherit".into(),
+                    jump_host_ids: vec![],
                     group_id: None,
                     tags: vec![],
                 },
@@ -482,6 +526,9 @@ async fn docker_openssh_server_runs_a_real_shell() {
                     clear_password: false,
                     key_id: None,
                     identity_id: None,
+                    startup_snippet_id: None,
+                    jump_mode: "inherit".into(),
+                    jump_host_ids: vec![],
                     group_id: None,
                     tags: vec![],
                 },
@@ -770,6 +817,9 @@ async fn docker_f02_install_key_then_connect_key_only() {
                     group_id: None,
                     key_id: None,
                     identity_id: None,
+                    startup_snippet_id: None,
+                    jump_mode: "inherit".into(),
+                    jump_host_ids: vec![],
                     tags: vec![],
                 },
             )?;
@@ -841,6 +891,9 @@ async fn docker_f02_install_key_then_connect_key_only() {
                     group_id: None,
                     key_id: Some(key.id),
                     identity_id: None,
+                    startup_snippet_id: None,
+                    jump_mode: "inherit".into(),
+                    jump_host_ids: vec![],
                     tags: vec![],
                 },
             )
@@ -853,5 +906,276 @@ async fn docker_f02_install_key_then_connect_key_only() {
         .send(Cmd::Write(b"echo key-only-$((6*7))\n".to_vec()))
         .unwrap();
     assert!(s.read_until("key-only-42").await.contains("key-only-42"));
+    s.cmds.send(Cmd::Close).unwrap();
+}
+
+// ------------------------------------------------------------------ jump hosts (F05) and startup snippets
+
+fn host_input(label: &str, port: u16, group: Option<&str>) -> HostInput {
+    HostInput {
+        id: None,
+        label: label.into(),
+        address: "127.0.0.1".into(),
+        port: Some(port),
+        username: Some("test".into()),
+        password: Some("right-pw".into()),
+        clear_password: false,
+        group_id: group.map(String::from),
+        key_id: None,
+        identity_id: None,
+        startup_snippet_id: None,
+        jump_mode: "inherit".into(),
+        jump_host_ids: vec![],
+        tags: vec![],
+    }
+}
+
+/// A second server to act as the bastion, and a host for it.
+async fn add_bastion(h: &Harness) -> (String, TestServer) {
+    let server = TestServer::default();
+    let port = start_server(server.clone()).await;
+    let input = host_input("bastion", port, None);
+    let host = h
+        .state
+        .store()
+        .with_db_session(move |c, s| hosts::save(c, s, &input))
+        .await
+        .unwrap();
+    (host.id, server)
+}
+
+async fn set_target(h: &Harness, mode: &str, hops: Vec<String>) {
+    let mut input = host_input("test-box", h.port, None);
+    input.id = Some(h.host_id.clone());
+    input.password = None;
+    input.jump_mode = mode.into();
+    input.jump_host_ids = hops;
+    h.state
+        .store()
+        .with_db_session(move |c, s| hosts::save(c, s, &input))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn connects_through_a_jump_host_with_a_prompt_per_hop() {
+    let h = harness(Some("right-pw")).await;
+    let (bastion, bastion_server) = add_bastion(&h).await;
+    set_target(&h, "custom", vec![bastion]).await;
+
+    let mut s = start(&h);
+    // The UI is told the route up front, then each hop asks about its own host key.
+    match s.until(|e| matches!(e, SessionEvent::Hop { .. })).await {
+        SessionEvent::Hop { via } => assert_eq!(via, vec!["bastion"]),
+        _ => unreachable!(),
+    }
+    let (id, kind) = s.expect_prompt().await;
+    assert!(matches!(kind, PromptKind::HostKeyNew { ref host, .. } if host == "bastion"));
+    s.answer(&id, true, None, false);
+    let (id, kind) = s.expect_prompt().await;
+    assert!(matches!(kind, PromptKind::HostKeyNew { ref host, .. } if host == "test-box"));
+    s.answer(&id, true, None, false);
+    s.until(is_state(SessionState::Ready)).await;
+    s.cmds.send(Cmd::Write(b"hi\n".to_vec())).unwrap();
+    assert!(s.read_until("echo: hi").await.contains("echo: hi"));
+    assert_eq!(
+        bastion_server.forwards.lock().unwrap().len(),
+        1,
+        "the shell must run through the bastion"
+    );
+    s.cmds.send(Cmd::Close).unwrap();
+}
+
+#[tokio::test]
+async fn a_group_chain_is_inherited_and_a_host_can_opt_out() {
+    let h = harness(Some("right-pw")).await;
+    let (bastion, bastion_server) = add_bastion(&h).await;
+    let group = h
+        .state
+        .store()
+        .with_db_session(move |c, s| {
+            crate::groups::save(
+                c,
+                s,
+                &crate::groups::GroupInput {
+                    id: None,
+                    parent_id: None,
+                    label: "Prod".into(),
+                    port: None,
+                    username: None,
+                    password: None,
+                    clear_password: false,
+                    key_id: None,
+                    identity_id: None,
+                    startup_snippet_id: None,
+                    jump_mode: "custom".into(),
+                    jump_host_ids: vec![bastion],
+                },
+            )
+        })
+        .await
+        .unwrap();
+    // Move the target into the group; it sets nothing itself, so it inherits the chain.
+    let mut input = host_input("test-box", h.port, Some(&group.id));
+    input.id = Some(h.host_id.clone());
+    input.password = None;
+    let hid = h.host_id.clone();
+    let saved = h
+        .state
+        .store()
+        .with_db_session(move |c, s| hosts::save(c, s, &input))
+        .await
+        .unwrap();
+    assert_eq!(saved.effective_jump_host_ids.len(), 1);
+    assert_eq!(saved.inherited.jump.as_ref().unwrap().group, "Prod");
+
+    let mut s = trusted_chain(&h, 2).await;
+    s.until(is_state(SessionState::Ready)).await;
+    s.cmds.send(Cmd::Close).unwrap();
+    s.task.await.unwrap();
+    assert_eq!(bastion_server.forwards.lock().unwrap().len(), 1);
+
+    // "none" on the host overrides the group: direct again, no new forward.
+    let mut input = host_input("test-box", h.port, Some(&group.id));
+    input.id = Some(hid);
+    input.password = None;
+    input.jump_mode = "none".into();
+    h.state
+        .store()
+        .with_db_session(move |c, s| hosts::save(c, s, &input))
+        .await
+        .unwrap();
+    let mut s = start(&h);
+    s.until(is_state(SessionState::Ready)).await; // host keys are known now: no prompts
+    s.cmds.send(Cmd::Close).unwrap();
+    assert_eq!(
+        bastion_server.forwards.lock().unwrap().len(),
+        1,
+        "no hop when the host opts out"
+    );
+}
+
+/// Answers `n` first-connect prompts with yes.
+async fn trusted_chain(h: &Harness, n: usize) -> Running {
+    let mut s = start(h);
+    for _ in 0..n {
+        let (id, _) = s.expect_prompt().await;
+        s.answer(&id, true, None, false);
+    }
+    s
+}
+
+#[tokio::test]
+async fn startup_snippet_runs_when_the_shell_is_ready() {
+    let h = harness(Some("right-pw")).await;
+    let snippet_input = crate::snippets::SnippetInput {
+        id: None,
+        label: "Uptime".into(),
+        script: "uptime".into(),
+        package_id: None,
+        target_host_ids: vec![],
+    };
+    let sid = h
+        .state
+        .store()
+        .with_db_session(move |c, s| {
+            crate::snippets::save(c, &s.vault_id, &snippet_input)?;
+            Ok(crate::snippets::list(c, &s.vault_id)?.snippets[0]
+                .id
+                .clone())
+        })
+        .await
+        .unwrap();
+    let mut input = host_input("test-box", h.port, None);
+    input.id = Some(h.host_id.clone());
+    input.password = None;
+    input.startup_snippet_id = Some(sid);
+    h.state
+        .store()
+        .with_db_session(move |c, s| hosts::save(c, s, &input))
+        .await
+        .unwrap();
+    let mut s = trusted(&h).await;
+    s.until(is_state(SessionState::Ready)).await;
+    assert!(s.read_until("echo: uptime").await.contains("echo: uptime"));
+    s.cmds.send(Cmd::Close).unwrap();
+}
+
+#[tokio::test]
+async fn jump_chain_rules_and_a_hop_cannot_be_deleted() {
+    let h = harness(Some("right-pw")).await;
+    let (bastion, _) = add_bastion(&h).await;
+    let store = h.state.store();
+    // A host can't be its own jump host, and unknown hops are refused.
+    let mut input = host_input("test-box", h.port, None);
+    input.id = Some(h.host_id.clone());
+    input.jump_mode = "custom".into();
+    input.jump_host_ids = vec![h.host_id.clone()];
+    assert!(store
+        .with_db_session({
+            let i = input.clone_for_test();
+            move |c, s| hosts::save(c, s, &i)
+        })
+        .await
+        .is_err());
+    input.jump_host_ids = vec!["nope".into()];
+    assert!(store
+        .with_db_session({
+            let i = input.clone_for_test();
+            move |c, s| hosts::save(c, s, &i)
+        })
+        .await
+        .is_err());
+    // Using the bastion as a hop locks it against deletion until it is removed from the chain.
+    set_target(&h, "custom", vec![bastion.clone()]).await;
+    let b = bastion.clone();
+    let err = store
+        .with_db_session(move |c, s| hosts::delete(c, s, &b))
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(err.code, ErrorCode::InUse);
+    assert!(err.message.contains("test-box"), "{}", err.message);
+    set_target(&h, "none", vec![]).await;
+    store
+        .with_db_session(move |c, s| hosts::delete(c, s, &bastion))
+        .await
+        .unwrap();
+}
+
+/// F05 against real OpenSSH: the container as its own bastion (it forwards to its own port 2222).
+#[tokio::test]
+#[ignore = "needs the Docker OpenSSH server on 127.0.0.1:2222 with TCP forwarding allowed"]
+async fn docker_jump_through_the_container_to_itself() {
+    let h = harness(None).await;
+    let mk = |label: &str, jump: Vec<String>| {
+        let mut i = host_input(label, 2222, None);
+        i.password = Some("test".into());
+        if !jump.is_empty() {
+            i.jump_mode = "custom".into();
+            i.jump_host_ids = jump;
+        }
+        i
+    };
+    let hop = mk("gateway", vec![]);
+    let gw = h
+        .state
+        .store()
+        .with_db_session(move |c, s| hosts::save(c, s, &hop))
+        .await
+        .unwrap();
+    let mut inner = mk("inner", vec![gw.id]);
+    inner.id = Some(h.host_id.clone());
+    h.state
+        .store()
+        .with_db_session(move |c, s| hosts::save(c, s, &inner))
+        .await
+        .unwrap();
+    let mut s = trusted_chain(&h, 1).await;
+    s.until(is_state(SessionState::Ready)).await;
+    s.cmds
+        .send(Cmd::Write(b"echo via-$((20+22))\n".to_vec()))
+        .unwrap();
+    assert!(s.read_until("via-42").await.contains("via-42"));
     s.cmds.send(Cmd::Close).unwrap();
 }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // S02 Hosts. The full app shell (tabs, all vault sections) arrives in P7; until then this page
 // carries a small Hosts-only sidebar so the layout already matches the canvas.
-import { KeyRound, Lock, Server, Settings, ShieldCheck, Vault } from '@lucide/vue'
+import { Code2, KeyRound, Lock, Server, Settings, ShieldCheck, Vault } from '@lucide/vue'
 import { buttonVariants } from '@/components/ui/button'
 import type { Session } from '~/stores/sessions'
 
@@ -9,24 +9,28 @@ const vault = useVaultStore()
 const hosts = useHostsStore()
 const sessions = useSessionsStore()
 const keychain = useKeychainStore()
+const snippetsStore = useSnippetsStore()
 const settings = useSettingsStore()
-const section = ref<'hosts' | 'keychain' | 'known-hosts' | 'settings'>('hosts')
+const section = ref<'hosts' | 'keychain' | 'snippets' | 'known-hosts' | 'settings'>('hosts')
 const paletteOpen = ref(false)
 const knownHosts = ref<{ refresh: () => void } | null>(null)
 onMounted(() => {
   hosts.refresh()
   keychain.refresh()
+  snippetsStore.refresh()
   settings.load()
 })
 onBeforeUnmount(() => {
   hosts.clear()
   keychain.clear()
+  snippetsStore.clear()
   sessions.clear()
 })
 
 const nav = computed(() => [
   { id: 'hosts', label: 'Hosts', icon: Server, count: hosts.hosts.length },
   { id: 'keychain', label: 'Keychain', icon: KeyRound, count: keychain.keys.length + keychain.identities.length },
+  { id: 'snippets', label: 'Snippets', icon: Code2, count: snippetsStore.snippets.length },
   { id: 'known-hosts', label: 'Known hosts', icon: ShieldCheck },
 ])
 
@@ -81,6 +85,7 @@ function onShortcut(e: KeyboardEvent) {
   else if (k === 't') sessions.openNewTab()
   else if (k === 'w' && sessions.active) requestClose(sessions.active)
   else if (k === ',') go('settings')
+  else if (k === '.') sessions.panelOpen = !sessions.panelOpen
   else if (k === 'n') newHost()
   else if (/^[1-9]$/.test(k)) sessions.activateNth(Number(k))
   else return
@@ -146,6 +151,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
             <KnownHostsList ref="knownHosts" />
           </template>
           <KeychainView v-else-if="section === 'keychain'" />
+          <SnippetsView v-else-if="section === 'snippets'" />
           <SettingsView v-else-if="section === 'settings'" />
           <HostsView v-else />
         </main>

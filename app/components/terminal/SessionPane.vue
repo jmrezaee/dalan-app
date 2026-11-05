@@ -1,5 +1,6 @@
 <script setup lang="ts">
 // S18: the terminal plus whatever the connection needs from the user, as an overlay card.
+import { PanelRight } from '@lucide/vue'
 import type { Session } from '~/stores/sessions'
 import type { OverlayKind } from './StatusOverlay.vue'
 import { Input } from '@/components/ui/input'
@@ -47,13 +48,16 @@ const cancel = () => sessions.respond(props.session, false)
 
 <template>
   <NewTab v-if="session.kind === 'new'" @new-host="$emit('newHost')" />
-  <div v-else class="relative size-full">
+  <div v-else class="flex size-full">
+    <div class="relative min-w-0 flex-1">
     <TerminalView :session="session" :active="active" />
+    <IconButton v-if="session.status === 'ready'" label="Snippets" shortcut="⌘." class="absolute right-3 top-2 z-10 bg-surface/70" :pressed="sessions.panelOpen" @click="sessions.panelOpen = !sessions.panelOpen"><PanelRight /></IconButton>
     <StatusOverlay
       v-if="overlay"
       :kind="overlay"
       :host="session.label"
       :address="session.address"
+      :hop="session.hop"
       :fingerprint="fingerprint"
       :old-fingerprint="oldFingerprint"
       :user="user"
@@ -83,5 +87,7 @@ const cancel = () => sessions.respond(props.session, false)
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+    </div>
+    <SessionSidePanel v-if="sessions.panelOpen && session.status === 'ready'" />
   </div>
 </template>

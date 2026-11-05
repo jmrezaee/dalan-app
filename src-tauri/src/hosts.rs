@@ -40,6 +40,12 @@ pub struct HostSummary {
     pub key_id: Option<String>,
     pub identity_id: Option<String>,
     pub effective_key_id: Option<String>,
+    pub startup_snippet_id: Option<String>,
+    /// `inherit`, `none` or `custom`.
+    pub jump_mode: String,
+    pub jump_host_ids: Vec<String>,
+    /// The chain actually used, after inheritance (empty = direct).
+    pub effective_jump_host_ids: Vec<String>,
     /// What the host would get from its groups if it set nothing itself ("from Production").
     pub inherited: Inherited,
     /// Epoch ms. Fits a JS number safely, so it is exported as `number` rather than bigint.
@@ -68,6 +74,11 @@ pub struct HostInput {
     pub group_id: Option<String>,
     pub key_id: Option<String>,
     pub identity_id: Option<String>,
+    pub startup_snippet_id: Option<String>,
+    /// `inherit`, `none` or `custom`.
+    pub jump_mode: String,
+    /// Hops in order, for `custom`.
+    pub jump_host_ids: Vec<String>,
     /// Tag names. Missing tags are created, and tags no host uses any more are removed.
     pub tags: Vec<String>,
 }
@@ -84,9 +95,14 @@ struct HostRow {
     key_id: Option<String>,
     identity_id: Option<String>,
     password_secret_id: Option<String>,
+    profile_id: String,
+    chain_mode: Option<String>,
+    startup_snippet_id: Option<String>,
+    /// Filled in by `with_jumps` (a separate query).
+    jump_host_ids: Vec<String>,
 }
 
-const SELECT_HOST: &str = "SELECT h.id, h.label, h.address, p.ssh_port, p.username, p.password_secret_id IS NOT NULL, h.group_id, h.last_connected_at, p.key_id, p.identity_id, p.password_secret_id
+const SELECT_HOST: &str = "SELECT h.id, h.label, h.address, p.ssh_port, p.username, p.password_secret_id IS NOT NULL, h.group_id, h.last_connected_at, p.key_id, p.identity_id, p.password_secret_id, h.profile_id, p.chain_mode, p.startup_snippet_id
      FROM hosts h JOIN connection_profiles p ON p.id = h.profile_id";
 
 fn row_to_host(r: &rusqlite::Row) -> rusqlite::Result<HostRow> {
@@ -102,6 +118,10 @@ fn row_to_host(r: &rusqlite::Row) -> rusqlite::Result<HostRow> {
         key_id: r.get(8)?,
         identity_id: r.get(9)?,
         password_secret_id: r.get(10)?,
+        profile_id: r.get(11)?,
+        chain_mode: r.get(12)?,
+        startup_snippet_id: r.get(13)?,
+        jump_host_ids: Vec::new(),
     })
 }
 
@@ -128,6 +148,9 @@ impl HostRow {
             password_secret_id: self.password_secret_id.as_deref(),
             key_id: self.key_id.as_deref(),
             identity_id: self.identity_id.as_deref(),
+            chain_mode: self.chain_mode.as_deref(),
+            jump: &self.jump_host_ids,
+            startup_snippet_id: self.startup_snippet_id.as_deref(),
         }
     }
 }
@@ -143,6 +166,10 @@ fn summarize(h: HostRow, tags: Vec<String>, groups: &GroupMap, ids: &IdentityMap
         effective_port: r.port.map_or(DEFAULT_PORT, |p| p.value),
         effective_has_password: r.password_secret_id.is_some(),
         effective_key_id: r.key_id.map(|k| k.value),
+        effective_jump_host_ids: r.jump.map(|j| j.value).unwrap_or_default(),
+        jump_mode: h.chain_mode.clone().unwrap_or_else(|| "inherit".into()),
+        jump_host_ids: h.jump_host_ids.clone(),
+        startup_snippet_id: h.startup_snippet_id.clone(),
         inherited,
         id: h.id,
         label: h.label,
@@ -162,6 +189,7 @@ pub fn tree(conn: &Connection, vault_id: &str) -> AppResult<HostsTree> {
     let groups = groups::load(conn, vault_id)?;
     let ids = groups::load_identities(conn, vault_id)?;
     let mut tags = tags_by_host(conn, vault_id)?;
+    let mut jumps = groups::load_jumps(conn, vault_id)?;
     let mut h = conn.prepare(&format!(
         "{SELECT_HOST} WHERE h.vault_id = ?1 ORDER BY h.sort, h.label COLLATE NOCASE"
     ))?;
@@ -169,7 +197,8 @@ pub fn tree(conn: &Connection, vault_id: &str) -> AppResult<HostsTree> {
         .query_map([vault_id], row_to_host)?
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
-        .map(|row| {
+        .map(|mut row| {
+            row.jump_host_ids = jumps.remove(&row.profile_id).unwrap_or_default();
             let t = tags.remove(&row.id).unwrap_or_default();
             summarize(row, t, &groups, &ids)
         })
@@ -181,7 +210,7 @@ pub fn tree(conn: &Connection, vault_id: &str) -> AppResult<HostsTree> {
 }
 
 pub fn get(conn: &Connection, vault_id: &str, id: &str) -> AppResult<HostSummary> {
-    let row = conn
+    let mut row = conn
         .query_row(
             &format!("{SELECT_HOST} WHERE h.id = ?1 AND h.vault_id = ?2"),
             params![id, vault_id],
@@ -189,6 +218,9 @@ pub fn get(conn: &Connection, vault_id: &str, id: &str) -> AppResult<HostSummary
         )
         .optional()?
         .ok_or_else(|| AppError::not_found("That host no longer exists."))?;
+    row.jump_host_ids = groups::load_jumps(conn, vault_id)?
+        .remove(&row.profile_id)
+        .unwrap_or_default();
     let tags = tags_by_host(conn, vault_id)?
         .remove(&row.id)
         .unwrap_or_default();
@@ -268,6 +300,13 @@ pub fn save(conn: &mut Connection, s: &VaultSession, input: &HostInput) -> AppRe
             return Err(AppError::validation("That group no longer exists."));
         }
     }
+    let (chain_mode, jumps) = groups::check_jump(
+        conn,
+        &s.vault_id,
+        &input.jump_mode,
+        &input.jump_host_ids,
+        input.id.as_deref(),
+    )?;
     let now = now_ms();
     let tx = conn.transaction()?;
 
@@ -279,13 +318,14 @@ pub fn save(conn: &mut Connection, s: &VaultSession, input: &HostInput) -> AppRe
             );
             let (secret_id, _) = groups::next_secret(&tx, s, None, password, false)?;
             tx.execute(
-                "INSERT INTO connection_profiles (id, vault_id, username, password_secret_id, ssh_port, key_id, identity_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
-                params![profile_id, s.vault_id, username, secret_id, input.port, input.key_id, input.identity_id, now],
+                "INSERT INTO connection_profiles (id, vault_id, username, password_secret_id, ssh_port, key_id, identity_id, chain_mode, startup_snippet_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+                params![profile_id, s.vault_id, username, secret_id, input.port, input.key_id, input.identity_id, chain_mode, input.startup_snippet_id, now],
             )?;
             tx.execute(
                 "INSERT INTO hosts (id, vault_id, group_id, profile_id, label, address, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
                 params![host_id, s.vault_id, input.group_id, profile_id, label, address, now],
             )?;
+            groups::write_jumps(&tx, &profile_id, &jumps)?;
             host_id
         }
         Some(id) => {
@@ -301,12 +341,13 @@ pub fn save(conn: &mut Connection, s: &VaultSession, input: &HostInput) -> AppRe
             let (secret_id, orphan) =
                 groups::next_secret(&tx, s, old_secret, password, input.clear_password)?;
             tx.execute(
-                "UPDATE connection_profiles SET username = ?1, password_secret_id = ?2, ssh_port = ?3, key_id = ?4, identity_id = ?5, updated_at = ?6 WHERE id = ?7",
-                params![username, secret_id, input.port, input.key_id, input.identity_id, now, profile_id],
+                "UPDATE connection_profiles SET username = ?1, password_secret_id = ?2, ssh_port = ?3, key_id = ?4, identity_id = ?5, chain_mode = ?6, startup_snippet_id = ?7, updated_at = ?8 WHERE id = ?9",
+                params![username, secret_id, input.port, input.key_id, input.identity_id, chain_mode, input.startup_snippet_id, now, profile_id],
             )?;
             if let Some(o) = orphan {
                 secrets::delete(&tx, s, &o)?;
             }
+            groups::write_jumps(&tx, &profile_id, &jumps)?;
             tx.execute(
                 "UPDATE hosts SET label = ?1, address = ?2, group_id = ?3, updated_at = ?4 WHERE id = ?5",
                 params![label, address, input.group_id, now, id],
@@ -321,6 +362,27 @@ pub fn save(conn: &mut Connection, s: &VaultSession, input: &HostInput) -> AppRe
 
 /// Deletes the host, its profile and its password secret. (`in_use` for jump hops arrives with P8.)
 pub fn delete(conn: &mut Connection, s: &VaultSession, id: &str) -> AppResult<()> {
+    // A host used as a jump host can't go until it is removed from those chains (RESTRICT in the schema).
+    let mut users: Vec<String> = Vec::new();
+    let mut st = conn.prepare(
+        "SELECT COALESCE(h.label, g.label) FROM profile_jump_hosts j
+         LEFT JOIN hosts h ON h.profile_id = j.profile_id
+         LEFT JOIN groups g ON g.profile_id = j.profile_id
+         WHERE j.jump_host_id = ?1",
+    )?;
+    for row in st.query_map([id], |r| r.get::<_, String>(0))? {
+        users.push(row?);
+    }
+    drop(st);
+    if !users.is_empty() {
+        return Err(AppError::new(
+            crate::error::ErrorCode::InUse,
+            format!(
+                "This host is a jump host for {}. Remove it from those chains first.",
+                users.join(", ")
+            ),
+        ));
+    }
     let tx = conn.transaction()?;
     let (profile_id, secret_id): (String, Option<String>) = tx
         .query_row(
@@ -344,6 +406,7 @@ pub fn delete(conn: &mut Connection, s: &VaultSession, id: &str) -> AppResult<()
 
 /// Everything a connection needs. The password is decrypted here, in Rust, and wiped on drop.
 pub struct ConnectInfo {
+    pub id: String,
     pub label: String,
     pub address: String,
     pub port: u16,
@@ -351,12 +414,16 @@ pub struct ConnectInfo {
     pub password: Option<zeroize::Zeroizing<String>>,
     /// Key to try first (the private key is loaded separately, in `keys`).
     pub key_id: Option<String>,
+    /// Script to type into the shell once it is ready (the host's startup snippet).
+    pub startup_script: Option<String>,
+    /// Hop host ids to go through first, in order (empty = direct).
+    pub jump_host_ids: Vec<String>,
 }
 
 /// Resolves host -> group -> parent group per field (identities included), so a host with no
 /// username of its own signs in with its group's.
 pub fn connect_info(conn: &Connection, s: &VaultSession, host_id: &str) -> AppResult<ConnectInfo> {
-    let h = conn
+    let mut h = conn
         .query_row(
             &format!("{SELECT_HOST} WHERE h.id = ?1 AND h.vault_id = ?2"),
             params![host_id, s.vault_id],
@@ -364,6 +431,9 @@ pub fn connect_info(conn: &Connection, s: &VaultSession, host_id: &str) -> AppRe
         )
         .optional()?
         .ok_or_else(|| AppError::not_found("That host no longer exists."))?;
+    h.jump_host_ids = groups::load_jumps(conn, &s.vault_id)?
+        .remove(&h.profile_id)
+        .unwrap_or_default();
     let map = groups::load(conn, &s.vault_id)?;
     let ids = groups::load_identities(conn, &s.vault_id)?;
     let mut levels = vec![h.level()];
@@ -379,13 +449,35 @@ pub fn connect_info(conn: &Connection, s: &VaultSession, host_id: &str) -> AppRe
         None => None,
     };
     Ok(ConnectInfo {
+        id: h.id.clone(),
         label: h.label.clone(),
         address: h.address.clone(),
         port: r.port.map_or(DEFAULT_PORT, |p| p.value),
         username: r.username.map(|u| u.value),
         password,
         key_id: r.key_id.map(|k| k.value),
+        startup_script: match &r.startup_snippet_id {
+            Some(sn) => crate::snippets::script(conn, &s.vault_id, &sn.value)?,
+            None => None,
+        },
+        jump_host_ids: r.jump.map(|j| j.value).unwrap_or_default(),
     })
+}
+
+/// Everything to connect to `host_id`: the jump hosts in order, then the target last.
+/// A hop's own chain is not followed (like OpenSSH's `ProxyJump a,b`).
+pub fn connect_plan(
+    conn: &Connection,
+    s: &VaultSession,
+    host_id: &str,
+) -> AppResult<Vec<ConnectInfo>> {
+    let target = connect_info(conn, s, host_id)?;
+    let mut plan = Vec::new();
+    for hop in &target.jump_host_ids {
+        plan.push(connect_info(conn, s, hop)?);
+    }
+    plan.push(target);
+    Ok(plan)
 }
 
 /// "Remember" on the password prompt: stores the password for this host's profile.
@@ -439,6 +531,29 @@ pub fn mark_connected(conn: &Connection, vault_id: &str, host_id: &str) -> AppRe
 }
 
 #[cfg(test)]
+impl HostInput {
+    /// Tests move inputs into closures; this avoids deriving `Clone` just for that.
+    pub fn clone_for_test(&self) -> HostInput {
+        HostInput {
+            id: self.id.clone(),
+            label: self.label.clone(),
+            address: self.address.clone(),
+            port: self.port,
+            username: self.username.clone(),
+            password: self.password.clone(),
+            clear_password: self.clear_password,
+            group_id: self.group_id.clone(),
+            key_id: self.key_id.clone(),
+            identity_id: self.identity_id.clone(),
+            startup_snippet_id: self.startup_snippet_id.clone(),
+            jump_mode: self.jump_mode.clone(),
+            jump_host_ids: self.jump_host_ids.clone(),
+            tags: self.tags.clone(),
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::open_in_memory;
@@ -461,6 +576,9 @@ mod tests {
             clear_password: false,
             key_id: None,
             identity_id: None,
+            startup_snippet_id: None,
+            jump_mode: "inherit".into(),
+            jump_host_ids: vec![],
             group_id: None,
             tags: vec![],
         }

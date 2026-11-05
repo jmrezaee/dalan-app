@@ -23,10 +23,10 @@ Clear errors for unreachable / auth failed / KEX failed,terminal,must,yes,yes,so
 Multiple session tabs (Cmd+T new tab),terminal,must,yes,yes,S16
 New Tab screen with recent connections and search,terminal,must,yes,yes,S16
 Command palette over hosts and tabs (Cmd+K),shell,must,yes,yes,S17 F03
-Jump host / host chain,hosts,must,yes,no,F05; free in Termius since 10.1.0
-Startup snippet per host,hosts,must,yes,no,source 10
-Snippets with packages,snippets,must,yes,no,S11 S12
-Run snippet in current session from side panel,snippets,must,yes,no,S20
+Jump host / host chain,hosts,must,yes,yes,F05; free in Termius since 10.1.0
+Startup snippet per host,hosts,must,yes,yes,source 10
+Snippets with packages,snippets,must,yes,yes,S11 S12
+Run snippet in current session from side panel,snippets,must,yes,yes,S20
 Local / remote / dynamic port forwarding rules with start-stop,port forwarding,must,yes,no,S09 S10 F06
 SFTP dual pane (local or host on each side),sftp,must,yes,no,S21
 SFTP drag-and-drop transfers with progress,sftp,must,yes,no,S21 S22 F07

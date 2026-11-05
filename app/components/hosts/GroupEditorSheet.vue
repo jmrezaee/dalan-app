@@ -7,6 +7,8 @@ import type { GroupSummary } from '~/types/bindings'
 
 const hosts = useHostsStore()
 const keychain = useKeychainStore()
+const snippets = useSnippetsStore()
+const snippetOptions = computed(() => snippets.snippets.map(s => ({ value: s.id, label: s.label })))
 const identityOptions = computed(() => keychain.identities.map(i => ({ value: i.id, label: `${i.label}  ·  ${i.username}` })))
 const keyOptions = computed(() => keychain.keys.map(k => ({ value: k.id, label: `${k.label}  ·  ${k.key_type}` })))
 
@@ -16,7 +18,7 @@ const open = computed({
 })
 const group = computed(() => (hosts.editingGroup && hosts.editingGroup !== 'new' ? hosts.editingGroup : null))
 
-const blank = () => ({ label: '', parent_id: hosts.currentGroupId as string | null, port: '' as number | string, username: '', password: '', identity_id: null as string | null, key_id: null as string | null })
+const blank = () => ({ label: '', parent_id: hosts.currentGroupId as string | null, port: '' as number | string, username: '', password: '', identity_id: null as string | null, key_id: null as string | null, startup_snippet_id: null as string | null, jump_mode: 'inherit', jump_host_ids: [] as string[] })
 const form = reactive(blank())
 const clearPassword = ref(false)
 const error = ref('')
@@ -27,7 +29,7 @@ const dirty = computed(() => current.value !== snapshot.value)
 
 watch(() => hosts.editingGroup, (e) => {
   const g = e && e !== 'new' ? (e as GroupSummary) : null
-  Object.assign(form, g ? { label: g.label, parent_id: g.parent_id, port: g.port ?? '', username: g.username ?? '', password: '', identity_id: g.identity_id, key_id: g.key_id } : blank())
+  Object.assign(form, g ? { label: g.label, parent_id: g.parent_id, port: g.port ?? '', username: g.username ?? '', password: '', identity_id: g.identity_id, key_id: g.key_id, startup_snippet_id: g.startup_snippet_id, jump_mode: g.jump_mode, jump_host_ids: [...g.jump_host_ids] } : blank())
   clearPassword.value = false
   error.value = ''
   snapshot.value = current.value
@@ -49,6 +51,9 @@ async function submit() {
     clear_password: clearPassword.value,
     identity_id: form.identity_id,
     key_id: form.key_id,
+    startup_snippet_id: form.startup_snippet_id,
+    jump_mode: form.jump_mode,
+    jump_host_ids: form.jump_host_ids,
   })
   busy.value = false
   if (!error.value) hosts.editingGroup = null
@@ -106,6 +111,25 @@ async function submit() {
             <button v-if="hasOwnPassword" type="button" class="self-start text-xs text-muted underline-offset-2 hover:text-text hover:underline" @click="clearPassword = true">Remove saved password</button>
             <p v-else-if="clearPassword" class="text-xs text-muted">The saved password is removed when you save.</p>
             <p v-if="!hasOwnPassword && !form.password && inherited.password" class="text-xs text-muted">Uses the password from {{ inherited.password }}.</p>
+          </div>
+        </section>
+
+        <section class="flex flex-col gap-3">
+          <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">Connection</h3>
+          <div class="flex flex-col gap-1.5">
+            <Label>Jump hosts</Label>
+            <ChainPicker
+              v-model:mode="form.jump_mode"
+              v-model:ids="form.jump_host_ids"
+              :options="hosts.hosts"
+              :inherited-ids="inherited.jump?.host_ids ?? []"
+              :inherited-from="inherited.jump?.group"
+              :target="form.label || 'hosts here'"
+            />
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <Label for="group-startup">Startup snippet</Label>
+            <OptionSelect id="group-startup" v-model="form.startup_snippet_id" :options="snippetOptions" none-label="None" />
           </div>
         </section>
 

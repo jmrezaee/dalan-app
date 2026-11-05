@@ -68,7 +68,7 @@ export const useHostsStore = defineStore('hosts', () => {
   /** What something placed in `groupId` would inherit ("from Production" hints). */
   function inheritedFor(groupId: string | null): Inherited {
     const g = groups.value.find(x => x.id === groupId)
-    if (!g) return { username: null, port: null, password: null, key: null }
+    if (!g) return { username: null, port: null, password: null, key: null, jump: null, startup_snippet: null }
     // A group can sign in through an identity, which supplies a username, a password and/or a key.
     const ident = g.identity_id ? useKeychainStore().identities.find(i => i.id === g.identity_id) : undefined
     const keyId = g.key_id ?? ident?.key_id ?? null
@@ -77,6 +77,8 @@ export const useHostsStore = defineStore('hosts', () => {
       port: g.port ? { value: g.port, group: g.label } : g.inherited.port,
       password: g.has_password || ident?.has_password ? g.label : g.inherited.password,
       key: keyId ? { value: keyId, group: g.label } : g.inherited.key,
+      jump: g.jump_mode === 'custom' ? { host_ids: g.jump_host_ids, group: g.label } : g.jump_mode === 'none' ? { host_ids: [], group: g.label } : g.inherited.jump,
+      startup_snippet: g.startup_snippet_id ? { value: g.startup_snippet_id, group: g.label } : g.inherited.startup_snippet,
     }
   }
 

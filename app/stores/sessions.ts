@@ -19,6 +19,8 @@ export interface Session {
   prompt: { id: string, kind: PromptKind } | null
   error: { code: string, message: string } | null
   disconnectedAt: Date | null
+  /** Jump hosts this connection goes through, e.g. `bastion`. */
+  hop: string
 }
 
 /** Live SSH tabs (S18). The xterm instance lives in TerminalView; this store only routes bytes to it. */
@@ -33,6 +35,8 @@ export const useSessionsStore = defineStore('sessions', () => {
   const pending = new Map<string, Uint8Array[]>()
   const lastOpen = new Map<string, number>()
 
+  /** S20: the side panel beside the active terminal (⌘.). */
+  const panelOpen = ref(false)
   const active = computed(() => sessions.value.find(s => s.key === activeKey.value) ?? null)
 
   function onEvent(sess: Session, e: SessionEvent) {
@@ -52,6 +56,9 @@ export const useSessionsStore = defineStore('sessions', () => {
       case 'error':
         sess.status = 'error'
         sess.error = { code: e.code, message: e.message }
+        break
+      case 'hop':
+        sess.hop = e.via.join(' → ')
         break
       case 'exit':
         break
@@ -86,6 +93,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     prompt: null,
     error: null,
     disconnectedAt: null,
+    hop: '',
   })
 
   /** Opens a tab for a host and switches to it. A New Tab that is showing turns into the session. */
@@ -178,5 +186,5 @@ export const useSessionsStore = defineStore('sessions', () => {
     pending.clear()
   }
 
-  return { sessions, activeKey, active, open, openNewTab, activateNth, attach, detach, write, resize, ack, respond, reconnect, close, clear }
+  return { sessions, activeKey, active, panelOpen, open, openNewTab, activateNth, attach, detach, write, resize, ack, respond, reconnect, close, clear }
 })

@@ -59,10 +59,24 @@ pub enum PromptKind {
 #[derive(Debug, Clone, Serialize, Type)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionEvent {
-    State { state: SessionState },
-    Prompt { prompt_id: String, kind: PromptKind },
-    Error { code: ErrorCode, message: String },
-    Exit { status: Option<u32> },
+    State {
+        state: SessionState,
+    },
+    Prompt {
+        prompt_id: String,
+        kind: PromptKind,
+    },
+    Error {
+        code: ErrorCode,
+        message: String,
+    },
+    Exit {
+        status: Option<u32>,
+    },
+    /// The jump hosts this connection goes through, in order ("via bastion").
+    Hop {
+        via: Vec<String>,
+    },
 }
 
 /// The UI's answer to a prompt. `accept: false` is Cancel. `text` carries a password.
