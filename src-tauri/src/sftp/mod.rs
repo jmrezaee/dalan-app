@@ -80,6 +80,12 @@ impl SftpManager {
         if let Ok(mut m) = self.sessions.lock() {
             m.clear();
         }
+        // Connections still asking questions (host key, password) must stop asking.
+        if let Ok(m) = self.opening.lock() {
+            for p in m.values() {
+                p.cancel_all_pub();
+            }
+        }
         self.transfers.cancel_all();
         self.edits.close_all();
     }
@@ -136,7 +142,7 @@ pub async fn open_remote(
     prompts: &Arc<Prompts>,
     host_id: &str,
 ) -> AppResult<RemoteFs> {
-    let conn = crate::ssh::connect_authenticated(store, io, prompts, host_id, None)
+    let conn = crate::ssh::connect_authenticated(store, io, prompts, host_id, None, false)
         .await
         .ok_or_else(|| {
             AppError::new(

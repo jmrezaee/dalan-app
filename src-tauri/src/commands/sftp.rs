@@ -63,6 +63,8 @@ pub async fn sftp_open(
         }
     };
     let label = remote.label.clone();
+    // The vault may have locked while we were connecting: don't register a session after that.
+    state.require_unlocked()?;
     let remote = Arc::new(remote);
     let home = sftp::Fs::Remote(Arc::clone(&remote))
         .home()
@@ -92,6 +94,17 @@ pub fn sftp_respond(
 #[specta::specta]
 pub fn sftp_close(state: State<'_, AppState>, sftp_id: String) {
     state.sftp.remove(&sftp_id);
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn fs_realpath(
+    state: State<'_, AppState>,
+    endpoint: String,
+    path: String,
+) -> AppResult<String> {
+    state.require_unlocked()?;
+    state.sftp.fs(&endpoint)?.realpath(&path).await
 }
 
 #[tauri::command]

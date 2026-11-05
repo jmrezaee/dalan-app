@@ -4,7 +4,7 @@ use tauri::State;
 
 use crate::error::AppResult;
 use crate::groups::{self, GroupInput, GroupSummary};
-use crate::hosts::{self, HostInput, HostSummary, HostsTree};
+use crate::hosts::{self, HostInput, HostSummary, HostsTree, RecentItem, TagInfo};
 use crate::state::AppState;
 
 #[tauri::command]
@@ -85,5 +85,32 @@ pub async fn host_set_protocol(
 ) -> AppResult<()> {
     state
         .with_db_session(move |c, s| hosts::set_protocol(c, s, &id, &protocol))
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn tags_list(state: State<'_, AppState>) -> AppResult<Vec<TagInfo>> {
+    state
+        .with_db_session(|c, s| hosts::tags_list(c, &s.vault_id))
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn tag_delete(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    state
+        .with_db_session(move |c, s| hosts::tag_delete(c, &s.vault_id, &id))
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn recent_connections(
+    state: State<'_, AppState>,
+    limit: u32,
+) -> AppResult<Vec<RecentItem>> {
+    state
+        .with_db_session(move |c, s| hosts::recent_connections(c, &s.vault_id, limit))
         .await
 }

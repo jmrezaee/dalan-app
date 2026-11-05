@@ -79,3 +79,57 @@ pub fn delete(conn: &Connection, s: &VaultSession, id: &str) -> AppResult<()> {
     )?;
     Ok(())
 }
+
+/// Deletes secrets that no row points at any more (a host or key was removed in a way that left its
+/// secret behind, or a save failed half way). Run at unlock, before anything else can be saving.
+/// Secrets referenced from a settings value (the AI key) count as used. Returns how many went.
+pub fn sweep_orphans(conn: &Connection, vault_id: &str) -> AppResult<usize> {
+    let ids: Vec<String> = {
+        let mut st = conn.prepare(
+            "SELECT id FROM secrets WHERE vault_id = ?1
+               AND id NOT IN (SELECT private_key_secret_id FROM keys WHERE private_key_secret_id IS NOT NULL)
+               AND id NOT IN (SELECT passphrase_secret_id FROM keys WHERE passphrase_secret_id IS NOT NULL)
+               AND id NOT IN (SELECT password_secret_id FROM identities WHERE password_secret_id IS NOT NULL)
+               AND id NOT IN (SELECT password_secret_id FROM connection_profiles WHERE password_secret_id IS NOT NULL)
+               AND id NOT IN (SELECT proxy_secret_id FROM connection_profiles WHERE proxy_secret_id IS NOT NULL)
+               AND id NOT IN (SELECT value_secret_id FROM profile_env_vars WHERE value_secret_id IS NOT NULL)",
+        )?;
+        let mapped = st.query_map([vault_id], |r| r.get(0))?;
+        mapped.collect::<Result<_, _>>()?
+    };
+    let mut removed = 0;
+    for id in ids {
+        let in_settings: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM settings WHERE instr(value, ?1) > 0)",
+            [&id],
+            |r| r.get(0),
+        )?;
+        if !in_settings {
+            removed += conn.execute("DELETE FROM secrets WHERE id = ?1", [&id])?;
+        }
+    }
+    Ok(removed)
+}
+
+#[cfg(test)]
+mod sweep_tests {
+    use super::*;
+    use crate::db::open_in_memory;
+    use crate::vault::{self, kdf::KdfParams};
+
+    #[test]
+    fn only_unreferenced_secrets_are_swept() {
+        let c = open_in_memory().unwrap();
+        let s = vault::create(&c, "correct-horse-staple", KdfParams::cheap()).unwrap();
+        let orphan = put(&c, &s, SecretKind::Password, b"x").unwrap();
+        let in_settings = put(&c, &s, SecretKind::Password, b"y").unwrap();
+        c.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES ('ai', ?1, 0)",
+            [format!("{{\"key_secret_id\":\"{in_settings}\"}}")],
+        )
+        .unwrap();
+        assert_eq!(sweep_orphans(&c, &s.vault_id).unwrap(), 1);
+        assert!(get(&c, &s, &orphan).is_err());
+        assert!(get(&c, &s, &in_settings).is_ok());
+    }
+}

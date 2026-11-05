@@ -33,6 +33,12 @@ export const commands = {
 	groupDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("group_delete", { id })),
 	/**  F04: drag hosts into a group (`group_id: null` = the top level). */
 	hostsMove: (ids: string[], groupId: string | null) => typedError<null, AppError>(__TAURI_INVOKE("hosts_move", { ids, groupId })),
+	tagsList: () => typedError<TagInfo[], AppError>(__TAURI_INVOKE("tags_list")),
+	tagDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("tag_delete", { id })),
+	recentConnections: (limit: number) => typedError<RecentItem[], AppError>(__TAURI_INVOKE("recent_connections", { limit })),
+	/**  Moves snippets into a package, or out of every package when `package_id` is `None`. */
+	snippetsMove: (ids: string[], packageId: string | null) => typedError<null, AppError>(__TAURI_INVOKE("snippets_move", { ids, packageId })),
+	fsRealpath: (endpoint: string, path: string) => typedError<string, AppError>(__TAURI_INVOKE("fs_realpath", { endpoint, path })),
 	/**  Opens a tab's connection. Returns at once; progress arrives on `events`, terminal output on `data`. */
 	sessionOpen: (hostId: string, cols: number, rows: number, events: Channel<SessionEvent_Deserialize>, data: Channel<RawBytes>) => typedError<SessionOpened, AppError>(__TAURI_INVOKE("session_open", { hostId, cols, rows, events, data })),
 	/**  A shell on this computer, shown as a tab. Same channels as `session_open`. */
@@ -947,7 +953,14 @@ export type PromptKind = { type: "host_key_new"; host: string; key_type: string;
 /**  Blocking. The default answer is "no". */
 { type: "host_key_changed"; host: string; key_type: string; old_fingerprint: string; new_fingerprint: string } | { type: "password"; host: string; user: string } | 
 /**  An encrypted private key needs its passphrase. */
-{ type: "passphrase"; key_label: string };
+{ type: "passphrase"; key_label: string } | 
+/**
+ *  One question from a keyboard-interactive sign-in (2FA code, PAM challenge). The server may
+ *  send several in a round; each is asked on its own and answered through `PromptAnswer.text`.
+ */
+{ type: "keyboard_interactive"; host: string; name: string; instructions: string; prompt: string; 
+/**  False for secrets (typed text must be hidden). */
+echo: boolean };
 
 /**  What the editors show and save. `kind`: `inherit`, `none`, `socks5` or `http`. */
 export type ProxyChoice = ProxyChoice_Serialize | ProxyChoice_Deserialize;
@@ -987,6 +1000,14 @@ export type ProxyConfig_Serialize = {
  *  not as a JSON array of numbers. The `Type` derive only exists for the generated bindings.
  */
 export type RawBytes = number[];
+
+/**  One entry of the New Tab "recent" list: the server and when you last connected to it. */
+export type RecentItem = {
+	host_id: string,
+	label: string,
+	address: string,
+	connected_at: number | null,
+};
 
 export type SerialConfig = {
 	baud: number,
@@ -1077,6 +1098,13 @@ export type Suggestion = {
 	command: string,
 	/**  The model asked a question instead of giving a command (the text after `# `). */
 	is_question: boolean,
+};
+
+/**  A tag and how many servers use it (the Tags menu). */
+export type TagInfo = {
+	id: string,
+	name: string,
+	hosts: number,
 };
 
 export type TemplateInput = TemplateInput_Serialize | TemplateInput_Deserialize;

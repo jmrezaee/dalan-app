@@ -30,6 +30,14 @@ function reply(accept: boolean) {
       <span class="text-muted">That can happen after a reinstall, or it can mean someone is intercepting the connection. Open the host in a tab to review it.</span>
       <div class="flex justify-end"><Button type="button" size="sm" @click="reply(false)">Close</Button></div>
     </template>
+    <template v-else-if="kind.type === 'keyboard_interactive'">
+      <span class="text-sm">{{ kind.name || `Sign in to ${kind.host}` }}</span>
+      <span v-if="kind.instructions" class="whitespace-pre-line text-muted">{{ kind.instructions }}</span>
+      <label for="prompt-answer">{{ kind.prompt.trim() }}</label>
+      <Input v-if="kind.echo" id="prompt-answer" v-model="text" autocomplete="off" />
+      <PasswordInput v-else id="prompt-answer" v-model="text" />
+      <div class="flex justify-end gap-2"><Button type="button" size="sm" variant="secondary" @click="reply(false)">Cancel</Button><Button type="button" size="sm" @click="reply(true)">Continue</Button></div>
+    </template>
     <template v-else-if="secret">
       <span class="text-sm">{{ kind.type === 'passphrase' ? `Passphrase for ${kind.key_label}` : `Password for ${kind.host}` }}</span>
       <PasswordInput id="prompt-secret" v-model="text" />

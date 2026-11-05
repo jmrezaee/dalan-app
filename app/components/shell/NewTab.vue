@@ -27,7 +27,9 @@ const results = computed<HostSummary[]>(() => {
   const all = [...hosts.hosts]
   if (!q) {
     // Hosts you have connected to, newest first; if there are none yet, show them all.
-    const recent = all.filter(h => h.last_connected_at).sort((a, b) => (b.last_connected_at ?? 0) - (a.last_connected_at ?? 0))
+    // The servers you connected to lately (from the connection history), newest first; none yet: show them all.
+    const byId = new Map(all.map(h => [h.id, h]))
+    const recent = hosts.recent.map(r => byId.get(r.host_id)).filter((h): h is HostSummary => !!h)
     return (recent.length ? recent : all).slice(0, 12)
   }
   return all.filter(h => `${h.label} ${h.address} ${h.effective_username ?? ''} ${h.tags.join(' ')}`.toLowerCase().includes(q)).slice(0, 12)

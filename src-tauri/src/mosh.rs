@@ -92,7 +92,8 @@ pub async fn run(
     let Some(client_path) = find_client() else {
         return fail(&io, ErrorCode::NotFound, "Mosh isn't installed on this computer. Install it (for example `brew install mosh`), then try again.".into());
     };
-    let Some(conn) = client::connect_authenticated(&store, &io, &prompts, &p.host_id, None).await
+    let Some(conn) =
+        client::connect_authenticated(&store, &io, &prompts, &p.host_id, None, false).await
     else {
         return;
     };

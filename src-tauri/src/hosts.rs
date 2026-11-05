@@ -586,11 +586,91 @@ pub fn link_key(conn: &Connection, vault_id: &str, host_id: &str, key_id: &str) 
     Ok(())
 }
 
+/// Newest connections kept in `connection_history`.
+const KEEP_CONNECTIONS: i64 = 200;
+
 pub fn mark_connected(conn: &Connection, vault_id: &str, host_id: &str) -> AppResult<()> {
+    let now = now_ms();
     conn.execute(
         "UPDATE hosts SET last_connected_at = ?1 WHERE id = ?2 AND vault_id = ?3",
-        params![now_ms(), host_id, vault_id],
+        params![now, host_id, vault_id],
     )?;
+    conn.execute(
+        "INSERT INTO connection_history (id, vault_id, host_id, connected_at) VALUES (?1, ?2, ?3, ?4)",
+        params![uuid::Uuid::now_v7().to_string(), vault_id, host_id, now],
+    )?;
+    conn.execute(
+        "DELETE FROM connection_history WHERE vault_id = ?1 AND rowid NOT IN (SELECT rowid FROM connection_history WHERE vault_id = ?1 ORDER BY connected_at DESC, rowid DESC LIMIT ?2)",
+        params![vault_id, KEEP_CONNECTIONS],
+    )?;
+    Ok(())
+}
+
+/// One entry of the New Tab "recent" list: the server and when you last connected to it.
+#[derive(Debug, Serialize, Type)]
+pub struct RecentItem {
+    pub host_id: String,
+    pub label: String,
+    pub address: String,
+    #[specta(type = f64)]
+    pub connected_at: i64,
+}
+
+/// Servers you connected to lately, newest first, each once.
+pub fn recent_connections(
+    conn: &Connection,
+    vault_id: &str,
+    limit: u32,
+) -> AppResult<Vec<RecentItem>> {
+    let mut st = conn.prepare(
+        "SELECT h.id, h.label, h.address, MAX(c.connected_at) AS last FROM connection_history c JOIN hosts h ON h.id = c.host_id WHERE c.vault_id = ?1 GROUP BY h.id ORDER BY last DESC LIMIT ?2",
+    )?;
+    let rows = st
+        .query_map(params![vault_id, limit.min(50)], |r| {
+            Ok(RecentItem {
+                host_id: r.get(0)?,
+                label: r.get(1)?,
+                address: r.get(2)?,
+                connected_at: r.get(3)?,
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+    Ok(rows)
+}
+
+/// A tag and how many servers use it (the Tags menu).
+#[derive(Debug, Serialize, Type)]
+pub struct TagInfo {
+    pub id: String,
+    pub name: String,
+    pub hosts: u32,
+}
+
+pub fn tags_list(conn: &Connection, vault_id: &str) -> AppResult<Vec<TagInfo>> {
+    let mut st = conn.prepare(
+        "SELECT t.id, t.name, COUNT(ht.host_id) FROM tags t LEFT JOIN host_tags ht ON ht.tag_id = t.id WHERE t.vault_id = ?1 GROUP BY t.id ORDER BY t.name COLLATE NOCASE",
+    )?;
+    let rows = st
+        .query_map([vault_id], |r| {
+            Ok(TagInfo {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                hosts: r.get(2)?,
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+    Ok(rows)
+}
+
+/// Removes a tag from every server that has it.
+pub fn tag_delete(conn: &Connection, vault_id: &str, id: &str) -> AppResult<()> {
+    let n = conn.execute(
+        "DELETE FROM tags WHERE id = ?1 AND vault_id = ?2",
+        params![id, vault_id],
+    )?; // host_tags rows go with it (ON DELETE CASCADE)
+    if n == 0 {
+        return Err(AppError::not_found("That tag no longer exists."));
+    }
     Ok(())
 }
 
@@ -651,6 +731,46 @@ mod tests {
     fn secret_count(c: &Connection) -> i64 {
         c.query_row("SELECT count(*) FROM secrets", [], |r| r.get(0))
             .unwrap()
+    }
+
+    #[test]
+    fn tags_list_counts_and_delete_removes_from_hosts_and_recents_are_distinct() {
+        let (mut c, s) = fresh();
+        let mut a = input("a");
+        a.tags = vec!["prod".into(), "web".into()];
+        let a = save(&mut c, &s, &a).unwrap();
+        let mut b = input("b");
+        b.tags = vec!["prod".into()];
+        let b = save(&mut c, &s, &b).unwrap();
+        let tags = tags_list(&c, &s.vault_id).unwrap();
+        assert_eq!(
+            tags.iter()
+                .map(|t| (t.name.as_str(), t.hosts))
+                .collect::<Vec<_>>(),
+            vec![("prod", 2), ("web", 1)]
+        );
+        tag_delete(&c, &s.vault_id, &tags[0].id).unwrap();
+        assert!(get(&c, &s.vault_id, &a.id).unwrap().tags == vec!["web".to_string()]);
+        assert!(get(&c, &s.vault_id, &b.id).unwrap().tags.is_empty());
+        assert!(tag_delete(&c, &s.vault_id, &tags[0].id).is_err());
+
+        // Recent connections: each server once, newest first, written by mark_connected.
+        let tick = || std::thread::sleep(std::time::Duration::from_millis(3)); // distinct millisecond stamps
+        mark_connected(&c, &s.vault_id, &a.id).unwrap();
+        tick();
+        mark_connected(&c, &s.vault_id, &b.id).unwrap();
+        tick();
+        mark_connected(&c, &s.vault_id, &a.id).unwrap();
+        let recent = recent_connections(&c, &s.vault_id, 10).unwrap();
+        assert_eq!(
+            recent
+                .iter()
+                .map(|r| r.label.as_str())
+                .collect::<Vec<_>>()
+                .len(),
+            2
+        );
+        assert_eq!(recent[0].host_id, a.id);
     }
 
     #[test]

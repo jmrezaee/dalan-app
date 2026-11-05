@@ -66,7 +66,7 @@ pub async fn log_replay(
                 .iter()
                 .find(|l| l.id == id)
                 .ok_or_else(|| AppError::not_found("That log no longer exists."))?;
-            logs::read_chunks(&dir, &id, &s.key, |chunk| {
+            logs::read_chunks(&dir, &id, &s.data_key, |chunk| {
                 let _ = data.send(RawBytes(chunk));
             })
         })

@@ -86,7 +86,7 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
   6. **Single instance:** add `tauri-plugin-single-instance`, so a second launch focuses the first window.
   - **Built (2026-11-05):** all six items. Changed key now needs the typed host name checked in Rust (`ssh/client.rs`); the UI sends it. "Trust" sends `remember: true`; `false` trusts once. Owner-only modes via `src/perms.rs` (app dir and logs 0700, `vault.db*`, log files and edit copies 0600). Single-instance plugin added (stack addition, desktop only). CSP set (`style-src` keeps `unsafe-inline` for Vue/Reka style attributes; dev CSP allows the Vite websocket). Rust tests added for each.
   - **Checked by Claude in the real window (second run, see `smoke-results-2026-11-05.md`):** unlock, terminals, SFTP and workspaces under the CSP; file modes; second binary launch exits. Still for you: `open -n` second copy (did not exit), a plain double-click while running, a tunnel under the CSP. Then mark `[x]`.
-- [ ] **P17 Robustness fixes (audit "Should fix" 7, 9, 11, 12, 13, 15):**
+- [x] **P17 Robustness fixes (audit "Should fix" 7, 9, 11, 12, 13, 15):**
   1. **Command history:**
      - Encrypt it with the vault key, re-encrypting it with everything else on a master password change.
      - Don't save lines with obvious secret flags (`-p<value>`, `--password=`, `PASSWORD=`, `token`).
@@ -106,6 +106,13 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
      - Add `recent_connections`, which writes `connection_history` and feeds New Tab.
      - Add `fs_realpath` and `snippets_move`.
      - Add the orphan-secret sweep on unlock.
+  - **Built (2026-11-05):**
+    - **Data key (migration 0005, approved):** `vaults.wrapped_data_key`; logs and history use it, so a password change keeps old logs readable (verified in the window: log recorded, password changed, log replays). Old vaults adopt their current key on first unlock. History is encrypted (`command_enc`); lines with obvious secrets are dropped.
+    - **Agent forwarding** only for shell sessions (`connect_authenticated(..., shell)`).
+    - **Keyboard-interactive:** none-probe finds the methods; KI-only servers skip the password question; each server question is its own `keyboard_interactive` prompt (one field per prompt, not `fields[]`); a saved password answers a hidden "password" question. Overlay and inline prompt panel updated. Tested against an in-process server; not against real PAM.
+    - **SFTP and lock:** re-check after connecting, pending questions cancelled on lock.
+    - **Commands:** `tags_list`, `tag_delete` (right-click a tag in the sidebar), `recent_connections` (feeds New Tab, written by `mark_connected`), `fs_realpath`, `snippets_move`, orphan-secret sweep at unlock. `fs_realpath` and `snippets_move` have no UI yet.
+  - **Still to check:** keyboard-interactive against a real PAM/2FA container; the tag delete menu and New Tab recents in the window.
 - [ ] **P18 UI fixes (audit "Must fix" 5, "Should fix" 14 and "Spec gaps"):**
   1. **Tab status dots:**
      - Track unread output per session; "waiting" when a prompt is pending; red for error or disconnected.
@@ -205,3 +212,5 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
 - 2026-11-05 P15 (partly done): `replica/smoke-test.md`, `scripts/test-servers.sh` (three Docker servers, host-key changes incl. key-type switch, bash 3.2 safe) and sample import files committed. Claude then ran the app itself with computer use against a debug bundle: M1 (F01, F11, F12) works in the real window, jump hosts, key login, import, local tunnel, logs and history too. Eight failures found and fixed (launch crash of a debug bundle outside the project folder, key-type switch skipping the identity-changed block, Enter on overlay buttons, macOS autocorrect capitalising inputs, stale host cards after connecting, hop prompts naming the target, dialog path overflow, wrong sample file); see the results file. 36 `features.csv` rows moved from `yes` to `partial` with a note. Still for Mehrdad by hand: SFTP drag and context menu (automation couldn't drive them), workspaces, snippets, groups, Keychain Generate/Install, unreachable/auth-failed overlays. Phase stays `[~]` until he has run those and reported.
 
 - 2026-11-05 P15 and P16 closed: Mehrdad confirmed by hand that SFTP drag and drop and dragging a host onto a group work (after `dragDropEnabled: false` and the row drag styles), and that double-clicking Dalan.app while it runs opens no second copy. Not checked: `open -n` (forced second copy), a tunnel under the CSP.
+
+- 2026-11-05 P17 done (see its note above). A hand check is still open for keyboard-interactive against a real server.

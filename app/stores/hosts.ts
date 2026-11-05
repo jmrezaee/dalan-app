@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { toast } from 'vue-sonner'
-import type { SerialConfig, AgentChoice, EnvVar, ProxyChoice, ProfileTheme, GroupInput, GroupSummary, HostInput, HostSummary, Inherited } from '~/types/bindings'
+import type { RecentItem, TagInfo, SerialConfig, AgentChoice, EnvVar, ProxyChoice, ProfileTheme, GroupInput, GroupSummary, HostInput, HostSummary, Inherited } from '~/types/bindings'
 import { CommandError, useTauri } from '~/composables/useTauri'
 
 type View = 'grid' | 'list'
@@ -12,6 +12,9 @@ export const useHostsStore = defineStore('hosts', () => {
   const hosts = ref<HostSummary[]>([])
   const groups = ref<GroupSummary[]>([])
   const loaded = ref(false)
+  /** Tags with how many servers use each (the tag menu), and the servers you connected to lately (New Tab). */
+  const tagInfos = ref<TagInfo[]>([])
+  const recent = ref<RecentItem[]>([])
   /** S25 import dialog. */
   const importOpen = ref(false)
   /** Terminal theme per host and group: its own, and what it inherits (with the group that sets it). */
@@ -88,6 +91,20 @@ export const useHostsStore = defineStore('hosts', () => {
     }
   }
 
+  /** Removes a tag from every server that has it. */
+  async function deleteTag(name: string) {
+    const info = tagInfos.value.find(x => x.name === name)
+    if (!info) return
+    try {
+      await api.tagDelete(info.id)
+      toast(`Removed the tag "${name}" from ${info.hosts} ${info.hosts === 1 ? 'server' : 'servers'}.`)
+      await refresh()
+    }
+    catch (e) {
+      toast.error(message(e))
+    }
+  }
+
   function toggleTag(tag: string) {
     selectedTags.value = selectedTags.value.includes(tag) ? selectedTags.value.filter(t => t !== tag) : [...selectedTags.value, tag]
   }
@@ -102,6 +119,8 @@ export const useHostsStore = defineStore('hosts', () => {
       const th = await api.terminalThemesList()
       themes.value = { hosts: Object.fromEntries(th.hosts.map(x => [x.id, x])), groups: Object.fromEntries(th.groups.map(x => [x.id, x])) }
       hosts.value = t.hosts
+      tagInfos.value = await api.tagsList()
+      recent.value = await api.recentConnections(12)
       groups.value = t.groups
       // The group you were in may have been deleted.
       if (currentGroupId.value && !t.groups.some(g => g.id === currentGroupId.value)) currentGroupId.value = null
@@ -198,8 +217,8 @@ export const useHostsStore = defineStore('hosts', () => {
   }
 
   return {
-    hosts, groups, loaded, importOpen, themes, themeFor, query, view, currentGroupId, selectedTags, editing, editingGroup,
+    hosts, groups, loaded, tagInfos, recent, importOpen, themes, themeFor, query, view, currentGroupId, selectedTags, editing, editingGroup,
     allTags, searching, currentGroup, breadcrumb, childGroups, visibleHosts,
-    groupLabel, groupOptions, inheritedFor, toggleTag, refresh, save, saveGroup, remove, removeGroup, move, clear,
+    groupLabel, groupOptions, inheritedFor, toggleTag, deleteTag, refresh, save, saveGroup, remove, removeGroup, move, clear,
   }
 })

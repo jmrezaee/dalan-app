@@ -16,7 +16,9 @@ pub async fn history_list(
     limit: u32,
 ) -> AppResult<Vec<HistoryEntry>> {
     state
-        .with_db_session(move |c, _| history::list(c, host_id.as_deref(), query.as_deref(), limit))
+        .with_db_session(move |c, s| {
+            history::list(c, s, host_id.as_deref(), query.as_deref(), limit)
+        })
         .await
 }
 

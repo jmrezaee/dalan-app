@@ -54,6 +54,16 @@ pub enum PromptKind {
     Passphrase {
         key_label: String,
     },
+    /// One question from a keyboard-interactive sign-in (2FA code, PAM challenge). The server may
+    /// send several in a round; each is asked on its own and answered through `PromptAnswer.text`.
+    KeyboardInteractive {
+        host: String,
+        name: String,
+        instructions: String,
+        prompt: String,
+        /// False for secrets (typed text must be hidden).
+        echo: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Type)]

@@ -49,3 +49,18 @@ pub async fn package_delete(state: State<'_, AppState>, id: String) -> AppResult
         .with_db_session(move |c, s| snippets::package_delete(c, &s.vault_id, &id))
         .await
 }
+
+/// Moves snippets into a package, or out of every package when `package_id` is `None`.
+#[tauri::command]
+#[specta::specta]
+pub async fn snippets_move(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+    package_id: Option<String>,
+) -> AppResult<()> {
+    state
+        .with_db_session(move |c, s| {
+            snippets::snippets_move(c, &s.vault_id, &ids, package_id.as_deref())
+        })
+        .await
+}

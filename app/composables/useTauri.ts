@@ -40,6 +40,9 @@ export function useTauri() {
     groupSave: (input: GroupInput) => unwrap(commands.groupSave(input)),
     groupDelete: (id: string) => unwrap(commands.groupDelete(id)),
     hostsMove: (ids: string[], groupId: string | null) => unwrap(commands.hostsMove(ids, groupId)),
+    tagsList: () => unwrap(commands.tagsList()),
+    tagDelete: (id: string) => unwrap(commands.tagDelete(id)),
+    recentConnections: (limit: number) => unwrap(commands.recentConnections(limit)),
     /** Terminal output arrives as raw bytes on its own channel (an ArrayBuffer, not JSON). */
     sessionOpen: (hostId: string, cols: number, rows: number, onEvent: (e: SessionEvent) => void, onData: (b: Uint8Array) => void) => {
       const events = new Channel<SessionEvent>()
@@ -70,6 +73,7 @@ export function useTauri() {
     sftpRespond: (openId: string, promptId: string, answer: PromptAnswer) => unwrap(commands.sftpRespond(openId, promptId, answer)),
     sftpClose: (sftpId: string) => commands.sftpClose(sftpId),
     fsHome: (endpoint: string) => unwrap(commands.fsHome(endpoint)),
+    fsRealpath: (endpoint: string, path: string) => unwrap(commands.fsRealpath(endpoint, path)),
     fsList: (endpoint: string, path: string, showHidden: boolean) => unwrap(commands.fsList(endpoint, path, showHidden)),
     fsMkdir: (endpoint: string, path: string) => unwrap(commands.fsMkdir(endpoint, path)),
     fsRename: (endpoint: string, from: string, to: string) => unwrap(commands.fsRename(endpoint, from, to)),
@@ -133,6 +137,7 @@ export function useTauri() {
     snippetsList: () => unwrap(commands.snippetsList()),
     snippetSave: (input: SnippetInput) => unwrap(commands.snippetSave(input)),
     snippetDelete: (id: string) => unwrap(commands.snippetDelete(id)),
+    snippetsMove: (ids: string[], packageId: string | null) => unwrap(commands.snippetsMove(ids, packageId)),
     packageSave: (id: string | null, label: string) => unwrap(commands.packageSave(id, label)),
     packageDelete: (id: string) => unwrap(commands.packageDelete(id)),
     settingsGetAll: () => unwrap(commands.settingsGetAll()),

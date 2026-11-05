@@ -13,6 +13,7 @@ use crate::db::now_ms;
 use crate::error::{AppError, AppResult};
 
 const KEY_CHECK_AAD: &[u8] = b"dalan:key-check:v1";
+const DATA_KEY_AAD: &[u8] = b"dalan:data-key:v1";
 const KEY_CHECK_PLAINTEXT: &[u8] = b"dalan-vault-ok";
 const SALT_LEN: usize = 16;
 pub const MIN_PASSWORD_CHARS: usize = 8;
@@ -21,7 +22,33 @@ pub const DEFAULT_AUTO_LOCK_MINUTES: u32 = 15;
 /// What "unlocked" means: the vault id and its key. The key is wiped when this is dropped.
 pub struct VaultSession {
     pub vault_id: String,
+    /// Derived from the master password. Protects the `secrets` table and wraps the data key.
     pub key: Key,
+    /// Random, never changes (a password change only re-wraps it). Encrypts session logs and command history.
+    pub data_key: Key,
+}
+
+/// wrapped = nonce || ciphertext of the data key, sealed with the password-derived key.
+fn wrap_data_key(key: &Key, data_key: &Key) -> AppResult<Vec<u8>> {
+    let (nonce, ct) = crypto::seal(key, DATA_KEY_AAD, data_key.as_ref())?;
+    Ok([nonce, ct].concat())
+}
+
+fn unwrap_data_key(key: &Key, blob: &[u8]) -> Option<Key> {
+    if blob.len() <= crypto::NONCE_LEN {
+        return None;
+    }
+    let (nonce, ct) = blob.split_at(crypto::NONCE_LEN);
+    let plain = crypto::open(key, DATA_KEY_AAD, nonce, ct)?;
+    let bytes: [u8; 32] = plain.as_slice().try_into().ok()?;
+    Some(zeroize::Zeroizing::new(bytes))
+}
+
+fn random_data_key() -> Key {
+    use chacha20poly1305::aead::{rand_core::RngCore, OsRng};
+    let mut k = [0u8; 32];
+    OsRng.fill_bytes(&mut k);
+    zeroize::Zeroizing::new(k)
 }
 
 pub fn exists(conn: &Connection) -> AppResult<bool> {
@@ -62,13 +89,18 @@ pub fn create(conn: &Connection, password: &str, params: KdfParams) -> AppResult
     let salt = random_salt();
     let key = derive_key(password.as_bytes(), &salt, &params)?;
     let key_check = make_key_check(&key)?;
+    let data_key = random_data_key();
     let id = uuid::Uuid::now_v7().to_string();
     let now = now_ms();
     conn.execute(
-        "INSERT INTO vaults (id, name, kind, kdf_salt, kdf_params, key_check, created_at, updated_at) VALUES (?1, 'Personal', 'local', ?2, ?3, ?4, ?5, ?5)",
-        params![id, salt.to_vec(), serde_json::to_string(&params).map_err(|e| AppError::internal(e.to_string()))?, key_check, now],
+        "INSERT INTO vaults (id, name, kind, kdf_salt, kdf_params, key_check, wrapped_data_key, created_at, updated_at) VALUES (?1, 'Personal', 'local', ?2, ?3, ?4, ?5, ?6, ?6)",
+        params![id, salt.to_vec(), serde_json::to_string(&params).map_err(|e| AppError::internal(e.to_string()))?, key_check, wrap_data_key(&key, &data_key)?, now],
     )?;
-    Ok(VaultSession { vault_id: id, key })
+    Ok(VaultSession {
+        vault_id: id,
+        key,
+        data_key,
+    })
 }
 
 struct VaultRow {
@@ -76,14 +108,21 @@ struct VaultRow {
     salt: Vec<u8>,
     params: KdfParams,
     key_check: Vec<u8>,
+    wrapped_data_key: Option<Vec<u8>>,
 }
 
 fn load_row(conn: &Connection) -> AppResult<VaultRow> {
-    let (id, salt, params_json, key_check): (String, Vec<u8>, String, Vec<u8>) = conn
+    let (id, salt, params_json, key_check, wrapped_data_key): (
+        String,
+        Vec<u8>,
+        String,
+        Vec<u8>,
+        Option<Vec<u8>>,
+    ) = conn
         .query_row(
-            "SELECT id, kdf_salt, kdf_params, key_check FROM vaults ORDER BY created_at LIMIT 1",
+            "SELECT id, kdf_salt, kdf_params, key_check, wrapped_data_key FROM vaults ORDER BY created_at LIMIT 1",
             [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
         )
         .optional()?
         .ok_or_else(|| AppError::not_found("No vault yet. Set one up first."))?;
@@ -94,6 +133,7 @@ fn load_row(conn: &Connection) -> AppResult<VaultRow> {
         salt,
         params,
         key_check,
+        wrapped_data_key,
     })
 }
 
@@ -104,9 +144,24 @@ pub fn unlock(conn: &Connection, password: &str) -> AppResult<VaultSession> {
     if !key_check_ok(&key, &row.key_check) {
         return Err(AppError::wrong_password());
     }
+    // A vault from before the data key existed: adopt the current key as the data key, so logs written
+    // with it stay readable. From now on it is wrapped, and survives password changes.
+    let data_key = match &row.wrapped_data_key {
+        Some(blob) => unwrap_data_key(&key, blob)
+            .ok_or_else(|| AppError::internal("the vault's data key could not be opened"))?,
+        None => {
+            let adopted = key.clone();
+            conn.execute(
+                "UPDATE vaults SET wrapped_data_key = ?1 WHERE id = ?2",
+                params![wrap_data_key(&key, &adopted)?, row.id],
+            )?;
+            adopted
+        }
+    };
     Ok(VaultSession {
         vault_id: row.id,
         key,
+        data_key,
     })
 }
 
@@ -146,19 +201,21 @@ pub fn change_password(
         )?;
     }
     tx.execute(
-        "UPDATE vaults SET kdf_salt = ?1, kdf_params = ?2, key_check = ?3, updated_at = ?4 WHERE id = ?5",
+        "UPDATE vaults SET kdf_salt = ?1, kdf_params = ?2, key_check = ?3, wrapped_data_key = ?4, updated_at = ?5 WHERE id = ?6",
         params![
             salt.to_vec(),
             serde_json::to_string(&params).map_err(|e| AppError::internal(e.to_string()))?,
             make_key_check(&new_key)?,
+            wrap_data_key(&new_key, &old_session.data_key)?,
             now_ms(),
             old_session.vault_id
         ],
     )?;
     tx.commit()?;
     Ok(VaultSession {
-        vault_id: old_session.vault_id,
+        vault_id: old_session.vault_id.clone(),
         key: new_key,
+        data_key: old_session.data_key.clone(),
     })
 }
 
@@ -302,6 +359,45 @@ mod tests {
         )
         .unwrap();
         assert!(secrets::get(&conn, &s, &b).is_err());
+    }
+
+    #[test]
+    fn data_key_survives_a_password_change_and_old_vaults_adopt_one() {
+        let (mut conn, s) = fresh();
+        assert_ne!(
+            *s.data_key, *s.key,
+            "a new vault gets its own random data key"
+        );
+        let again = unlock(&conn, "correct-horse-staple").unwrap();
+        assert_eq!(*again.data_key, *s.data_key);
+        let after = change_password(
+            &mut conn,
+            "correct-horse-staple",
+            "a-brand-new-password",
+            KdfParams::cheap(),
+        )
+        .unwrap();
+        assert_eq!(*after.data_key, *s.data_key, "logs must stay readable");
+        let reopened = unlock(&conn, "a-brand-new-password").unwrap();
+        assert_eq!(*reopened.data_key, *s.data_key);
+
+        // A vault from before migration 0005 has no wrapped key: the first unlock adopts the password key.
+        conn.execute("UPDATE vaults SET wrapped_data_key = NULL", [])
+            .unwrap();
+        let legacy = unlock(&conn, "a-brand-new-password").unwrap();
+        assert_eq!(*legacy.data_key, *legacy.key);
+        let wrapped: Option<Vec<u8>> = conn
+            .query_row("SELECT wrapped_data_key FROM vaults", [], |r| r.get(0))
+            .unwrap();
+        assert!(wrapped.is_some(), "the adopted key is stored wrapped");
+        let moved = change_password(
+            &mut conn,
+            "a-brand-new-password",
+            "yet-another-password",
+            KdfParams::cheap(),
+        )
+        .unwrap();
+        assert_eq!(*moved.data_key, *legacy.data_key, "old logs still open");
     }
 
     #[test]

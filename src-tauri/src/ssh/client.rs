@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use russh::client::{self, Handler};
 use russh::keys::{HashAlg, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
-use russh::ChannelMsg;
+use russh::{ChannelMsg, MethodKind};
 use tokio::sync::mpsc;
 use tokio::time::{interval, timeout, MissedTickBehavior};
 use zeroize::Zeroizing;
@@ -286,6 +286,8 @@ pub async fn connect_authenticated(
     prompts: &Arc<Prompts>,
     host_id: &str,
     remote: Option<Arc<crate::tunnels::RemoteHook>>,
+    // Agent forwarding is for interactive shells only: SFTP, tunnels and key install never get it.
+    shell: bool,
 ) -> Option<Connected> {
     emit_state(io, SessionState::Connecting);
 
@@ -359,7 +361,7 @@ pub async fn connect_authenticated(
                     &user,
                     &pattern,
                     remote.clone().filter(|_| i == last),
-                    info.agent_forwarding && i == last,
+                    shell && info.agent_forwarding && i == last,
                 )
                 .await?
             }
@@ -400,7 +402,7 @@ pub async fn connect_authenticated(
                     &user,
                     &pattern,
                     remote.clone().filter(|_| i == last),
-                    info.agent_forwarding && i == last,
+                    shell && info.agent_forwarding && i == last,
                 )
                 .await?
             }
@@ -410,7 +412,7 @@ pub async fn connect_authenticated(
                 handle,
                 label: info.label.clone(),
                 startup_script: info.startup_script.clone(),
-                agent_forwarding: info.agent_forwarding,
+                agent_forwarding: shell && info.agent_forwarding,
                 _hops: hops,
             });
         }
@@ -562,6 +564,19 @@ async fn authenticate(
             KeyResult::Stop => return false,
         }
     }
+    // Which methods does the server offer? An empty "none" attempt tells us. A server that only has
+    // keyboard-interactive (2FA, PAM) must not be asked for a password first.
+    let offered = match handle.authenticate_none(user).await {
+        Ok(client::AuthResult::Success) => return true,
+        Ok(client::AuthResult::Failure {
+            remaining_methods, ..
+        }) => Some(remaining_methods),
+        Err(_) => None, // let the real attempt below report the broken connection
+    };
+    let can = |k: MethodKind| offered.as_ref().map_or(true, |m| m.contains(&k));
+    if !can(MethodKind::Password) && can(MethodKind::KeyboardInteractive) {
+        return keyboard_interactive(handle, io, prompts, info, user).await;
+    }
     let password: Zeroizing<String> = match (&info.password, &rejected_key) {
         (Some(p), _) => p.clone(),
         // A key was refused and there is no password to fall back on: say so, don't ask for one.
@@ -594,6 +609,13 @@ async fn authenticate(
     };
     match handle.authenticate_password(user, password.as_str()).await {
         Ok(r) if r.success() => true,
+        // The password was right but the server wants a second step (or offers keyboard-interactive
+        // as the other way in): carry on with its questions.
+        Ok(client::AuthResult::Failure {
+            remaining_methods, ..
+        }) if remaining_methods.contains(&MethodKind::KeyboardInteractive) => {
+            keyboard_interactive(handle, io, prompts, info, user).await
+        }
         Ok(_) => {
             emit_error(
                 io,
@@ -611,6 +633,86 @@ async fn authenticate(
             false
         }
     }
+}
+
+/// Keyboard-interactive sign-in: the server sends rounds of questions, we ask each one in the S18
+/// overlay and send the answers back. A saved password answers a hidden "password" question by itself.
+async fn keyboard_interactive(
+    handle: &mut client::Handle<Client>,
+    io: &Arc<SessionIo>,
+    prompts: &Arc<Prompts>,
+    info: &hosts::ConnectInfo,
+    user: &str,
+) -> bool {
+    use client::KeyboardInteractiveAuthResponse as R;
+    let lost = |io: &Arc<SessionIo>, e: russh::Error| {
+        emit_error(
+            io,
+            ErrorCode::HostUnreachable,
+            format!("Connection lost while signing in: {e}"),
+        );
+        false
+    };
+    let mut reply = match handle
+        .authenticate_keyboard_interactive_start(user, None)
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => return lost(io, e),
+    };
+    // A server that keeps asking forever is not worth following.
+    for _ in 0..8 {
+        match reply {
+            R::Success => return true,
+            R::Failure { .. } => {
+                emit_error(
+                    io,
+                    ErrorCode::AuthFailed,
+                    format!("{} rejected the answers.", info.label),
+                );
+                return false;
+            }
+            R::InfoRequest {
+                name,
+                instructions,
+                prompts: questions,
+            } => {
+                let mut answers = Vec::with_capacity(questions.len());
+                for q in questions {
+                    let asks_password = !q.echo && q.prompt.to_lowercase().contains("password");
+                    if let (true, Some(pw)) = (asks_password, &info.password) {
+                        answers.push(pw.as_str().to_string());
+                        continue;
+                    }
+                    let kind = PromptKind::KeyboardInteractive {
+                        host: info.label.clone(),
+                        name: name.clone(),
+                        instructions: instructions.clone(),
+                        prompt: q.prompt.clone(),
+                        echo: q.echo,
+                    };
+                    let Some(a) = prompts.ask(io, kind).await else {
+                        emit_state(io, SessionState::Closed);
+                        return false;
+                    };
+                    answers.push(a.text.unwrap_or_default());
+                }
+                reply = match handle
+                    .authenticate_keyboard_interactive_respond(answers)
+                    .await
+                {
+                    Ok(r) => r,
+                    Err(e) => return lost(io, e),
+                };
+            }
+        }
+    }
+    emit_error(
+        io,
+        ErrorCode::AuthFailed,
+        format!("{} asked too many questions.", info.label),
+    );
+    false
 }
 
 /// Runs one command on its own channel and returns what it printed (capped at `max` bytes), or
@@ -679,7 +781,8 @@ pub async fn run(
     p: Params,
     mut cmds: mpsc::UnboundedReceiver<Cmd>,
 ) {
-    let Some(conn) = connect_authenticated(&store, &io, &prompts, &p.host_id, None).await else {
+    let Some(conn) = connect_authenticated(&store, &io, &prompts, &p.host_id, None, true).await
+    else {
         return;
     };
 
@@ -836,7 +939,8 @@ pub async fn run_export(
         Ok(k) => k,
         Err(e) => return emit_error(&io, e.code, e.message),
     };
-    let Some(conn) = connect_authenticated(&store, &io, &prompts, &host_id, None).await else {
+    let Some(conn) = connect_authenticated(&store, &io, &prompts, &host_id, None, false).await
+    else {
         return;
     };
     // Absolute paths stay as typed; `~/x` becomes "$HOME/x".

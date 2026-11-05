@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // S02 Hosts. The full app shell (tabs, all vault sections) arrives in P7; until then this page
 // carries a small Hosts-only sidebar so the layout already matches the canvas.
-import { ScrollText, ArrowDownUp, Code2, LayoutGrid, KeyRound, Lock, Server, Settings, ShieldCheck, Vault, Waypoints } from '@lucide/vue'
+import { ScrollText, ArrowDownUp, Code2, LayoutGrid, KeyRound, Lock, Server, Settings, ShieldCheck, Trash2, Vault, Waypoints } from '@lucide/vue'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { buttonVariants } from '@/components/ui/button'
 import type { Session } from '~/stores/sessions'
 
@@ -175,16 +176,21 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
           <div v-if="hosts.allTags.length" class="flex flex-1 flex-col gap-1.5 px-2 pt-4">
             <span class="px-2.5 text-2xs font-medium uppercase tracking-wider text-muted">Tags</span>
             <div class="flex flex-wrap gap-1.5 px-2.5">
-              <button
-                v-for="t in hosts.allTags"
-                :key="t"
-                type="button"
-                :aria-pressed="hosts.selectedTags.includes(t)"
-                :class="['h-[22px] rounded-full border px-2 text-xs', hosts.selectedTags.includes(t) ? 'border-accent bg-accent/10 text-text' : 'border-border bg-surface-hover text-muted hover:text-text']"
-                @click="section = 'hosts'; hosts.toggleTag(t)"
-              >
-                {{ t }}
-              </button>
+              <ContextMenu v-for="t in hosts.allTags" :key="t">
+                <ContextMenuTrigger as-child>
+                  <button
+                    type="button"
+                    :aria-pressed="hosts.selectedTags.includes(t)"
+                    :class="['h-[22px] rounded-full border px-2 text-xs', hosts.selectedTags.includes(t) ? 'border-accent bg-accent/10 text-text' : 'border-border bg-surface-hover text-muted hover:text-text']"
+                    @click="section = 'hosts'; hosts.toggleTag(t)"
+                  >
+                    {{ t }}
+                  </button>
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                  <ContextMenuItem class="text-danger" @select="hosts.deleteTag(t)"><Trash2 />Delete tag</ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
             </div>
           </div>
           <div v-else class="flex-1" />

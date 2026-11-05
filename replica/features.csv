@@ -43,11 +43,11 @@ SFTP transfer conflicts (replace / keep both / skip),sftp,should,yes,partial,S22
 SFTP permissions (chmod),sftp,should,unknown,partial,not in Termius docs; expected by users; smoke 2026-11-05: needs a real check
 Environment variables per host/group (SendEnv),hosts,should,yes,partial,source 12; smoke 2026-11-05: not run against a real server
 SOCKS5 / HTTP proxy per host,hosts,should,yes,partial,source 2; smoke 2026-11-05: not run through a real proxy
-SSH agent forwarding,hosts,should,yes,partial,source 2; smoke 2026-11-05: not run against a real server
+SSH agent forwarding,hosts,should,yes,partial,source 2; shells only since P17; not run against a real server
 Import from ~/.ssh/config and known_hosts and keys,import,should,yes,no,S25 F10
 Import hosts from CSV,import,should,yes,partial,source 2; smoke 2026-11-05: CSV import not run in the real window (SSH config import was)
 Terminal themes per host/group,terminal,should,yes,partial,S20; smoke 2026-11-05: not run in the real window
-Command history side panel,terminal,should,yes,yes,S20
+Command history side panel,terminal,should,yes,yes,S20; encrypted with the data key since P17; secret-looking lines are not saved
 Local terminal tab,terminal,should,yes,partial,S23 local terminal path; smoke 2026-11-05: not run in the real window
 Session logs (last per host + bookmarks + comment),logs,should,yes,yes,S15 source 6; paid in Termius
 SSH certificates (key + cert as one item),keychain,could,yes,partial,source 7; smoke 2026-11-05: not run against a real OpenSSH server
@@ -72,3 +72,4 @@ Termius AI model and AI snippet writing,terminal,could,yes,skip,their hosted mod
 AWS / DigitalOcean / Azure host sync,integrations,could,yes,skip,possible via official APIs later; not core
 Mobile apps (iOS Android),platform,could,yes,skip,desktop only
 Termius brand icon theme names and copy,brand,could,yes,skip,owned assets; make your own with /replica-brand
+Keyboard-interactive sign-in (2FA / PAM),hosts,should,yes,partial,P17; tested against an in-process server only

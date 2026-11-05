@@ -128,6 +128,27 @@ type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 impl Fs {
     /// Where a new pane starts: your home folder.
+    /// Resolves `.`, `..` and symlinks to an absolute path.
+    pub async fn realpath(&self, path: &str) -> AppResult<String> {
+        match self {
+            Fs::Local => {
+                let p = path.to_string();
+                tokio::task::spawn_blocking(move || {
+                    std::fs::canonicalize(&p)
+                        .map(|c| c.to_string_lossy().into_owned())
+                        .map_err(|e| io_err(&e, &p))
+                })
+                .await
+                .map_err(|e| AppError::internal(e.to_string()))?
+            }
+            Fs::Remote(r) => r
+                .sftp
+                .canonicalize(path)
+                .await
+                .map_err(|e| sftp_err(&e, path)),
+        }
+    }
+
     pub async fn home(&self) -> AppResult<String> {
         match self {
             Fs::Local => Ok(std::env::var("HOME")

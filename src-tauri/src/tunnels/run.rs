@@ -103,7 +103,7 @@ pub async fn run_tunnel(
             *l = None;
         }
         let conn = tokio::select! {
-            c = connect_authenticated(&store, &io, &prompts, &rule.host_id, hook.clone()) => c,
+            c = connect_authenticated(&store, &io, &prompts, &rule.host_id, hook.clone(), false) => c,
             _ = cancel.changed() => return,
         };
         let Some(conn) = conn else {

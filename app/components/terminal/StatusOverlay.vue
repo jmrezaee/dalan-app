@@ -2,7 +2,7 @@
 // S18. Copy is from replica/brand.md. The overlay is role=alertdialog when it needs an answer.
 import { CircleAlert, KeyRound, LoaderCircle, PlugZap, ShieldAlert, Unplug } from '@lucide/vue'
 
-export type OverlayKind = 'connecting' | 'password' | 'passphrase' | 'host-key-new' | 'host-key-changed' | 'auth-failed' | 'unreachable' | 'disconnected'
+export type OverlayKind = 'connecting' | 'password' | 'passphrase' | 'question' | 'host-key-new' | 'host-key-changed' | 'auth-failed' | 'unreachable' | 'disconnected'
 const props = defineProps<{
   kind: OverlayKind
   host: string
@@ -13,6 +13,8 @@ const props = defineProps<{
   reason?: string
   user?: string
   keyLabel?: string
+  /** One keyboard-interactive question from the server (2FA code, PAM challenge). */
+  question?: { name: string, instructions: string, prompt: string, echo: boolean }
   time?: string
 }>()
 const emit = defineEmits<{ cancel: []; submit: [password: string, remember: boolean]; trust: []; close: []; replace: []; edit: []; retry: []; reconnect: [] }>()
@@ -22,6 +24,7 @@ const remember = ref(false)
 // The password field is inside a PasswordInput wrapper, so focus it by id when the card appears.
 function focusPassword() {
   if (props.kind === 'password' || props.kind === 'passphrase') nextTick(() => document.getElementById('session-password')?.focus())
+  if (props.kind === 'question') nextTick(() => document.getElementById('session-answer')?.focus())
 }
 // Keyboard: the safe default button (Close, Reconnect, Retry, Try again) takes focus when the card appears,
 // so Enter does what the card's default says. (The `autofocus` attribute does nothing on elements added later.)
@@ -60,6 +63,16 @@ function submit() {
         <p v-else-if="user" class="text-muted">Signing in as <span class="font-mono">{{ user }}</span>.</p>
         <PasswordInput id="session-password" v-model="password" />
         <label class="flex items-center gap-2 text-sm"><Checkbox v-model="remember" />Remember it on this computer</label>
+        <div class="flex justify-end gap-2"><Button type="button" variant="secondary" @click="$emit('cancel')">Cancel</Button><Button type="submit">Continue</Button></div>
+      </form>
+
+      <form v-else-if="kind === 'question' && question" class="flex flex-col gap-3" @submit.prevent="submit">
+        <KeyRound class="size-6 text-accent" aria-hidden="true" />
+        <h2 class="text-lg">{{ question.name || `Sign in to ${host}` }}</h2>
+        <p v-if="question.instructions" class="whitespace-pre-line text-muted">{{ question.instructions }}</p>
+        <label for="session-answer" class="text-sm">{{ question.prompt.trim() }}</label>
+        <Input v-if="question.echo" id="session-answer" v-model="password" autocomplete="off" />
+        <PasswordInput v-else id="session-answer" v-model="password" />
         <div class="flex justify-end gap-2"><Button type="button" variant="secondary" @click="$emit('cancel')">Cancel</Button><Button type="submit">Continue</Button></div>
       </form>
 

@@ -6,9 +6,12 @@
 //!   ended up with), nor one cancelled with Ctrl-C or Ctrl-U.
 //! - A line typed right after a prompt that asks for a "password" or "passphrase" is dropped, so
 //!   `sudo` and `ssh` passwords don't land in the history. It's a text match on the prompt, not a
-//!   guarantee: a command with a secret inside it (`mysql -pSECRET`) is stored as typed.
+//!   guarantee.
+//! - A line that carries an obvious secret (`--password=…`, `TOKEN=…`, `mysql -pSECRET`,
+//!   `sshpass -p …`, a bearer header) is dropped too (see `looks_secret`).
 //!
-//! History is plain text in the database (not encrypted like secrets).
+//! Commands are encrypted with the vault's data key (`command_enc`). Rows written before that
+//! (plain `command`) are encrypted the next time history is read or written.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -20,6 +23,7 @@ use specta::Type;
 use crate::db::now_ms;
 use crate::error::AppResult;
 use crate::state::Store;
+use crate::vault::{crypto, VaultSession};
 
 const MAX_COMMAND: usize = 2000;
 /// Newest commands kept per server.
@@ -139,7 +143,7 @@ impl HistoryTap {
             let _ = store
                 .with_db_session(move |c, s| {
                     for l in &lines {
-                        record(c, &s.vault_id, host.as_deref(), l)?;
+                        record(c, s, host.as_deref(), l)?;
                     }
                     Ok(())
                 })
@@ -203,27 +207,102 @@ pub struct HistoryEntry {
     pub ran_at: i64,
 }
 
+/// True for a line that obviously carries a credential. A text match, not a guarantee.
+pub fn looks_secret(line: &str) -> bool {
+    let l = line.to_lowercase();
+    const MARKERS: [&str; 14] = [
+        "--password",
+        "--passwd",
+        "--token",
+        "--secret",
+        "--api-key",
+        "password=",
+        "passwd=",
+        "token=",
+        "secret=",
+        "apikey=",
+        "api_key=",
+        "authorization:",
+        "bearer ",
+        "sshpass",
+    ];
+    if MARKERS.iter().any(|m| l.contains(m)) {
+        return true;
+    }
+    // `mysql -pSECRET` (the value is glued to the flag). `-p` alone, or `-p 22`, is harmless.
+    let mut words = l.split_whitespace();
+    let first = words.next().unwrap_or("");
+    matches!(first, "mysql" | "mysqldump" | "mysqladmin" | "mariadb")
+        && words.any(|w| w.starts_with("-p") && w.len() > 2 && !w.starts_with("--"))
+}
+
+fn seal_command(s: &VaultSession, id: &str, command: &str) -> AppResult<Vec<u8>> {
+    let (nonce, ct) = crypto::seal(&s.data_key, id.as_bytes(), command.as_bytes())?;
+    Ok([nonce, ct].concat())
+}
+
+fn open_command(s: &VaultSession, id: &str, blob: &[u8]) -> Option<String> {
+    if blob.len() <= crypto::NONCE_LEN {
+        return None;
+    }
+    let (nonce, ct) = blob.split_at(crypto::NONCE_LEN);
+    let plain = crypto::open(&s.data_key, id.as_bytes(), nonce, ct)?;
+    String::from_utf8(plain.to_vec()).ok()
+}
+
+/// Encrypts rows saved as plain text before the data key existed.
+fn encrypt_legacy(conn: &Connection, s: &VaultSession) -> AppResult<()> {
+    let rows: Vec<(String, String)> = {
+        let mut st = conn.prepare(
+            "SELECT id, command FROM command_history WHERE command_enc IS NULL AND command != ''",
+        )?;
+        let mapped = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        mapped.collect::<Result<_, _>>()?
+    };
+    for (id, command) in rows {
+        conn.execute(
+            "UPDATE command_history SET command = '', command_enc = ?1 WHERE id = ?2",
+            params![seal_command(s, &id, &command)?, id],
+        )?;
+    }
+    Ok(())
+}
+
+fn row_command(s: &VaultSession, id: &str, plain: String, enc: Option<Vec<u8>>) -> Option<String> {
+    match enc {
+        Some(blob) => open_command(s, id, &blob),
+        None => Some(plain),
+    }
+}
+
 /// Saves a command for a server (`None` = local terminal). The same command twice in a row is
-/// kept once, and only the newest `KEEP_PER_HOST` stay.
+/// kept once, and only the newest `KEEP_PER_HOST` stay. Lines that look like secrets are skipped.
 pub fn record(
     conn: &Connection,
-    _vault_id: &str,
+    s: &VaultSession,
     host_id: Option<&str>,
     command: &str,
 ) -> AppResult<()> {
-    let last: Option<String> = conn
-        .query_row(
-            "SELECT command FROM command_history WHERE host_id IS ?1 ORDER BY ran_at DESC, rowid DESC LIMIT 1",
-            params![host_id],
-            |r| r.get(0),
-        )
-        .ok();
-    if last.as_deref() == Some(command) {
+    if looks_secret(command) {
         return Ok(());
     }
+    encrypt_legacy(conn, s)?;
+    let last: Option<(String, Option<Vec<u8>>, String)> = conn
+        .query_row(
+            "SELECT command, command_enc, id FROM command_history WHERE host_id IS ?1 ORDER BY ran_at DESC, rowid DESC LIMIT 1",
+            params![host_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .ok();
+    if let Some((plain, enc, id)) = last {
+        if row_command(s, &id, plain, enc).as_deref() == Some(command) {
+            return Ok(());
+        }
+    }
+    let id = uuid::Uuid::now_v7().to_string();
     conn.execute(
-        "INSERT INTO command_history (id, host_id, command, ran_at) VALUES (?1, ?2, ?3, ?4)",
-        params![uuid::Uuid::now_v7().to_string(), host_id, command, now_ms()],
+        "INSERT INTO command_history (id, host_id, command, command_enc, ran_at) VALUES (?1, ?2, '', ?3, ?4)",
+        params![id, host_id, seal_command(s, &id, command)?, now_ms()],
     )?;
     conn.execute(
         "DELETE FROM command_history WHERE host_id IS ?1 AND rowid NOT IN (SELECT rowid FROM command_history WHERE host_id IS ?1 ORDER BY ran_at DESC, rowid DESC LIMIT ?2)",
@@ -232,30 +311,44 @@ pub fn record(
     Ok(())
 }
 
-/// Newest first. `query` filters by substring.
+/// Newest first. `query` filters by substring (case-insensitive; done here, after decrypting).
 pub fn list(
     conn: &Connection,
+    s: &VaultSession,
     host_id: Option<&str>,
     query: Option<&str>,
     limit: u32,
 ) -> AppResult<Vec<HistoryEntry>> {
-    let like = format!(
-        "%{}%",
-        query.unwrap_or("").replace('%', "\\%").replace('_', "\\_")
-    );
+    encrypt_legacy(conn, s)?;
+    let needle = query.unwrap_or("").to_lowercase();
     let mut st = conn.prepare(
-        "SELECT id, command, ran_at FROM command_history WHERE host_id IS ?1 AND command LIKE ?2 ESCAPE '\\' ORDER BY ran_at DESC, rowid DESC LIMIT ?3",
+        "SELECT id, command, command_enc, ran_at FROM command_history WHERE host_id IS ?1 ORDER BY ran_at DESC, rowid DESC",
     )?;
-    let rows = st
-        .query_map(params![host_id, like, limit.min(500)], |r| {
-            Ok(HistoryEntry {
-                id: r.get(0)?,
-                command: r.get(1)?,
-                ran_at: r.get(2)?,
-            })
-        })?
-        .collect::<Result<_, _>>()?;
-    Ok(rows)
+    let mut rows = st.query_map(params![host_id], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, Option<Vec<u8>>>(2)?,
+            r.get::<_, i64>(3)?,
+        ))
+    })?;
+    let mut out = Vec::new();
+    let max = limit.min(500) as usize;
+    while out.len() < max {
+        let Some(row) = rows.next() else { break };
+        let (id, plain, enc, ran_at) = row?;
+        let Some(command) = row_command(s, &id, plain, enc) else {
+            continue; // can't be opened (should not happen): skip rather than fail the whole list
+        };
+        if needle.is_empty() || command.to_lowercase().contains(&needle) {
+            out.push(HistoryEntry {
+                id,
+                command,
+                ran_at,
+            });
+        }
+    }
+    Ok(out)
 }
 
 /// One server's history, or everything.
@@ -307,28 +400,94 @@ mod tests {
     }
 
     #[test]
+    fn lines_with_obvious_secrets_are_not_kept() {
+        for bad in [
+            "mysql -u root -pSecret db",
+            "mysql --password=x",
+            "export API_TOKEN=abc",
+            "curl -H 'Authorization: Bearer abc' x",
+            "sshpass -p hunter2 ssh a@b",
+            "deploy --token abc",
+        ] {
+            assert!(looks_secret(bad), "{bad}");
+        }
+        for ok in [
+            "ssh -p 22 host",
+            "mkdir -p a/b",
+            "find . -print",
+            "mysql -p",
+            "git log token-list",
+        ] {
+            assert!(!looks_secret(ok), "{ok}");
+        }
+    }
+
+    #[test]
+    fn history_is_encrypted_at_rest_and_old_plain_rows_are_upgraded() {
+        let c = open_in_memory().unwrap();
+        let s = vault::create(&c, "correct-horse-staple", KdfParams::cheap()).unwrap();
+        record(&c, &s, None, "echo hello").unwrap();
+        record(&c, &s, None, "mysql -pTopSecret").unwrap(); // dropped
+        let raw: (String, Option<Vec<u8>>) = c
+            .query_row(
+                "SELECT command, command_enc FROM command_history",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(raw.0, "");
+        assert!(raw
+            .1
+            .is_some_and(|b| !String::from_utf8_lossy(&b).contains("hello")));
+        assert_eq!(list(&c, &s, None, None, 10).unwrap().len(), 1);
+        // A row from before the data key: plain text, no ciphertext.
+        c.execute(
+            "INSERT INTO command_history (id, host_id, command, ran_at) VALUES ('old', NULL, 'uptime', 1)",
+            [],
+        )
+        .unwrap();
+        let got = list(&c, &s, None, Some("UPT"), 10).unwrap();
+        assert_eq!(got[0].command, "uptime");
+        let plain: String = c
+            .query_row(
+                "SELECT command FROM command_history WHERE id = 'old'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(plain, "", "upgraded to ciphertext");
+        // Another vault key can't read it.
+        let other = vault::VaultSession {
+            vault_id: s.vault_id.clone(),
+            key: s.key.clone(),
+            data_key: zeroize::Zeroizing::new([9u8; 32]),
+        };
+        assert!(list(&c, &other, None, None, 10).unwrap().is_empty());
+    }
+
+    #[test]
     fn storage_dedupes_limits_and_filters_per_host() {
         let c = open_in_memory().unwrap();
         let s = vault::create(&c, "correct-horse-staple", KdfParams::cheap()).unwrap();
         // Local terminal (no host), so no foreign key is needed.
-        record(&c, &s.vault_id, None, "ls").unwrap();
-        record(&c, &s.vault_id, None, "ls").unwrap(); // repeat: kept once
-        record(&c, &s.vault_id, None, "docker ps").unwrap();
-        record(&c, &s.vault_id, None, "ls").unwrap(); // not a consecutive repeat
-        let all = list(&c, None, None, 50).unwrap();
+        record(&c, &s, None, "ls").unwrap();
+        record(&c, &s, None, "ls").unwrap(); // repeat: kept once
+        record(&c, &s, None, "docker ps").unwrap();
+        record(&c, &s, None, "ls").unwrap(); // not a consecutive repeat
+        let all = list(&c, &s, None, None, 50).unwrap();
         assert_eq!(
             all.iter().map(|e| e.command.as_str()).collect::<Vec<_>>(),
             vec!["ls", "docker ps", "ls"]
         );
-        assert_eq!(list(&c, None, Some("dock"), 50).unwrap().len(), 1);
-        assert_eq!(list(&c, None, Some("100%"), 50).unwrap().len(), 0); // % is literal
+        assert_eq!(list(&c, &s, None, Some("dock"), 50).unwrap().len(), 1);
+        assert_eq!(list(&c, &s, None, Some("100%"), 50).unwrap().len(), 0); // % is literal
         for i in 0..520 {
-            record(&c, &s.vault_id, None, &format!("cmd {i}")).unwrap();
+            record(&c, &s, None, &format!("cmd {i}")).unwrap();
         }
-        assert_eq!(list(&c, None, None, 500).unwrap().len(), 500);
-        assert_eq!(list(&c, None, None, 1).unwrap()[0].command, "cmd 519");
+        assert_eq!(list(&c, &s, None, None, 500).unwrap().len(), 500);
+        assert_eq!(list(&c, &s, None, None, 1).unwrap()[0].command, "cmd 519");
         clear(&c, None, false).unwrap();
-        assert!(list(&c, None, None, 50).unwrap().is_empty());
+        assert!(list(&c, &s, None, None, 50).unwrap().is_empty());
         assert!(!enabled(&c)); // off until Settings turns it on
     }
 }

@@ -61,7 +61,12 @@ pub async fn vault_unlock(
     match state.with_db(move |c| vault::unlock(c, &pw)).await {
         Ok(session) => {
             state.reset_failures();
+            let vault_id = session.vault_id.clone();
             state.set_session(Some(session));
+            // Secrets nothing points at any more are removed.
+            let _ = state
+                .with_db(move |c| crate::vault::secrets::sweep_orphans(c, &vault_id))
+                .await;
             super::tunnels::autostart(&app, &state).await; // rules marked "start when Dalan unlocks"
             Ok(())
         }

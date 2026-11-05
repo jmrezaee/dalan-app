@@ -442,3 +442,13 @@ async fn docker_sftp_lists_uploads_downloads_and_deletes() {
         "the folder and everything in it is gone"
     );
 }
+
+#[tokio::test]
+async fn realpath_resolves_dots_locally() {
+    let d = TempDir::new();
+    d.write("a/b/file.txt", b"x");
+    let dir = d.path("a/b/..");
+    let got = Fs::Local.realpath(&dir).await.unwrap();
+    assert!(got.ends_with("/a"), "{got}");
+    assert!(Fs::Local.realpath(&d.path("missing")).await.is_err());
+}

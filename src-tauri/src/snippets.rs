@@ -154,6 +154,34 @@ pub fn delete(conn: &Connection, vault_id: &str, id: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Moves snippets into a package (`None` = out of any package).
+pub fn snippets_move(
+    conn: &mut Connection,
+    vault_id: &str,
+    ids: &[String],
+    package_id: Option<&str>,
+) -> AppResult<()> {
+    let tx = conn.transaction()?;
+    if let Some(p) = package_id {
+        let ok: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM snippet_packages WHERE id = ?1 AND vault_id = ?2)",
+            params![p, vault_id],
+            |r| r.get(0),
+        )?;
+        if !ok {
+            return Err(AppError::not_found("That package no longer exists."));
+        }
+    }
+    for id in ids {
+        tx.execute(
+            "UPDATE snippets SET package_id = ?1, updated_at = ?2 WHERE id = ?3 AND vault_id = ?4",
+            params![package_id, now_ms(), id, vault_id],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 pub fn package_save(
     conn: &Connection,
     vault_id: &str,
@@ -213,6 +241,33 @@ mod tests {
     use super::*;
     use crate::db::open_in_memory;
     use crate::vault::{self, kdf::KdfParams};
+
+    #[test]
+    fn snippets_move_into_and_out_of_a_package() {
+        let mut c = open_in_memory().unwrap();
+        let v = vault::create(&c, "correct-horse-staple", KdfParams::cheap())
+            .unwrap()
+            .vault_id;
+        package_save(&c, &v, None, "Deploy").unwrap();
+        let pkg = list(&c, &v).unwrap().packages[0].id.clone();
+        let input = SnippetInput {
+            id: None,
+            label: "Disk".into(),
+            script: "df -h".into(),
+            package_id: None,
+            target_host_ids: vec![],
+        };
+        save(&mut c, &v, &input).unwrap();
+        let id = list(&c, &v).unwrap().snippets[0].id.clone();
+        snippets_move(&mut c, &v, std::slice::from_ref(&id), Some(&pkg)).unwrap();
+        assert_eq!(
+            list(&c, &v).unwrap().snippets[0].package_id.as_deref(),
+            Some(pkg.as_str())
+        );
+        snippets_move(&mut c, &v, &[id], None).unwrap();
+        assert!(list(&c, &v).unwrap().snippets[0].package_id.is_none());
+        assert!(snippets_move(&mut c, &v, &[], Some("nope")).is_err());
+    }
 
     #[test]
     fn snippets_and_packages_roundtrip() {

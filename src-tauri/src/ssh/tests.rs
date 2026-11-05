@@ -34,6 +34,8 @@ pub(crate) struct TestServer {
     pub(crate) forwards: Arc<std::sync::Mutex<Vec<String>>>,
     /// Channels that carry forwarded traffic: their data belongs to the tunnel, not to our echo shell.
     pub(crate) tunnel_channels: Arc<std::sync::Mutex<Vec<ChannelId>>>,
+    /// When set, the server only offers keyboard-interactive and wants this code (a 2FA-style server).
+    pub(crate) kbd_code: Option<String>,
 }
 
 impl server::Server for TestServer {
@@ -80,6 +82,31 @@ impl server::Handler for TestServer {
             *self.cert_logins.lock().unwrap() += 1;
         }
         Ok(if ok { Auth::Accept } else { Auth::reject() })
+    }
+    async fn auth_keyboard_interactive<'a>(
+        &'a mut self,
+        user: &str,
+        _submethods: &str,
+        response: Option<server::Response<'a>>,
+    ) -> Result<Auth, Self::Error> {
+        let Some(code) = self.kbd_code.clone() else {
+            return Ok(Auth::reject());
+        };
+        Ok(match response {
+            None => Auth::Partial {
+                name: "Two-step sign-in".into(),
+                instructions: "Open your authenticator app.".into(),
+                prompts: vec![("Verification code: ".into(), true)].into(),
+            },
+            Some(mut r) => {
+                let given = r.next().map(|b| String::from_utf8_lossy(&b).into_owned());
+                if user == "test" && given.as_deref() == Some(code.as_str()) {
+                    Auth::Accept
+                } else {
+                    Auth::reject()
+                }
+            }
+        })
     }
     async fn channel_open_direct_tcpip(
         &mut self,
@@ -222,6 +249,11 @@ pub(crate) async fn start_server(srv: TestServer) -> u16 {
         .unwrap()],
         auth_rejection_time: Duration::from_millis(1),
         auth_rejection_time_initial: Some(Duration::from_millis(0)),
+        methods: if srv.kbd_code.is_some() {
+            russh::MethodSet::from(&[russh::MethodKind::KeyboardInteractive][..])
+        } else {
+            server::Config::default().methods
+        },
         ..Default::default()
     });
     let socket = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
@@ -242,11 +274,20 @@ pub(crate) struct Harness {
 
 /// A fresh unlocked vault with one host pointing at a new test server.
 pub(crate) async fn harness(saved_password: Option<&str>) -> Harness {
+    harness_with(saved_password, |_| {}).await
+}
+
+/// Same, with a chance to change the test server before it starts.
+pub(crate) async fn harness_with(
+    saved_password: Option<&str>,
+    tweak: impl FnOnce(&mut TestServer),
+) -> Harness {
     let conn = open_in_memory().unwrap();
     let session = vault::create(&conn, "correct-horse-staple", KdfParams::cheap()).unwrap();
     let state = AppState::new(conn);
     state.set_session(Some(session));
-    let server = TestServer::default();
+    let mut server = TestServer::default();
+    tweak(&mut server);
     let port = start_server(server.clone()).await;
     let pw = saved_password.map(String::from);
     let host = state
@@ -1528,4 +1569,34 @@ async fn docker_jump_through_the_container_to_itself() {
         .unwrap();
     assert!(s.read_until("via-42").await.contains("via-42"));
     s.cmds.send(Cmd::Close).unwrap();
+}
+
+#[tokio::test]
+async fn keyboard_interactive_asks_the_servers_question_and_signs_in() {
+    // A 2FA-style server: no password method at all, just a code. No password may be asked for.
+    let h = harness_with(None, |s| s.kbd_code = Some("123456".into())).await;
+    let mut s = start(&h);
+    let (id, _) = s.expect_prompt().await;
+    s.answer(&id, true, None, true); // trust the host key
+    let (id, kind) = s.expect_prompt().await;
+    let PromptKind::KeyboardInteractive {
+        prompt, name, echo, ..
+    } = kind
+    else {
+        panic!("expected the server's question, not a password prompt")
+    };
+    assert_eq!(prompt.trim(), "Verification code:");
+    assert_eq!(name, "Two-step sign-in");
+    assert!(echo);
+    s.answer(&id, true, Some("123456"), false);
+    s.until(is_state(SessionState::Ready)).await;
+
+    // A wrong code is a normal sign-in failure.
+    let mut s = start(&h);
+    let (id, _) = s.expect_prompt().await;
+    s.answer(&id, true, Some("000000"), false);
+    match s.until(|e| matches!(e, SessionEvent::Error { .. })).await {
+        SessionEvent::Error { code, .. } => assert_eq!(code, ErrorCode::AuthFailed),
+        _ => unreachable!(),
+    }
 }

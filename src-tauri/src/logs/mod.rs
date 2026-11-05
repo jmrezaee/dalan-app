@@ -2,12 +2,12 @@
 //! (the previous one is deleted when a newer session ends) plus any log the user bookmarks.
 //!
 //! File format, in `<app data>/logs/<id>.dlog`: repeated `[u32 big-endian length][24-byte nonce]
-//! [ciphertext]`, each chunk sealed with the vault key (aad = log id + chunk number, so chunks
+//! [ciphertext]`, each chunk sealed with the vault's data key (aad = log id + chunk number, so chunks
 //! can't be moved or reordered). Only terminal output is kept, as raw bytes: replaying them in a
 //! read-only terminal reproduces what the screen showed.
 //!
-//! Logs are off until the user turns them on in Settings. After a master-password change, older
-//! logs can't be opened (the key changed); they can still be deleted.
+//! Logs are off until the user turns them on in Settings. The data key never changes (a password
+//! change only re-wraps it), so old logs stay readable.
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
@@ -301,7 +301,7 @@ impl LogTap {
                 if !enabled(c) {
                     return Ok(None);
                 }
-                Ok(Some((begin(c, s, host_id.as_deref())?, s.key.clone())))
+                Ok(Some((begin(c, s, host_id.as_deref())?, s.data_key.clone())))
             })
             .await
             .ok()
@@ -422,7 +422,7 @@ mod tests {
         use crate::state::AppState;
         let conn = open_in_memory().unwrap();
         let s = vault::create(&conn, "correct-horse-staple", KdfParams::cheap()).unwrap();
-        let key = s.key.clone();
+        let key = s.data_key.clone();
         let state = AppState::new(conn);
         state.set_session(Some(s));
         let dir = temp();
