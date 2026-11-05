@@ -1,0 +1,6 @@
+<template>
+  <pre class="whitespace-pre-wrap"><span class="text-ansi-green">deploy@web-1</span>:<span class="text-ansi-blue">~/app</span>$ ls --color
+<span class="text-ansi-blue">bin</span>  <span class="text-ansi-cyan">current -> releases/42</span>  <span class="text-ansi-yellow">notes.txt</span>  <span class="text-ansi-red">crash.log</span>
+<span class="text-ansi-bright-black"># 16 colours: </span><span class="text-ansi-black">k</span><span class="text-ansi-red">r</span><span class="text-ansi-green">g</span><span class="text-ansi-yellow">y</span><span class="text-ansi-blue">b</span><span class="text-ansi-magenta">m</span><span class="text-ansi-cyan">c</span><span class="text-ansi-white">w</span> <span class="text-ansi-bright-red">R</span><span class="text-ansi-bright-green">G</span><span class="text-ansi-bright-yellow">Y</span><span class="text-ansi-bright-blue">B</span><span class="text-ansi-bright-magenta">M</span><span class="text-ansi-bright-cyan">C</span><span class="text-ansi-bright-white">W</span>
+<span class="text-ansi-green">deploy@web-1</span>:<span class="text-ansi-blue">~/app</span>$ <span class="inline-block h-[1.1em] w-[0.6em] translate-y-0.5 bg-terminal-cursor"/></pre>
+</template>

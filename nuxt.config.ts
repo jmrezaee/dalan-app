@@ -6,6 +6,8 @@ export default defineNuxtConfig({
   ssr: false,
   devtools: { enabled: false },
   modules: ['@pinia/nuxt', '@nuxtjs/color-mode', 'shadcn-nuxt', '@nuxt/eslint'],
+  // Folders group components by area, but names stay short (HostCard, not HostsHostCard).
+  components: [{ path: '~/components', pathPrefix: false }],
   css: ['~/assets/css/main.css'],
   colorMode: { preference: 'dark', fallback: 'dark', classSuffix: '' },
   shadcn: { prefix: '', componentDir: './app/components/ui' },

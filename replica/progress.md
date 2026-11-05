@@ -10,13 +10,13 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
   - git init.
   - Nuxt 4 SPA (`ssr: false`, srcDir `app/`) + Tauri 2, package `dalan-app`, pnpm, Node 24.12.0, dev port 4000.
   - Tailwind v4 + shadcn-vue + `@nuxtjs/color-mode` (dark default), with `replica/design/tokens.css` wired in.
-  - Inter and JetBrains Mono bundled locally, plus `lucide-vue-next`.
+  - Inter and JetBrains Mono bundled locally, plus Lucide icons (`@lucide/vue`).
   - Rust module skeleton (`db`, `vault`, `ssh`, `sftp`, `tunnels`, `keys`, `pty`, `import`, `logs`, `commands`, `error.rs`).
   - `rusqlite` + `rusqlite_migration` running `replica/schema.sql` as `0001_init`.
   - `AppError` → `{ code, message }`, and TS bindings generated from Rust into `app/types/bindings.ts`.
   - Lint, typecheck, Vitest, clippy.
   - A CI workflow running all checks plus the sweep and contrast scripts.
-- [ ] **P1 Design primitives:**
+- [x] **P1 Design primitives:**
   - `app/pages/design.vue` (dev only): every primitive and app component from `replica/design/components.md` in every state, dark and light side by side.
   - Use shadcn-vue components restyled by tokens; switch hover `accent` classes to `bg-surface-hover`.
   - Playwright screenshot of `/design`.
@@ -65,3 +65,4 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
 (Claude Code appends one dated line per finished phase: what was built, what Mehrdad should test by hand, known gaps.)
 
 - 2026-11-05 P0: Nuxt 4 SPA + Tauri 2 + Rust skeleton, `0001_init` migration (21 tables) runs on start, `AppError`, bindings via tauri-specta into `app/types/bindings.ts`, CI workflow. Test: `pnpm tauri dev` opens a window with the Dalan title; `vault.db` appears in `~/Library/Application Support/app.dalan.desktop/`. Gaps: placeholder app icon (flat dark square), TypeScript pinned to 5.9 (TS 7 breaks typescript-eslint/vue-tsc), `lucide-vue-next` is deprecated upstream in favour of `@lucide/vue` (kept per CLAUDE.md), window-state and single-instance plugins not added yet, shadcn-vue components added from P1.
+- 2026-11-05 P1: shadcn-vue primitives restyled by tokens (hover `accent` -> `bg-surface-hover`), app components (TabBar/AppTab, VaultNav, PageToolbar, HostCard, GroupCard, KeyCard, RuleCard, StatusOverlay, UnlockCard, ProgressRow, PaneHeader, Stepper, SplitButton, IconButton, PasswordInput, NumberInput, SearchInput, EmptyState, StatusDot/Pill, TagChip), and `/design` (dev only) with dark and light side by side. Test: `pnpm dev`, open http://127.0.0.1:4000/design; `pnpm screenshot:design` writes `replica/design/design-page.png` (uses installed Chrome). Gaps: FileTable/PathBar, Workspace split (Resizable), SidePanel, NewTab, ShortcutRecorder, CredentialPicker, TagInput, ChainPicker, EnvVarList, HostPicker, ConflictDialog are built with their screens (P3 to P11); Reka dialogs/menus/toasts follow the app theme, not the light island; `.light` class added to tokens.css (via build_css.py) so a light island can sit inside the dark root; switched icons to `@lucide/vue` (successor of deprecated `lucide-vue-next`).

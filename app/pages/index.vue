@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Lock } from 'lucide-vue-next'
+import { Lock } from '@lucide/vue'
 </script>
 
 <template>

@@ -73,7 +73,7 @@ A personal desktop SSH client for Mehrdad and his team. It is a clean-room rebui
 - **Naming clash:** shadcn-vue's `accent` means a hover background, but ours is the brand colour. When adding a shadcn-vue component, change its hover classes to `bg-surface-hover`.
 - **Theme and assets:**
   - Dark is the default theme (`@nuxtjs/color-mode`, `preference: 'dark'`, `classSuffix: ''`).
-  - Icons come from `lucide-vue-next` only.
+  - Icons come from Lucide only, via `@lucide/vue` (the successor of the deprecated `lucide-vue-next`; shadcn-vue generates imports from it).
   - Fonts are Inter and JetBrains Mono, bundled locally.
 - **Specs:** every component follows `replica/design/components.md`, including its focus, disabled, loading, error and empty states. UI copy comes from there or is written fresh in the same voice.
 - **M0 builds `app/pages/design.vue` first** (dev only). It renders every primitive in every state in both themes, before any real screen.
