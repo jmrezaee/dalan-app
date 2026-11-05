@@ -38,7 +38,7 @@ Broadcast input to all panes (Cmd+B),workspaces,should,yes,yes,S19; free in Term
 Save workspace as template and reopen,workspaces,should,yes,yes,S19 source 11
 Drag a tab onto another to make a workspace,workspaces,should,yes,no,source 11
 Run snippet on multiple hosts (opens workspace),snippets,should,yes,yes,S13 F08
-SFTP edit remote file locally and prompt to re-upload,sftp,should,yes,no,F07 source 5
+SFTP edit remote file locally and prompt to re-upload,sftp,should,yes,yes,F07 source 5
 SFTP transfer conflicts (replace / keep both / skip),sftp,should,yes,yes,S22
 SFTP permissions (chmod),sftp,should,unknown,yes,not in Termius docs; expected by users
 Environment variables per host/group (SendEnv),hosts,should,yes,no,source 12

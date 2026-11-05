@@ -109,7 +109,58 @@ export const useSftpStore = defineStore('sftp', () => {
   }
 
   function closeRemote(p: Pane) {
-    if (isRemote(p)) api.sftpClose(p.endpoint)
+    if (!isRemote(p)) return
+    // Files being edited from this connection stop with it.
+    for (const [id, e] of edits) {
+      if (e.endpoint === p.endpoint) endEdit(id)
+    }
+    api.sftpClose(p.endpoint)
+  }
+
+  // ---- F07: edit a server file in the default app, offer to upload when it is saved.
+  const edits = new Map<string, { endpoint: string, name: string }>()
+  function endEdit(id: string) {
+    edits.delete(id)
+    toast.dismiss(`edit-${id}`)
+    api.editClose(id)
+  }
+
+  async function upload(id: string, force: boolean) {
+    const name = edits.get(id)?.name ?? 'file'
+    try {
+      const r = await api.editUpload(id, force)
+      if (r === 'remote_changed') {
+        toast.warning(`${name} changed on the server since you opened it.`, {
+          id: `edit-${id}`, duration: Infinity,
+          action: { label: 'Overwrite', onClick: () => upload(id, true) },
+          cancel: { label: 'Keep mine local', onClick: () => {} },
+        })
+        return
+      }
+      toast.success(`Uploaded ${name}.`, { id: `edit-${id}` })
+    }
+    catch (e) {
+      toast.error(message(e), { id: `edit-${id}` })
+    }
+  }
+
+  async function edit(i: number, name: string) {
+    const p = panes[i]!
+    try {
+      let id = ''
+      id = (await api.editOpen(p.endpoint, joinPath(p, name), (e) => {
+        if (e.type !== 'changed') return
+        toast(`${name} was saved.`, {
+          id: `edit-${id}`, duration: Infinity,
+          action: { label: 'Upload', onClick: () => upload(id, false) },
+          cancel: { label: 'Stop editing', onClick: () => endEdit(id) },
+        })
+      })).edit_id
+      edits.set(id, { endpoint: p.endpoint, name })
+    }
+    catch (e) {
+      toast.error(message(e))
+    }
   }
 
   async function connect(i: number, host: HostSummary) {
@@ -255,5 +306,5 @@ export const useSftpStore = defineStore('sftp', () => {
     prompt.value = null
   }
 
-  return { panes, transfers, prompt, dragging, sorted, load, showLocal, connect, answer, refresh, go, up, open, toggleHidden, mkdir, rename, chmod, remove, copy, resolveConflict, cancel, clearFinished, dropOn, clear }
+  return { panes, transfers, prompt, dragging, sorted, load, showLocal, connect, edit, answer, refresh, go, up, open, toggleHidden, mkdir, rename, chmod, remove, copy, resolveConflict, cancel, clearFinished, dropOn, clear }
 })

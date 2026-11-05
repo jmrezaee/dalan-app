@@ -109,6 +109,7 @@ const dirName = computed(() => (props.index === 0 ? 'right' : 'left'))
         <ContextMenuItem v-if="ctx && ctx.kind === 'dir'" @select="sftp.open(index, ctx!)">Open</ContextMenuItem>
         <ContextMenuItem v-if="picked.length && other.endpoint" @select="copyOver">Copy to {{ dirName }} pane</ContextMenuItem>
         <ContextMenuSeparator v-if="picked.length" />
+        <ContextMenuItem v-if="picked.length === 1 && remote && picked[0]!.kind === 'file'" @select="sftp.edit(index, picked[0]!.name)">Edit in default app</ContextMenuItem>
         <ContextMenuItem v-if="picked.length === 1" @select="emit('rename', picked[0]!.name)"><Pencil />Rename</ContextMenuItem>
         <ContextMenuItem v-if="picked.length === 1 && remote" @select="emit('chmod', picked[0]!.name)">Permissions…</ContextMenuItem>
         <ContextMenuItem v-if="picked.length" class="text-danger" @select="emit('remove', picked.map(p => p.name))"><Trash2 />Delete</ContextMenuItem>

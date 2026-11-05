@@ -5,10 +5,11 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use specta::Type;
 use tauri::ipc::Channel;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 
 use crate::error::{AppError, AppResult};
-use crate::sftp::{self, Choice, FsEntry, TransferEvent, TransferItem};
+use crate::sftp::{self, Choice, EditEvent, EditUpload, FsEntry, TransferEvent, TransferItem};
 use crate::ssh::{PromptAnswer, Prompts, SessionEvent, SessionIo};
 use crate::state::AppState;
 
@@ -203,4 +204,60 @@ pub fn transfer_resolve(
 #[specta::specta]
 pub fn transfer_cancel(state: State<'_, AppState>, transfer_id: String) -> AppResult<()> {
     state.sftp.transfers.cancel(&transfer_id)
+}
+
+#[derive(Serialize, Type)]
+pub struct EditOpened {
+    pub edit_id: String,
+}
+
+/// Downloads a server file, opens it in the system's default app and watches it. A `changed`
+/// event means the local copy was saved; the UI then offers `edit_upload`.
+#[tauri::command]
+#[specta::specta]
+pub async fn edit_open(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    endpoint: String,
+    path: String,
+    events: Channel<EditEvent>,
+) -> AppResult<EditOpened> {
+    state.require_unlocked()?;
+    let fs = state.sftp.fs(&endpoint)?;
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::internal(e.to_string()))?
+        .join("edit-tmp");
+    let emit: sftp::EditEmit = Arc::new(move |e| {
+        let _ = events.send(e);
+    });
+    let (edit_id, local) = state.sftp.edits.open(fs, &path, &root, emit).await?;
+    if let Err(e) = app
+        .opener()
+        .open_path(local.to_string_lossy(), None::<&str>)
+    {
+        state.sftp.edits.close(&edit_id);
+        return Err(AppError::internal(format!("Couldn't open the file: {e}")));
+    }
+    Ok(EditOpened { edit_id })
+}
+
+/// Uploads the edited copy. `RemoteChanged` means the server file changed meanwhile: ask, then
+/// call again with `force`.
+#[tauri::command]
+#[specta::specta]
+pub async fn edit_upload(
+    state: State<'_, AppState>,
+    edit_id: String,
+    force: bool,
+) -> AppResult<EditUpload> {
+    state.require_unlocked()?;
+    state.sftp.edits.upload(&edit_id, force).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn edit_close(state: State<'_, AppState>, edit_id: String) {
+    state.sftp.edits.close(&edit_id);
 }

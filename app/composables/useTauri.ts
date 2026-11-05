@@ -1,7 +1,7 @@
 // The only place that talks to Rust. Stores call these wrappers, never `invoke` directly.
 import { Channel } from '@tauri-apps/api/core'
 import { commands } from '~/types/bindings'
-import type { AppError, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportRow, KeyUpdate, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
+import type { AppError, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportRow, KeyUpdate, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -71,6 +71,13 @@ export function useTauri() {
     },
     transferResolve: (id: string, choice: Choice, applyToAll: boolean) => unwrap(commands.transferResolve(id, choice, applyToAll)),
     transferCancel: (id: string) => unwrap(commands.transferCancel(id)),
+    editOpen: (endpoint: string, path: string, onEvent: (e: EditEvent) => void) => {
+      const events = new Channel<EditEvent>()
+      events.onmessage = onEvent
+      return unwrap(commands.editOpen(endpoint, path, events as never))
+    },
+    editUpload: (editId: string, force: boolean) => unwrap(commands.editUpload(editId, force)),
+    editClose: (editId: string) => commands.editClose(editId),
     importPreview: (kind: 'ssh_config' | 'csv', path: string | null) => unwrap(commands.importPreview(kind, path)),
     importApply: (rows: ImportRow[], groupId: string | null) => unwrap(commands.importApply(rows, groupId)),
     workspacesList: () => unwrap(commands.workspacesList()),

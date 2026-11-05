@@ -47,6 +47,17 @@ export const commands = {
 	workspaceSave: (input: TemplateInput_Deserialize) => typedError<string, AppError>(__TAURI_INVOKE("workspace_save", { input })),
 	workspaceDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("workspace_delete", { id })),
 	/**
+	 *  Downloads a server file, opens it in the system's default app and watches it. A `changed`
+	 *  event means the local copy was saved; the UI then offers `edit_upload`.
+	 */
+	editOpen: (endpoint: string, path: string, events: Channel<EditEvent>) => typedError<EditOpened, AppError>(__TAURI_INVOKE("edit_open", { endpoint, path, events })),
+	/**
+	 *  Uploads the edited copy. `RemoteChanged` means the server file changed meanwhile: ask, then
+	 *  call again with `force`.
+	 */
+	editUpload: (editId: string, force: boolean) => typedError<EditUpload, AppError>(__TAURI_INVOKE("edit_upload", { editId, force })),
+	editClose: (editId: string) => __TAURI_INVOKE<void>("edit_close", { editId }),
+	/**
 	 *  `kind` is `ssh_config` or `csv`. `path` is a file chosen in the dialog; for `ssh_config`,
 	 *  `None` reads `~/.ssh/config`. Rust reads the file, the webview only knows the path.
 	 */
@@ -122,6 +133,18 @@ export type AutoLockWarning = {
 };
 
 export type Choice = "replace" | "keep_both" | "skip";
+
+export type EditEvent = 
+/**  The local copy was saved. The UI asks whether to upload it. */
+{ type: "changed" };
+
+export type EditOpened = {
+	edit_id: string,
+};
+
+export type EditUpload = "uploaded" | 
+/**  The file on the server changed since it was downloaded. Upload again with `force` to overwrite. */
+"remote_changed";
 
 export type EntryKind = "file" | "dir" | "other";
 

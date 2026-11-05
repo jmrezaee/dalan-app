@@ -2,6 +2,7 @@
 //! disk and a remote host over SFTP. Every file operation runs here in Rust; the webview only sees
 //! names, sizes and progress.
 
+mod edit;
 mod fs;
 mod transfer;
 
@@ -14,6 +15,7 @@ use specta::Type;
 use crate::error::{AppError, AppResult};
 use crate::ssh::{PromptAnswer, Prompts};
 
+pub use edit::{EditEmit, EditEvent, EditManager, EditUpload};
 pub use fs::{Fs, RemoteFs};
 pub use transfer::{Choice, Emit as TransferEmit, TransferEvent, TransferItem, TransferManager};
 
@@ -58,6 +60,7 @@ pub struct SftpManager {
     sessions: Mutex<HashMap<String, Arc<RemoteFs>>>,
     opening: Mutex<HashMap<String, Arc<Prompts>>>,
     pub transfers: TransferManager,
+    pub edits: EditManager,
 }
 
 impl SftpManager {
@@ -78,6 +81,7 @@ impl SftpManager {
             m.clear();
         }
         self.transfers.cancel_all();
+        self.edits.close_all();
     }
 
     /// Turns `"local"` or an sftp id into something to run operations on.

@@ -54,6 +54,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::workspaces::workspaces_list,
             commands::workspaces::workspace_save,
             commands::workspaces::workspace_delete,
+            commands::sftp::edit_open,
+            commands::sftp::edit_upload,
+            commands::sftp::edit_close,
             commands::import::import_preview,
             commands::import::import_apply,
             commands::sftp::sftp_open,
@@ -119,6 +122,8 @@ pub fn run() {
             builder.mount_events(app);
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
+            // Edited-file copies from a previous run are stale: nothing is watching them any more.
+            let _ = std::fs::remove_dir_all(dir.join("edit-tmp"));
             let conn = db::open(&dir.join("vault.db"))?;
             app.manage(AppState::new(conn));
             vault::spawn_auto_lock(app.handle().clone());
