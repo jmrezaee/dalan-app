@@ -26,6 +26,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const loaded = ref(false)
   /** Keep a log of each session (S15). Off until chosen. */
   const logsEnabled = ref(false)
+  /** Remember typed commands for the side panel's History tab. Off until chosen. */
+  const historyEnabled = ref(false)
 
   /** Light or dark right now (resolves "system"). */
   const resolvedTheme = computed(() => (colorMode.value === 'light' ? 'light' : 'dark'))
@@ -49,6 +51,7 @@ export const useSettingsStore = defineStore('settings', () => {
       const sec = parse('security')
       if (typeof sec.auto_lock_minutes === 'number') autoLockMinutes.value = sec.auto_lock_minutes
       logsEnabled.value = parse('logs').enabled === true
+      historyEnabled.value = parse('history').enabled === true
       loaded.value = true
     }
     catch {
@@ -85,5 +88,10 @@ export const useSettingsStore = defineStore('settings', () => {
     save('logs', { enabled })
   }
 
-  return { logsEnabled, setLogs, theme, terminal, autoLockMinutes, loaded, resolvedTheme, load, setTheme, setTerminal, setAutoLock }
+  function setHistory(enabled: boolean) {
+    historyEnabled.value = enabled
+    save('history', { enabled })
+  }
+
+  return { logsEnabled, setLogs, historyEnabled, setHistory, theme, terminal, autoLockMinutes, loaded, resolvedTheme, load, setTheme, setTerminal, setAutoLock }
 })

@@ -1,10 +1,15 @@
 <script setup lang="ts">
-// S20 (snippets tab): run a saved script in this session. Clicking a row types it into the shell.
-import { Play, X } from '@lucide/vue'
+// S20: snippets and command history for the current session. A snippet or command row types into the shell.
+import { CornerDownLeft, Play, Trash2, X } from '@lucide/vue'
 import { toast } from 'vue-sonner'
+import type { HistoryEntry } from '~/types/bindings'
+import { cn } from '@/lib/utils'
 
 const snippets = useSnippetsStore()
 const sessions = useSessionsStore()
+const settings = useSettingsStore()
+const api = useTauri()
+const tab = ref<'snippets' | 'history'>('snippets')
 const query = ref('')
 
 const matches = computed(() => {
@@ -15,16 +20,59 @@ function run(id: string) {
   const s = snippets.snippets.find(x => x.id === id)
   if (s && snippets.runInActive(s)) toast(`Ran ${s.label}.`)
 }
+
+// ---- History (per server; the local terminal has its own).
+const history = ref<HistoryEntry[]>([])
+const hostId = computed(() => sessions.activeSession?.hostId || null)
+async function loadHistory() {
+  try {
+    history.value = await api.historyList(hostId.value, tab.value === 'history' ? query.value.trim() || null : null, 200)
+  }
+  catch {
+    history.value = []
+  }
+}
+watch([tab, hostId, () => sessions.panelOpen], () => { if (tab.value === 'history' && sessions.panelOpen) loadHistory() }, { immediate: true })
+watch(query, () => { if (tab.value === 'history') loadHistory() })
+/** Types the command; with `enter` it runs, without it you can edit first. */
+function use(c: HistoryEntry, enter: boolean) {
+  const s = sessions.activeSession
+  if (!s) return
+  sessions.input(s, new TextEncoder().encode(enter ? `${c.command}\n` : c.command))
+}
+async function clearHistory() {
+  try {
+    await api.historyClear(hostId.value, false)
+    toast('History cleared.')
+  }
+  catch {
+    toast.error('Something went wrong. Try again.')
+  }
+  await loadHistory()
+}
 </script>
 
 <template>
   <aside aria-label="Side panel" class="flex h-full w-[300px] shrink-0 flex-col border-l border-border bg-surface">
-    <div class="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
-      <h2 class="text-sm font-medium">Snippets</h2>
+    <div class="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
+      <div role="tablist" aria-label="Side panel" class="flex gap-1">
+        <button
+          v-for="t in [{ v: 'snippets', l: 'Snippets' }, { v: 'history', l: 'History' }] as const"
+          :key="t.v"
+          type="button"
+          role="tab"
+          :aria-selected="tab === t.v"
+          :class="cn('h-7 rounded-md px-2.5 text-sm', tab === t.v ? 'bg-surface-hover font-medium' : 'text-muted hover:bg-surface-hover')"
+          @click="tab = t.v; query = ''"
+        >
+          {{ t.l }}
+        </button>
+      </div>
       <IconButton label="Close side panel" shortcut="⌘." size="xs" class="ml-auto" @click="sessions.panelOpen = false"><X /></IconButton>
     </div>
-    <div class="p-2"><SearchInput v-model="query" class="w-full" placeholder="Find a snippet" :result-count="matches.length" /></div>
-    <div class="flex-1 overflow-auto px-2 pb-2">
+    <div class="p-2"><SearchInput v-model="query" class="w-full" :placeholder="tab === 'snippets' ? 'Find a snippet' : 'Find a command'" :result-count="tab === 'snippets' ? matches.length : history.length" /></div>
+
+    <div v-if="tab === 'snippets'" class="flex-1 overflow-auto px-2 pb-2">
       <p v-if="!snippets.snippets.length" class="px-2 py-4 text-sm text-muted">No snippets yet. Create some under Snippets in the vault.</p>
       <p v-else-if="!matches.length" class="px-2 py-4 text-sm text-muted">No snippets match.</p>
       <button
@@ -40,6 +88,20 @@ function run(id: string) {
         </span>
         <Play class="size-3.5 shrink-0 text-muted group-hover:text-accent" aria-label="Run" />
       </button>
+    </div>
+
+    <div v-else class="flex min-h-0 flex-1 flex-col">
+      <div class="flex-1 overflow-auto px-2 pb-2">
+        <p v-if="!settings.historyEnabled" class="px-2 py-4 text-sm text-muted">Command history is off. Turn it on in Settings, under Logs.</p>
+        <p v-else-if="!history.length" class="px-2 py-4 text-sm text-muted">{{ query ? 'No commands match.' : 'Commands you type here will show up.' }}</p>
+        <div v-for="c in history" :key="c.id" class="group flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-surface-hover">
+          <button type="button" class="min-w-0 flex-1 truncate text-left font-mono text-xs" :title="c.command" @click="use(c, false)">{{ c.command }}</button>
+          <IconButton label="Run command" size="xs" class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100" @click="use(c, true)"><CornerDownLeft /></IconButton>
+        </div>
+      </div>
+      <div v-if="history.length" class="border-t border-border p-2">
+        <Button variant="ghost" size="sm" class="w-full justify-start text-muted" @click="clearHistory"><Trash2 />Clear history for this server</Button>
+      </div>
     </div>
   </aside>
 </template>

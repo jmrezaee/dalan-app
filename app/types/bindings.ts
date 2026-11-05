@@ -59,6 +59,10 @@ export const commands = {
 	 */
 	editUpload: (editId: string, force: boolean) => typedError<EditUpload, AppError>(__TAURI_INVOKE("edit_upload", { editId, force })),
 	editClose: (editId: string) => __TAURI_INVOKE<void>("edit_close", { editId }),
+	/**  `host_id: None` = the local terminal. Newest first. */
+	historyList: (hostId: string | null, query: string | null, limit: number) => typedError<HistoryEntry[], AppError>(__TAURI_INVOKE("history_list", { hostId, query, limit })),
+	/**  Clears one server's history, or everything when `all` is true. */
+	historyClear: (hostId: string | null, all: boolean) => typedError<null, AppError>(__TAURI_INVOKE("history_clear", { hostId, all })),
 	logsList: () => typedError<LogSummary_Serialize[], AppError>(__TAURI_INVOKE("logs_list")),
 	logBookmark: (id: string, bookmarked: boolean, comment: string | null) => typedError<null, AppError>(__TAURI_INVOKE("log_bookmark", { id, bookmarked, comment })),
 	logDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("log_delete", { id })),
@@ -409,6 +413,12 @@ export type GroupSummary_Serialize = {
 	group_count: number,
 	/**  What the group gets from its own ancestors. */
 	inherited: Inherited_Serialize,
+};
+
+export type HistoryEntry = {
+	id: string,
+	command: string,
+	ran_at: number | null,
 };
 
 /**  Create and update share one shape. `id` is `None` to create. */

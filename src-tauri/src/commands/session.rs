@@ -9,6 +9,7 @@ use tauri::{AppHandle, State};
 
 use crate::commands::logs::logs_dir;
 use crate::error::AppResult;
+use crate::history::HistoryTap;
 use crate::known_hosts::{self, KnownHost};
 use crate::logs;
 use crate::ssh::{Cmd, Job, PromptAnswer, RawBytes, SessionEvent, SessionIo, SessionState};
@@ -17,6 +18,7 @@ use crate::state::AppState;
 /// Wires a session to the UI channels, copying output into a log when one is recording.
 fn tapped_io(
     tap: Option<Arc<logs::LogTap>>,
+    hist: Option<Arc<HistoryTap>>,
     events: Channel<SessionEvent>,
     data: Channel<RawBytes>,
 ) -> SessionIo {
@@ -37,6 +39,9 @@ fn tapped_io(
         data: Box::new(move |b| {
             if let Some(t) = &tap {
                 t.data(&b);
+            }
+            if let Some(h) = &hist {
+                h.output(&b);
             }
             let _ = data.send(RawBytes(b));
         }),
@@ -62,10 +67,14 @@ pub async fn session_open(
 ) -> AppResult<SessionOpened> {
     state.require_unlocked()?;
     let tap = logs::LogTap::start(&state.store(), logs_dir(&app)?, Some(host_id.clone())).await;
-    let io = tapped_io(tap, events, data);
+    let hist = HistoryTap::start(&state.store(), Some(host_id.clone())).await;
+    let io = tapped_io(tap, hist.clone(), events, data);
     let session_id = state
         .sessions
         .open(state.store(), host_id, Job::Shell, cols, rows, io)?;
+    if let Some(h) = hist {
+        state.history.add(&session_id, h);
+    }
     Ok(SessionOpened { session_id })
 }
 
@@ -82,11 +91,15 @@ pub async fn local_session_open(
 ) -> AppResult<SessionOpened> {
     state.require_unlocked()?;
     let tap = logs::LogTap::start(&state.store(), logs_dir(&app)?, None).await;
-    let io = tapped_io(tap, events, data);
+    let hist = HistoryTap::start(&state.store(), None).await;
+    let io = tapped_io(tap, hist.clone(), events, data);
     let session_id =
         state
             .sessions
             .open(state.store(), String::new(), Job::Local, cols, rows, io)?;
+    if let Some(h) = hist {
+        state.history.add(&session_id, h);
+    }
     Ok(SessionOpened { session_id })
 }
 
@@ -97,6 +110,7 @@ pub fn session_write(
     session_id: String,
     data: Vec<u8>,
 ) -> AppResult<()> {
+    state.history.input(&session_id, &data);
     state.sessions.send(&session_id, Cmd::Write(data))
 }
 
@@ -132,6 +146,7 @@ pub fn session_respond(
 #[tauri::command]
 #[specta::specta]
 pub fn session_close(state: State<'_, AppState>, session_id: String) {
+    state.history.remove(&session_id);
     state.sessions.close(&session_id);
 }
 

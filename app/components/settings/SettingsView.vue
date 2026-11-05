@@ -85,7 +85,11 @@ const num = (v: string | number, fallback: number) => (Number.isFinite(Number(v)
             <span class="flex flex-1 flex-col">Keep a log of each session<span class="text-xs text-muted">Saves what the terminal printed, encrypted with your master password. Each server keeps its latest log; bookmark one to keep it. Applies to sessions you open from now on.</span></span>
             <Switch :model-value="settings.logsEnabled" aria-label="Keep session logs" @update:model-value="(v: boolean) => settings.setLogs(v)" />
           </div>
-          <p class="pt-3 text-xs text-muted">Logs can hold anything shown on screen, so turn this on only if that's fine for your servers. After you change the master password, older logs can no longer be opened (you can still delete them).</p>
+          <div class="row">
+            <span class="flex flex-1 flex-col">Remember typed commands<span class="text-xs text-muted">Fills the History tab in a terminal's side panel (⌘.), per server. Lines you edit with arrows or Tab, and lines typed at a password prompt, are skipped.</span></span>
+            <Switch :model-value="settings.historyEnabled" aria-label="Remember typed commands" @update:model-value="(v: boolean) => settings.setHistory(v)" />
+          </div>
+          <p class="pt-3 text-xs text-muted">Commands are saved as typed and not encrypted, so a password written inside a command would be kept too. Logs can hold anything shown on screen, so turn this on only if that's fine for your servers. After you change the master password, older logs can no longer be opened (you can still delete them).</p>
         </template>
 
         <template v-else-if="section === 'Shortcuts'">

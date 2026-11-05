@@ -3,6 +3,7 @@
 pub mod agent;
 pub mod app;
 pub mod env;
+pub mod history;
 pub mod hosts;
 pub mod import;
 pub mod keychain;

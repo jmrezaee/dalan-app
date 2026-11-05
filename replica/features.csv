@@ -47,7 +47,7 @@ SSH agent forwarding,hosts,should,yes,yes,source 2
 Import from ~/.ssh/config and known_hosts and keys,import,should,yes,no,S25 F10
 Import hosts from CSV,import,should,yes,yes,source 2
 Terminal themes per host/group,terminal,should,yes,yes,S20
-Command history side panel,terminal,should,yes,no,S20
+Command history side panel,terminal,should,yes,yes,S20
 Local terminal tab,terminal,should,yes,yes,S23 local terminal path
 Session logs (last per host + bookmarks + comment),logs,should,yes,yes,S15 source 6; paid in Termius
 SSH certificates (key + cert as one item),keychain,could,yes,no,source 7

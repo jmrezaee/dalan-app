@@ -85,6 +85,8 @@ export function useTauri() {
     },
     editUpload: (editId: string, force: boolean) => unwrap(commands.editUpload(editId, force)),
     editClose: (editId: string) => commands.editClose(editId),
+    historyList: (hostId: string | null, query: string | null, limit: number) => unwrap(commands.historyList(hostId, query, limit)),
+    historyClear: (hostId: string | null, all: boolean) => unwrap(commands.historyClear(hostId, all)),
     logsList: () => unwrap(commands.logsList()),
     logBookmark: (id: string, bookmarked: boolean, comment: string | null) => unwrap(commands.logBookmark(id, bookmarked, comment)),
     logDelete: (id: string) => unwrap(commands.logDelete(id)),

@@ -5,6 +5,7 @@ pub mod env;
 pub mod error;
 pub mod events;
 pub mod groups;
+pub mod history;
 pub mod hosts;
 pub mod import;
 pub mod keys;
@@ -62,6 +63,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sftp::edit_open,
             commands::sftp::edit_upload,
             commands::sftp::edit_close,
+            commands::history::history_list,
+            commands::history::history_clear,
             commands::logs::logs_list,
             commands::logs::log_bookmark,
             commands::logs::log_delete,
