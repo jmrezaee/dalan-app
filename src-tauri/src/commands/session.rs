@@ -7,7 +7,7 @@ use tauri::State;
 
 use crate::error::AppResult;
 use crate::known_hosts::{self, KnownHost};
-use crate::ssh::{Cmd, PromptAnswer, RawBytes, SessionEvent, SessionIo};
+use crate::ssh::{Cmd, Job, PromptAnswer, RawBytes, SessionEvent, SessionIo};
 use crate::state::AppState;
 
 #[derive(Serialize, Type)]
@@ -37,7 +37,7 @@ pub async fn session_open(
     };
     let session_id = state
         .sessions
-        .open(state.store(), host_id, cols, rows, io)?;
+        .open(state.store(), host_id, Job::Shell, cols, rows, io)?;
     Ok(SessionOpened { session_id })
 }
 
@@ -107,4 +107,34 @@ pub async fn known_host_delete(state: State<'_, AppState>, id: String) -> AppRes
     state
         .with_db_session(move |c, s| known_hosts::delete(c, &s.vault_id, &id))
         .await
+}
+
+/// S08: installs a key's public half on a host. Same plumbing as a session: progress and prompts
+/// (host key, password) arrive on `events`, and answers go to `session_respond`.
+#[tauri::command]
+#[specta::specta]
+pub async fn key_export_to_host(
+    state: State<'_, AppState>,
+    key_id: String,
+    host_id: String,
+    dir: String,
+    file_name: String,
+    events: Channel<SessionEvent>,
+) -> AppResult<SessionOpened> {
+    state.require_unlocked()?;
+    let io = SessionIo {
+        event: Box::new(move |e| {
+            let _ = events.send(e);
+        }),
+        data: Box::new(|_| {}),
+    };
+    let job = Job::Export {
+        key_id,
+        dir,
+        file: file_name,
+    };
+    let session_id = state
+        .sessions
+        .open(state.store(), host_id, job, 80, 24, io)?;
+    Ok(SessionOpened { session_id })
 }

@@ -2,7 +2,7 @@
 // S18. Copy is from replica/brand.md. The overlay is role=alertdialog when it needs an answer.
 import { CircleAlert, KeyRound, LoaderCircle, PlugZap, ShieldAlert, Unplug } from '@lucide/vue'
 
-export type OverlayKind = 'connecting' | 'password' | 'host-key-new' | 'host-key-changed' | 'auth-failed' | 'unreachable' | 'disconnected'
+export type OverlayKind = 'connecting' | 'password' | 'passphrase' | 'host-key-new' | 'host-key-changed' | 'auth-failed' | 'unreachable' | 'disconnected'
 const props = defineProps<{
   kind: OverlayKind
   host: string
@@ -12,6 +12,7 @@ const props = defineProps<{
   oldFingerprint?: string
   reason?: string
   user?: string
+  keyLabel?: string
   time?: string
 }>()
 const emit = defineEmits<{ cancel: []; submit: [password: string, remember: boolean]; trust: []; close: []; replace: []; edit: []; retry: []; reconnect: [] }>()
@@ -20,7 +21,7 @@ const password = ref('')
 const remember = ref(false)
 // The password field is inside a PasswordInput wrapper, so focus it by id when the card appears.
 function focusPassword() {
-  if (props.kind === 'password') nextTick(() => document.getElementById('session-password')?.focus())
+  if (props.kind === 'password' || props.kind === 'passphrase') nextTick(() => document.getElementById('session-password')?.focus())
 }
 onMounted(focusPassword)
 watch(() => props.kind, focusPassword)
@@ -43,10 +44,11 @@ function submit() {
         <div class="flex justify-end"><Button variant="secondary" @click="$emit('cancel')">Cancel</Button></div>
       </template>
 
-      <form v-else-if="kind === 'password'" class="flex flex-col gap-3" @submit.prevent="submit">
+      <form v-else-if="kind === 'password' || kind === 'passphrase'" class="flex flex-col gap-3" @submit.prevent="submit">
         <KeyRound class="size-6 text-accent" aria-hidden="true" />
-        <h2 class="text-lg">Password for {{ host }}</h2>
-        <p v-if="user" class="text-muted">Signing in as <span class="font-mono">{{ user }}</span>.</p>
+        <h2 class="text-lg">{{ kind === 'passphrase' ? `Passphrase for ${keyLabel}` : `Password for ${host}` }}</h2>
+        <p v-if="kind === 'passphrase'" class="text-muted">This key is protected. Dalan opens it to sign in to {{ host }}.</p>
+        <p v-else-if="user" class="text-muted">Signing in as <span class="font-mono">{{ user }}</span>.</p>
         <PasswordInput id="session-password" v-model="password" />
         <label class="flex items-center gap-2 text-sm"><Checkbox v-model="remember" />Remember it on this computer</label>
         <div class="flex justify-end gap-2"><Button type="button" variant="secondary" @click="$emit('cancel')">Cancel</Button><Button type="submit">Continue</Button></div>

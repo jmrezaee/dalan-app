@@ -21,13 +21,15 @@ pub struct GroupRow {
     pub username: Option<String>,
     pub port: Option<u16>,
     pub password_secret_id: Option<String>,
+    pub key_id: Option<String>,
+    pub identity_id: Option<String>,
 }
 
 pub type GroupMap = HashMap<String, GroupRow>;
 
 pub fn load(conn: &Connection, vault_id: &str) -> AppResult<GroupMap> {
     let mut st = conn.prepare(
-        "SELECT g.id, g.parent_id, g.label, p.username, p.ssh_port, p.password_secret_id
+        "SELECT g.id, g.parent_id, g.label, p.username, p.ssh_port, p.password_secret_id, p.key_id, p.identity_id
          FROM groups g JOIN connection_profiles p ON p.id = g.profile_id WHERE g.vault_id = ?1",
     )?;
     let rows = st
@@ -39,38 +41,135 @@ pub fn load(conn: &Connection, vault_id: &str) -> AppResult<GroupMap> {
                 username: r.get(3)?,
                 port: r.get::<_, Option<i64>>(4)?.map(|p| p as u16),
                 password_secret_id: r.get(5)?,
+                key_id: r.get(6)?,
+                identity_id: r.get(7)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows.into_iter().map(|g| (g.id.clone(), g)).collect())
 }
 
-/// What a host (or group) would get from its ancestors, field by field. First non-NULL wins.
-#[derive(Default)]
-pub struct Walk<'a> {
-    pub username: Option<(&'a str, &'a GroupRow)>,
-    pub port: Option<(u16, &'a GroupRow)>,
-    pub password: Option<(&'a str, &'a GroupRow)>,
+/// What an identity (S07) contributes at the level where it is chosen.
+#[derive(Debug, Clone)]
+pub struct IdentityRow {
+    pub username: String,
+    pub password_secret_id: Option<String>,
+    pub key_id: Option<String>,
 }
 
-/// Walks up from `start` (a group id). The step limit stops a corrupt cycle from looping forever.
-pub fn walk<'a>(map: &'a GroupMap, start: Option<&str>) -> Walk<'a> {
-    let mut w = Walk::default();
+pub type IdentityMap = HashMap<String, IdentityRow>;
+
+pub fn load_identities(conn: &Connection, vault_id: &str) -> AppResult<IdentityMap> {
+    let mut st = conn.prepare(
+        "SELECT id, username, password_secret_id, key_id FROM identities WHERE vault_id = ?1",
+    )?;
+    let rows = st
+        .query_map([vault_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                IdentityRow {
+                    username: r.get(1)?,
+                    password_secret_id: r.get(2)?,
+                    key_id: r.get(3)?,
+                },
+            ))
+        })?
+        .collect::<Result<_, _>>()?;
+    Ok(rows)
+}
+
+/// One link in the inheritance chain: a host's own profile, or one group's.
+#[derive(Default, Clone, Copy)]
+pub struct Level<'a> {
+    /// Group label, or `None` for the host itself.
+    pub label: Option<&'a str>,
+    pub username: Option<&'a str>,
+    pub port: Option<u16>,
+    pub password_secret_id: Option<&'a str>,
+    pub key_id: Option<&'a str>,
+    pub identity_id: Option<&'a str>,
+}
+
+impl<'a> From<&'a GroupRow> for Level<'a> {
+    fn from(g: &'a GroupRow) -> Self {
+        Level {
+            label: Some(&g.label),
+            username: g.username.as_deref(),
+            port: g.port,
+            password_secret_id: g.password_secret_id.as_deref(),
+            key_id: g.key_id.as_deref(),
+            identity_id: g.identity_id.as_deref(),
+        }
+    }
+}
+
+/// A resolved value and where it came from (`None` = the item itself, else a group label).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Sourced<T> {
+    pub value: T,
+    pub from: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct Resolved {
+    pub username: Option<Sourced<String>>,
+    pub port: Option<Sourced<u16>>,
+    pub password_secret_id: Option<Sourced<String>>,
+    pub key_id: Option<Sourced<String>>,
+}
+
+/// The groups above `start`, nearest first. The step limit stops a corrupt cycle from looping forever.
+pub fn chain<'a>(map: &'a GroupMap, start: Option<&str>) -> Vec<Level<'a>> {
+    let mut out = Vec::new();
     let mut cur = start.and_then(|id| map.get(id));
     for _ in 0..=map.len() {
         let Some(g) = cur else { break };
-        if w.username.is_none() {
-            w.username = g.username.as_deref().map(|u| (u, g));
-        }
-        if w.port.is_none() {
-            w.port = g.port.map(|p| (p, g));
-        }
-        if w.password.is_none() {
-            w.password = g.password_secret_id.as_deref().map(|s| (s, g));
-        }
+        out.push(Level::from(g));
         cur = g.parent_id.as_deref().and_then(|id| map.get(id));
     }
-    w
+    out
+}
+
+/// Per field, the first level (nearest first) that sets it wins. A level can set a field directly,
+/// or through its identity (which supplies a username, a password and/or a key).
+pub fn resolve(levels: &[Level], identities: &IdentityMap) -> Resolved {
+    let mut r = Resolved::default();
+    for l in levels {
+        let ident = l.identity_id.and_then(|id| identities.get(id));
+        let from = l.label.map(String::from);
+        let src = |v: String| Sourced {
+            value: v,
+            from: from.clone(),
+        };
+        if r.username.is_none() {
+            r.username = l
+                .username
+                .map(String::from)
+                .or(ident.map(|i| i.username.clone()))
+                .map(src);
+        }
+        if r.port.is_none() {
+            r.port = l.port.map(|p| Sourced {
+                value: p,
+                from: from.clone(),
+            });
+        }
+        if r.password_secret_id.is_none() {
+            r.password_secret_id = l
+                .password_secret_id
+                .map(String::from)
+                .or(ident.and_then(|i| i.password_secret_id.clone()))
+                .map(src);
+        }
+        if r.key_id.is_none() {
+            r.key_id = l
+                .key_id
+                .map(String::from)
+                .or(ident.and_then(|i| i.key_id.clone()))
+                .map(src);
+        }
+    }
+    r
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -93,20 +192,26 @@ pub struct Inherited {
     pub port: Option<InheritedPort>,
     /// Group label, when a password is inherited. The password itself never leaves Rust.
     pub password: Option<String>,
+    /// The inherited key: `value` is the key's id (the UI looks up its label).
+    pub key: Option<InheritedText>,
 }
 
-impl From<&Walk<'_>> for Inherited {
-    fn from(w: &Walk<'_>) -> Self {
+impl From<&Resolved> for Inherited {
+    fn from(r: &Resolved) -> Self {
+        let text = |s: &Option<Sourced<String>>| {
+            s.as_ref().map(|s| InheritedText {
+                value: s.value.clone(),
+                group: s.from.clone().unwrap_or_default(),
+            })
+        };
         Inherited {
-            username: w.username.map(|(v, g)| InheritedText {
-                value: v.to_string(),
-                group: g.label.clone(),
+            username: text(&r.username),
+            port: r.port.as_ref().map(|p| InheritedPort {
+                value: p.value,
+                group: p.from.clone().unwrap_or_default(),
             }),
-            port: w.port.map(|(v, g)| InheritedPort {
-                value: v,
-                group: g.label.clone(),
-            }),
-            password: w.password.map(|(_, g)| g.label.clone()),
+            password: r.password_secret_id.as_ref().and_then(|p| p.from.clone()),
+            key: text(&r.key_id),
         }
     }
 }
@@ -119,6 +224,8 @@ pub struct GroupSummary {
     pub username: Option<String>,
     pub port: Option<u16>,
     pub has_password: bool,
+    pub key_id: Option<String>,
+    pub identity_id: Option<String>,
     /// Hosts in this group and everything below it.
     pub host_count: u32,
     pub group_count: u32,
@@ -128,6 +235,7 @@ pub struct GroupSummary {
 
 pub fn list(conn: &Connection, vault_id: &str) -> AppResult<Vec<GroupSummary>> {
     let map = load(conn, vault_id)?;
+    let identities = load_identities(conn, vault_id)?;
     // Direct host counts, then roll them up the tree.
     let mut direct: HashMap<String, u32> = HashMap::new();
     let mut st = conn.prepare("SELECT group_id, count(*) FROM hosts WHERE vault_id = ?1 AND group_id IS NOT NULL GROUP BY group_id")?;
@@ -163,7 +271,9 @@ pub fn list(conn: &Connection, vault_id: &str) -> AppResult<Vec<GroupSummary>> {
             has_password: g.password_secret_id.is_some(),
             host_count: total.get(g.id.as_str()).copied().unwrap_or(0),
             group_count: children.get(g.id.as_str()).copied().unwrap_or(0),
-            inherited: Inherited::from(&walk(&map, g.parent_id.as_deref())),
+            key_id: g.key_id.clone(),
+            identity_id: g.identity_id.clone(),
+            inherited: Inherited::from(&resolve(&chain(&map, g.parent_id.as_deref()), &identities)),
         })
         .collect();
     out.sort_by_key(|g| g.label.to_lowercase());
@@ -179,6 +289,8 @@ pub struct GroupInput {
     pub username: Option<String>,
     pub password: Option<String>,
     pub clear_password: bool,
+    pub key_id: Option<String>,
+    pub identity_id: Option<String>,
 }
 
 /// True if `candidate` is `id` itself or sits somewhere below it (a move there would make a cycle).
@@ -264,8 +376,8 @@ pub fn save(
             );
             let (secret, _) = next_secret(&tx, s, None, password, false)?;
             tx.execute(
-                "INSERT INTO connection_profiles (id, vault_id, username, password_secret_id, ssh_port, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
-                params![pid, s.vault_id, username, secret, input.port, now],
+                "INSERT INTO connection_profiles (id, vault_id, username, password_secret_id, ssh_port, key_id, identity_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+                params![pid, s.vault_id, username, secret, input.port, input.key_id, input.identity_id, now],
             )?;
             tx.execute(
                 "INSERT INTO groups (id, vault_id, parent_id, profile_id, label, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
@@ -284,8 +396,8 @@ pub fn save(
                 .ok_or_else(|| AppError::not_found("That group no longer exists."))?;
             let (secret, orphan) = next_secret(&tx, s, old, password, input.clear_password)?;
             tx.execute(
-                "UPDATE connection_profiles SET username = ?1, password_secret_id = ?2, ssh_port = ?3, updated_at = ?4 WHERE id = ?5",
-                params![username, secret, input.port, now, pid],
+                "UPDATE connection_profiles SET username = ?1, password_secret_id = ?2, ssh_port = ?3, key_id = ?4, identity_id = ?5, updated_at = ?6 WHERE id = ?7",
+                params![username, secret, input.port, input.key_id, input.identity_id, now, pid],
             )?;
             if let Some(o) = orphan {
                 secrets::delete(&tx, s, &o)?;
@@ -387,6 +499,8 @@ mod tests {
                 username: user.map(String::from),
                 password: pw.map(String::from),
                 clear_password: false,
+                key_id: None,
+                identity_id: None,
             },
         )
         .unwrap()
@@ -410,6 +524,8 @@ mod tests {
                 password: None,
                 clear_password: false,
                 group_id: group.map(String::from),
+                key_id: None,
+                identity_id: None,
                 tags: vec![],
             },
         )
@@ -438,6 +554,8 @@ mod tests {
                 username: None,
                 password: None,
                 clear_password: false,
+                key_id: None,
+                identity_id: None,
             },
         )
         .unwrap();
@@ -468,6 +586,8 @@ mod tests {
             username: Some("root".into()),
             password: None,
             clear_password: false,
+            key_id: None,
+            identity_id: None,
             group_id: Some(web.id.clone()),
             tags: vec![],
         };
@@ -507,6 +627,8 @@ mod tests {
                 username: None,
                 password: None,
                 clear_password: false,
+                key_id: None,
+                identity_id: None,
             },
         );
         assert!(err.is_err());
@@ -521,6 +643,8 @@ mod tests {
                 username: None,
                 password: None,
                 clear_password: false,
+                key_id: None,
+                identity_id: None,
             },
         );
         assert!(err.is_err());
@@ -601,6 +725,8 @@ mod tests {
             username: None,
             password: None,
             clear_password: false,
+            key_id: None,
+            identity_id: None,
             group_id: None,
             tags: vec!["Prod".into(), " prod ".into(), "web".into(), "".into()],
         };

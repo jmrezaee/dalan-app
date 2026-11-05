@@ -7,6 +7,9 @@ import { Input } from '@/components/ui/input'
 import type { HostSummary } from '~/types/bindings'
 
 const hosts = useHostsStore()
+const keychain = useKeychainStore()
+const identityOptions = computed(() => keychain.identities.map(i => ({ value: i.id, label: `${i.label}  ·  ${i.username}` })))
+const keyOptions = computed(() => keychain.keys.map(k => ({ value: k.id, label: `${k.label}  ·  ${k.key_type}` })))
 
 const open = computed({
   get: () => hosts.editing !== null,
@@ -14,7 +17,7 @@ const open = computed({
 })
 const host = computed(() => (hosts.editing && hosts.editing !== 'new' ? hosts.editing : null))
 
-const blank = () => ({ label: '', address: '', port: '' as number | string, username: '', password: '', group_id: hosts.currentGroupId as string | null, tags: [] as string[] })
+const blank = () => ({ label: '', address: '', port: '' as number | string, username: '', password: '', group_id: hosts.currentGroupId as string | null, tags: [] as string[], identity_id: null as string | null, key_id: null as string | null })
 const form = reactive(blank())
 const clearPassword = ref(false)
 const error = ref('')
@@ -27,7 +30,7 @@ const dirty = computed(() => current.value !== snapshot.value)
 // Reset the form each time the sheet opens, from the host being edited (or blank, in the group you are viewing).
 watch(() => hosts.editing, (e) => {
   const h = e && e !== 'new' ? (e as HostSummary) : null
-  Object.assign(form, h ? { label: h.label, address: h.address, port: h.port ?? '', username: h.username ?? '', password: '', group_id: h.group_id, tags: [...h.tags] } : blank())
+  Object.assign(form, h ? { label: h.label, address: h.address, port: h.port ?? '', username: h.username ?? '', password: '', group_id: h.group_id, tags: [...h.tags], identity_id: h.identity_id, key_id: h.key_id } : blank())
   clearPassword.value = false
   error.value = ''
   snapshot.value = current.value
@@ -49,6 +52,8 @@ async function submit() {
     clear_password: clearPassword.value,
     group_id: form.group_id,
     tags: form.tags,
+    identity_id: form.identity_id,
+    key_id: form.key_id,
   })
   busy.value = false
   if (!error.value) hosts.editing = null
@@ -107,6 +112,15 @@ async function submit() {
               <InheritedHint v-if="inherited.username && !form.username" :group="inherited.username.group" />
             </div>
             <p v-if="!form.username && !inherited.username" class="text-xs text-muted">Leave it blank to be asked when you connect.</p>
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <Label for="host-identity">Identity</Label>
+            <OptionSelect id="host-identity" v-model="form.identity_id" :options="identityOptions" none-label="None" />
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <Label for="host-key">Key</Label>
+            <OptionSelect id="host-key" v-model="form.key_id" :options="keyOptions" none-label="None" />
+            <p v-if="!form.key_id && inherited.key" class="text-xs text-muted">Uses the key {{ keychain.keyLabel(inherited.key.value) ?? 'from a group' }} from {{ inherited.key.group }}.</p>
           </div>
           <div class="flex flex-col gap-1.5">
             <Label for="host-password">Password</Label>

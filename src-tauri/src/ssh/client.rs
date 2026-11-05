@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use russh::client::{self, Handler};
-use russh::keys::{HashAlg, PublicKeyOrCertificate};
+use russh::keys::{HashAlg, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::ChannelMsg;
 use tokio::sync::mpsc;
 use tokio::time::{interval, timeout, MissedTickBehavior};
@@ -15,6 +15,7 @@ use zeroize::Zeroizing;
 use super::{Cmd, PromptKind, Prompts, SessionEvent, SessionIo, SessionState};
 use crate::error::ErrorCode;
 use crate::hosts;
+use crate::keys;
 use crate::known_hosts::{self, Check};
 use crate::state::Store;
 
@@ -39,7 +40,7 @@ enum Rejected {
     Failed(String),
 }
 
-struct Client {
+pub struct Client {
     store: Store,
     io: Arc<SessionIo>,
     prompts: Arc<Prompts>,
@@ -129,26 +130,44 @@ fn emit_error(io: &SessionIo, code: ErrorCode, message: impl Into<String>) {
     });
 }
 
-pub async fn run(
-    store: Store,
-    io: Arc<SessionIo>,
-    prompts: Arc<Prompts>,
-    p: Params,
-    mut cmds: mpsc::UnboundedReceiver<Cmd>,
-) {
-    emit_state(&io, SessionState::Connecting);
+/// A connected, signed-in SSH connection and the host's label.
+pub struct Connected {
+    pub handle: client::Handle<Client>,
+    pub label: String,
+}
 
-    let host_id = p.host_id.clone();
+/// Reports a failure to the UI and gives back `None`, so callers can `return fail(...)`.
+fn fail<T>(io: &SessionIo, code: ErrorCode, message: impl Into<String>) -> Option<T> {
+    emit_error(io, code, message);
+    None
+}
+
+fn closed<T>(io: &SessionIo) -> Option<T> {
+    emit_state(io, SessionState::Closed);
+    None
+}
+
+/// Steps shared by shells and key export: resolve the host, TCP, handshake (with the host-key
+/// prompt), then sign in (key first, then password). Failures are reported through `io`.
+pub async fn connect_authenticated(
+    store: &Store,
+    io: &Arc<SessionIo>,
+    prompts: &Arc<Prompts>,
+    host_id: &str,
+) -> Option<Connected> {
+    emit_state(io, SessionState::Connecting);
+
+    let hid = host_id.to_string();
     let info = match store
-        .with_db_session(move |c, s| hosts::connect_info(c, s, &host_id))
+        .with_db_session(move |c, s| hosts::connect_info(c, s, &hid))
         .await
     {
         Ok(i) => i,
-        Err(e) => return emit_error(&io, e.code, e.message),
+        Err(e) => return fail(io, e.code, e.message),
     };
     let Some(user) = info.username.clone() else {
-        return emit_error(
-            &io,
+        return fail(
+            io,
             ErrorCode::AuthFailed,
             format!("{} has no username. Edit the host to add one.", info.label),
         );
@@ -164,15 +183,15 @@ pub async fn run(
     {
         Ok(Ok(s)) => s,
         Ok(Err(e)) => {
-            return emit_error(
-                &io,
+            return fail(
+                io,
                 ErrorCode::HostUnreachable,
                 format!("Can't reach {pattern}: {e}"),
             )
         }
         Err(_) => {
-            return emit_error(
-                &io,
+            return fail(
+                io,
                 ErrorCode::HostUnreachable,
                 format!("Can't reach {pattern}: timed out"),
             )
@@ -184,8 +203,8 @@ pub async fn run(
     let rejected = Arc::new(Mutex::new(None));
     let handler = Client {
         store: store.clone(),
-        io: Arc::clone(&io),
-        prompts: Arc::clone(&prompts),
+        io: Arc::clone(io),
+        prompts: Arc::clone(prompts),
         label: info.label.clone(),
         pattern: pattern.clone(),
         rejected: Arc::clone(&rejected),
@@ -201,15 +220,15 @@ pub async fn run(
         Err(e) => {
             let why = rejected.lock().ok().and_then(|r| r.clone());
             return match why {
-                Some(Rejected::ByUser) => emit_state(&io, SessionState::Closed),
-                Some(Rejected::Unsupported) => emit_error(
-                    &io,
+                Some(Rejected::ByUser) => closed(io),
+                Some(Rejected::Unsupported) => fail(
+                    io,
                     ErrorCode::KexFailed,
                     "This server uses a host certificate, which Dalan doesn't support yet.",
                 ),
-                Some(Rejected::Failed(m)) => emit_error(&io, ErrorCode::Internal, m),
-                None => emit_error(
-                    &io,
+                Some(Rejected::Failed(m)) => fail(io, ErrorCode::Internal, m),
+                None => fail(
+                    io,
                     ErrorCode::KexFailed,
                     format!("Couldn't agree on encryption with {pattern}: {e}"),
                 ),
@@ -217,24 +236,164 @@ pub async fn run(
         }
     };
 
-    // 3. Password. Saved one first; otherwise ask (and remember if the user ticks the box).
-    emit_state(&io, SessionState::Authenticating);
-    let password: Zeroizing<String> = match info.password {
-        Some(p) => p,
-        None => {
+    // 3. Sign in.
+    emit_state(io, SessionState::Authenticating);
+    if !authenticate(&mut handle, store, io, prompts, &info, &user, host_id).await {
+        let _ = handle
+            .disconnect(russh::Disconnect::ByApplication, "", "en")
+            .await;
+        return None;
+    }
+    Some(Connected {
+        handle,
+        label: info.label,
+    })
+}
+
+enum KeyResult {
+    Accepted,
+    /// The server said no to this key (carries the key's label).
+    Rejected(String),
+    /// Cancelled or failed; the UI has already been told.
+    Stop,
+}
+
+/// F02: sign in with the host's key. An encrypted key needs its passphrase (saved, or asked for).
+async fn try_key(
+    handle: &mut client::Handle<Client>,
+    store: &Store,
+    io: &Arc<SessionIo>,
+    prompts: &Arc<Prompts>,
+    key_id: &str,
+    user: &str,
+) -> KeyResult {
+    let kid = key_id.to_string();
+    let loaded = match store
+        .with_db_session(move |c, s| keys::load_for_auth(c, s, &kid))
+        .await
+    {
+        Ok(l) => l,
+        Err(e) => {
+            emit_error(io, e.code, e.message);
+            return KeyResult::Stop;
+        }
+    };
+    let passphrase: Option<Zeroizing<String>> = if !loaded.encrypted {
+        None
+    } else if let Some(p) = &loaded.saved_passphrase {
+        Some(p.clone())
+    } else {
+        let kind = PromptKind::Passphrase {
+            key_label: loaded.label.clone(),
+        };
+        let Some(a) = prompts.ask(io, kind).await else {
+            emit_state(io, SessionState::Closed);
+            return KeyResult::Stop;
+        };
+        let pw = Zeroizing::new(a.text.unwrap_or_default());
+        if a.remember && !pw.is_empty() {
+            let (id, label, pw2) = (key_id.to_string(), loaded.label.clone(), pw.to_string());
+            let _ = store
+                .with_db_session(move |c, s| {
+                    keys::update(
+                        c,
+                        s,
+                        &keys::KeyUpdate {
+                            id,
+                            label,
+                            save_passphrase: Some(pw2),
+                            forget_passphrase: false,
+                        },
+                    )
+                })
+                .await;
+        }
+        Some(pw)
+    };
+    let key = match keys::open_private(&loaded, passphrase.as_ref().map(|p| p.as_str())) {
+        Ok(k) => k,
+        Err(_) => {
+            emit_error(
+                io,
+                ErrorCode::AuthFailed,
+                format!(
+                    "That passphrase didn't work for the key \"{}\".",
+                    loaded.label
+                ),
+            );
+            return KeyResult::Stop;
+        }
+    };
+    // RSA keys sign with SHA-2 when the server supports it; other types have no choice to make.
+    let hash = if matches!(key.algorithm(), russh::keys::Algorithm::Rsa { .. }) {
+        handle
+            .best_supported_rsa_hash()
+            .await
+            .ok()
+            .flatten()
+            .flatten()
+    } else {
+        None
+    };
+    match handle
+        .authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key), hash))
+        .await
+    {
+        Ok(r) if r.success() => KeyResult::Accepted,
+        Ok(_) => KeyResult::Rejected(loaded.label.clone()),
+        Err(e) => {
+            emit_error(
+                io,
+                ErrorCode::HostUnreachable,
+                format!("Connection lost while signing in: {e}"),
+            );
+            KeyResult::Stop
+        }
+    }
+}
+
+/// Key first (if the host has one), then the password: saved, else asked for.
+/// Returns false after reporting why it failed.
+async fn authenticate(
+    handle: &mut client::Handle<Client>,
+    store: &Store,
+    io: &Arc<SessionIo>,
+    prompts: &Arc<Prompts>,
+    info: &hosts::ConnectInfo,
+    user: &str,
+    host_id: &str,
+) -> bool {
+    let mut rejected_key = None;
+    if let Some(key_id) = &info.key_id {
+        match try_key(handle, store, io, prompts, key_id, user).await {
+            KeyResult::Accepted => return true,
+            KeyResult::Rejected(label) => rejected_key = Some(label),
+            KeyResult::Stop => return false,
+        }
+    }
+    let password: Zeroizing<String> = match (&info.password, &rejected_key) {
+        (Some(p), _) => p.clone(),
+        // A key was refused and there is no password to fall back on: say so, don't ask for one.
+        (None, Some(label)) => {
+            emit_error(
+                io,
+                ErrorCode::AuthFailed,
+                format!("{} rejected the key \"{label}\".", info.label),
+            );
+            return false;
+        }
+        (None, None) => {
             let kind = PromptKind::Password {
                 host: info.label.clone(),
-                user: user.clone(),
+                user: user.to_string(),
             };
-            let Some(a) = prompts.ask(&io, kind).await else {
-                let _ = handle
-                    .disconnect(russh::Disconnect::ByApplication, "", "en")
-                    .await;
-                return emit_state(&io, SessionState::Closed);
+            let Some(a) = prompts.ask(io, kind).await else {
+                emit_state(io, SessionState::Closed);
+                return false;
             };
             let pw = Zeroizing::new(a.text.unwrap_or_default());
             if a.remember && !pw.is_empty() {
-                let (hid, pw2) = (p.host_id.clone(), pw.clone());
+                let (hid, pw2) = (host_id.to_string(), pw.clone());
                 let _ = store
                     .with_db_session(move |c, s| hosts::save_password(c, s, &hid, &pw2))
                     .await;
@@ -243,23 +402,38 @@ pub async fn run(
         }
     };
     match handle.authenticate_password(user, password.as_str()).await {
-        Ok(r) if r.success() => {}
+        Ok(r) if r.success() => true,
         Ok(_) => {
-            return emit_error(
-                &io,
+            emit_error(
+                io,
                 ErrorCode::AuthFailed,
                 format!("{} rejected the password.", info.label),
-            )
+            );
+            false
         }
         Err(e) => {
-            return emit_error(
-                &io,
+            emit_error(
+                io,
                 ErrorCode::HostUnreachable,
                 format!("Connection lost while signing in: {e}"),
-            )
+            );
+            false
         }
     }
-    drop(password); // wiped now, not at the end of the session
+}
+
+pub async fn run(
+    store: Store,
+    io: Arc<SessionIo>,
+    prompts: Arc<Prompts>,
+    p: Params,
+    mut cmds: mpsc::UnboundedReceiver<Cmd>,
+) {
+    let Some(Connected { handle, .. }) =
+        connect_authenticated(&store, &io, &prompts, &p.host_id).await
+    else {
+        return;
+    };
 
     // 4. PTY + shell.
     let mut channel = match handle.channel_open_session().await {
@@ -340,5 +514,95 @@ pub async fn run(
             status: exit_status,
         });
         emit_state(&io, SessionState::Disconnected);
+    }
+}
+
+/// What `~` expands to, and which characters may appear in an install path. The path goes into a
+/// shell command, so it is checked strictly instead of quoted cleverly.
+fn safe_path_part(s: &str) -> bool {
+    !s.is_empty()
+        && !s.contains("..")
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._-/".contains(c))
+}
+
+/// S08: append the public key to `authorized_keys` on the server (folder 700, file 600, no
+/// duplicates), then link the key to the host. Prompts (host key, password) arrive on `io` like a shell's.
+pub async fn run_export(
+    store: Store,
+    io: Arc<SessionIo>,
+    prompts: Arc<Prompts>,
+    host_id: String,
+    key_id: String,
+    dir: String,
+    file: String,
+) {
+    let dir = dir.trim().to_string();
+    let rel = dir.strip_prefix("~/").unwrap_or(&dir).to_string();
+    if !safe_path_part(&rel) || !safe_path_part(&file) || file.contains('/') {
+        return emit_error(
+            &io,
+            ErrorCode::Validation,
+            "Use a plain folder and file name, like ~/.ssh and authorized_keys.",
+        );
+    }
+    let kid = key_id.clone();
+    let key = match store
+        .with_db_session(move |c, s| keys::get(c, s, &kid))
+        .await
+    {
+        Ok(k) => k,
+        Err(e) => return emit_error(&io, e.code, e.message),
+    };
+    let Some(conn) = connect_authenticated(&store, &io, &prompts, &host_id).await else {
+        return;
+    };
+    // Absolute paths stay as typed; `~/x` becomes "$HOME/x".
+    let base = if dir.starts_with("~/") {
+        format!("\"$HOME\"/{rel}")
+    } else {
+        rel.clone()
+    };
+    let line = key.public_key.replace('\'', "'\\''");
+    let cmd = format!(
+        "umask 077; mkdir -p {base} && chmod 700 {base} && touch {base}/{file} && chmod 600 {base}/{file} && (grep -qxF '{line}' {base}/{file} || printf '%s\\n' '{line}' >> {base}/{file})"
+    );
+    let result = async {
+        let mut ch = conn.handle.channel_open_session().await.ok()?;
+        ch.exec(true, cmd).await.ok()?;
+        let mut status = None;
+        while let Some(msg) = ch.wait().await {
+            match msg {
+                ChannelMsg::ExitStatus { exit_status } => status = Some(exit_status),
+                ChannelMsg::Close => break,
+                _ => {}
+            }
+        }
+        status
+    }
+    .await;
+    let _ = conn
+        .handle
+        .disconnect(russh::Disconnect::ByApplication, "", "en")
+        .await;
+    match result {
+        Some(0) => {
+            let (hid, kid) = (host_id, key_id);
+            match store
+                .with_db_session(move |c, s| hosts::link_key(c, &s.vault_id, &hid, &kid))
+                .await
+            {
+                Ok(()) => {
+                    (io.event)(SessionEvent::Exit { status: Some(0) });
+                    emit_state(&io, SessionState::Closed);
+                }
+                Err(e) => emit_error(&io, e.code, e.message),
+            }
+        }
+        _ => emit_error(
+            &io,
+            ErrorCode::PermissionDenied,
+            format!("{} didn't let Dalan write the key there.", conn.label),
+        ),
     }
 }

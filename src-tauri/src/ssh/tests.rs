@@ -19,13 +19,17 @@ use crate::known_hosts;
 use crate::state::AppState;
 use crate::vault::{self, kdf::KdfParams};
 
-#[derive(Clone)]
-struct TestServer;
+/// Shared knobs for the test server: which public key it accepts, and the commands it was asked to run.
+#[derive(Clone, Default)]
+struct TestServer {
+    accepted_key: Arc<std::sync::Mutex<Option<String>>>,
+    execs: Arc<std::sync::Mutex<Vec<String>>>,
+}
 
 impl server::Server for TestServer {
     type Handler = Self;
     fn new_client(&mut self, _: Option<std::net::SocketAddr>) -> Self {
-        Self
+        self.clone()
     }
 }
 
@@ -37,6 +41,34 @@ impl server::Handler for TestServer {
         } else {
             Auth::reject()
         })
+    }
+    async fn auth_publickey(
+        &mut self,
+        user: &str,
+        key: russh::server::VerifiedPublicKey<'_>,
+    ) -> Result<Auth, Self::Error> {
+        let fp = key
+            .public_key
+            .fingerprint(russh::keys::HashAlg::Sha256)
+            .to_string();
+        let ok =
+            user == "test" && self.accepted_key.lock().unwrap().as_deref() == Some(fp.as_str());
+        Ok(if ok { Auth::Accept } else { Auth::reject() })
+    }
+    async fn exec_request(
+        &mut self,
+        c: ChannelId,
+        data: &[u8],
+        s: &mut Session,
+    ) -> Result<(), Self::Error> {
+        self.execs
+            .lock()
+            .unwrap()
+            .push(String::from_utf8_lossy(data).into_owned());
+        s.channel_success(c)?;
+        s.exit_status_request(c, 0)?;
+        s.close(c)?;
+        Ok(())
     }
     async fn channel_open_session(
         &mut self,
@@ -79,7 +111,7 @@ impl server::Handler for TestServer {
     }
 }
 
-async fn start_server() -> u16 {
+async fn start_server(srv: TestServer) -> u16 {
     let config = Arc::new(server::Config {
         keys: vec![russh::keys::PrivateKey::random(
             &mut rand::rng(),
@@ -93,7 +125,7 @@ async fn start_server() -> u16 {
     let socket = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
     let port = socket.local_addr().unwrap().port();
     tokio::spawn(async move {
-        let mut s = TestServer;
+        let mut s = srv;
         let _ = s.run_on_socket(config, &socket).await;
     });
     port
@@ -103,6 +135,7 @@ struct Harness {
     state: AppState,
     host_id: String,
     port: u16,
+    server: TestServer,
 }
 
 /// A fresh unlocked vault with one host pointing at a new test server.
@@ -111,7 +144,8 @@ async fn harness(saved_password: Option<&str>) -> Harness {
     let session = vault::create(&conn, "correct-horse-staple", KdfParams::cheap()).unwrap();
     let state = AppState::new(conn);
     state.set_session(Some(session));
-    let port = start_server().await;
+    let server = TestServer::default();
+    let port = start_server(server.clone()).await;
     let pw = saved_password.map(String::from);
     let host = state
         .store()
@@ -127,6 +161,8 @@ async fn harness(saved_password: Option<&str>) -> Harness {
                     username: Some("test".into()),
                     password: pw,
                     clear_password: false,
+                    key_id: None,
+                    identity_id: None,
                     group_id: None,
                     tags: vec![],
                 },
@@ -138,6 +174,7 @@ async fn harness(saved_password: Option<&str>) -> Harness {
         state,
         host_id: host.id,
         port,
+        server,
     }
 }
 
@@ -406,6 +443,8 @@ async fn unreachable_host_reports_host_unreachable() {
                     username: Some("test".into()),
                     password: None,
                     clear_password: false,
+                    key_id: None,
+                    identity_id: None,
                     group_id: None,
                     tags: vec![],
                 },
@@ -441,6 +480,8 @@ async fn docker_openssh_server_runs_a_real_shell() {
                     username: Some("test".into()),
                     password: Some("test".into()),
                     clear_password: false,
+                    key_id: None,
+                    identity_id: None,
                     group_id: None,
                     tags: vec![],
                 },
@@ -465,4 +506,352 @@ async fn docker_openssh_server_runs_a_real_shell() {
     assert!(out.contains("20000"));
     s.cmds.send(Cmd::Close).unwrap();
     s.until(is_state(SessionState::Closed)).await;
+}
+
+/// Generates a key, stores it, makes the server accept it, and links it to the host.
+async fn give_host_a_key(
+    h: &Harness,
+    passphrase: Option<&str>,
+    save: bool,
+) -> crate::keys::KeySummary {
+    let (pass, hid) = (passphrase.map(String::from), h.host_id.clone());
+    let key = h
+        .state
+        .store()
+        .with_db_session(move |c, s| {
+            let new = crate::keys::generate(&crate::keys::GenerateInput {
+                label: "deploy-key".into(),
+                kind: crate::keys::KeyKind::Ed25519,
+                passphrase: pass,
+                save_passphrase: save,
+            })?;
+            let k = crate::keys::store(c, s, &new)?;
+            hosts::link_key(c, &s.vault_id, &hid, &k.id)?;
+            Ok(k)
+        })
+        .await
+        .unwrap();
+    *h.server.accepted_key.lock().unwrap() = Some(key.fingerprint.clone());
+    key
+}
+
+async fn trusted(h: &Harness) -> Running {
+    let mut s = start(h);
+    let (id, _) = s.expect_prompt().await;
+    s.answer(&id, true, None, false);
+    s
+}
+
+#[tokio::test]
+async fn key_auth_signs_in_without_a_password() {
+    let h = harness(None).await; // no password saved: only the key can work
+    give_host_a_key(&h, None, false).await;
+    let mut s = trusted(&h).await;
+    s.until(is_state(SessionState::Ready)).await; // never saw a password prompt
+    s.cmds.send(Cmd::Close).unwrap();
+}
+
+#[tokio::test]
+async fn encrypted_key_asks_for_its_passphrase_unless_saved() {
+    let h = harness(None).await;
+    give_host_a_key(&h, Some("key-pass-123"), false).await;
+    let mut s = trusted(&h).await;
+    let (id, kind) = s.expect_prompt().await;
+    assert!(matches!(kind, PromptKind::Passphrase { ref key_label } if key_label == "deploy-key"));
+    s.answer(&id, true, Some("key-pass-123"), true); // remember it
+    s.until(is_state(SessionState::Ready)).await;
+    s.cmds.send(Cmd::Close).unwrap();
+    s.task.await.unwrap();
+    // Remembered: the next connect doesn't ask again.
+    let mut s = start(&h);
+    let first = s
+        .until(|e| {
+            matches!(
+                e,
+                SessionEvent::Prompt { .. }
+                    | SessionEvent::State {
+                        state: SessionState::Ready
+                    }
+            )
+        })
+        .await;
+    assert!(
+        matches!(first, SessionEvent::State { .. }),
+        "a saved passphrase must not prompt"
+    );
+    s.cmds.send(Cmd::Close).unwrap();
+}
+
+#[tokio::test]
+async fn wrong_passphrase_is_reported_not_retried_blindly() {
+    let h = harness(None).await;
+    give_host_a_key(&h, Some("key-pass-123"), false).await;
+    let mut s = trusted(&h).await;
+    let (id, _) = s.expect_prompt().await;
+    s.answer(&id, true, Some("nope"), false);
+    match s.until(|e| matches!(e, SessionEvent::Error { .. })).await {
+        SessionEvent::Error { code, message } => {
+            assert_eq!(code, ErrorCode::AuthFailed);
+            assert!(message.contains("deploy-key"));
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[tokio::test]
+async fn refused_key_without_a_password_says_the_key_was_rejected() {
+    let h = harness(None).await;
+    give_host_a_key(&h, None, false).await;
+    *h.server.accepted_key.lock().unwrap() = Some("SHA256:someone-else".into());
+    let mut s = trusted(&h).await;
+    match s.until(|e| matches!(e, SessionEvent::Error { .. })).await {
+        SessionEvent::Error { code, message } => {
+            assert_eq!(code, ErrorCode::AuthFailed);
+            assert!(
+                message.contains("rejected the key \"deploy-key\""),
+                "{message}"
+            );
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[tokio::test]
+async fn refused_key_falls_back_to_the_saved_password() {
+    let h = harness(Some("right-pw")).await;
+    give_host_a_key(&h, None, false).await;
+    *h.server.accepted_key.lock().unwrap() = Some("SHA256:someone-else".into());
+    let mut s = trusted(&h).await;
+    s.until(is_state(SessionState::Ready)).await;
+    s.cmds.send(Cmd::Close).unwrap();
+}
+
+#[tokio::test]
+async fn export_installs_the_public_key_and_links_it_to_the_host() {
+    let h = harness(Some("right-pw")).await;
+    let hid = h.host_id.clone();
+    let key = h
+        .state
+        .store()
+        .with_db_session(move |c, s| {
+            let new = crate::keys::generate(&crate::keys::GenerateInput {
+                label: "it's-a-key".into(),
+                kind: crate::keys::KeyKind::Ed25519,
+                passphrase: None,
+                save_passphrase: false,
+            })?;
+            crate::keys::store(c, s, &new)
+        })
+        .await
+        .unwrap();
+    let (etx, mut events) = mpsc::unbounded_channel();
+    let io = Arc::new(SessionIo {
+        event: Box::new(move |e| {
+            let _ = etx.send(e);
+        }),
+        data: Box::new(|_| {}),
+    });
+    let prompts = Arc::new(Prompts::default());
+    let task = tokio::spawn(client::run_export(
+        h.state.store(),
+        io,
+        Arc::clone(&prompts),
+        hid.clone(),
+        key.id.clone(),
+        "~/.ssh".into(),
+        "authorized_keys".into(),
+    ));
+    // Trust the host key, then wait for the export to finish.
+    loop {
+        match tokio::time::timeout(Duration::from_secs(10), events.recv())
+            .await
+            .unwrap()
+            .unwrap()
+        {
+            SessionEvent::Prompt { prompt_id, .. } => prompts
+                .answer(
+                    &prompt_id,
+                    PromptAnswer {
+                        accept: true,
+                        text: None,
+                        remember: false,
+                    },
+                )
+                .unwrap(),
+            SessionEvent::Exit { status } => {
+                assert_eq!(status, Some(0));
+                break;
+            }
+            SessionEvent::Error { message, .. } => panic!("export failed: {message}"),
+            _ => {}
+        }
+    }
+    task.await.unwrap();
+    let cmd = h
+        .server
+        .execs
+        .lock()
+        .unwrap()
+        .first()
+        .cloned()
+        .expect("the server saw a command");
+    assert!(
+        cmd.contains("\"$HOME\"/.ssh") && cmd.contains("chmod 700") && cmd.contains("chmod 600"),
+        "{cmd}"
+    );
+    assert!(
+        cmd.contains("grep -qxF"),
+        "must not add the key twice: {cmd}"
+    );
+    assert!(
+        cmd.contains(&key.public_key.replace('\'', "'\\''")),
+        "the quoted key is in the command: {cmd}"
+    );
+    let linked = h
+        .state
+        .store()
+        .with_db_session(move |c, s| hosts::get(c, &s.vault_id, &hid))
+        .await
+        .unwrap();
+    assert_eq!(linked.key_id.as_deref(), Some(key.id.as_str()));
+}
+
+#[tokio::test]
+async fn export_refuses_paths_that_could_escape_the_shell_command() {
+    let h = harness(Some("right-pw")).await;
+    let (etx, mut events) = mpsc::unbounded_channel();
+    let io = Arc::new(SessionIo {
+        event: Box::new(move |e| {
+            let _ = etx.send(e);
+        }),
+        data: Box::new(|_| {}),
+    });
+    client::run_export(
+        h.state.store(),
+        io,
+        Arc::new(Prompts::default()),
+        h.host_id.clone(),
+        "k".into(),
+        "~/.ssh; rm -rf /".into(),
+        "authorized_keys".into(),
+    )
+    .await;
+    assert!(matches!(
+        events.recv().await.unwrap(),
+        SessionEvent::Error {
+            code: ErrorCode::Validation,
+            ..
+        }
+    ));
+    assert!(h.server.execs.lock().unwrap().is_empty());
+}
+
+/// F02 against real OpenSSH: password sign-in, install a fresh key, then sign in with the key alone.
+#[tokio::test]
+#[ignore = "needs the Docker OpenSSH server on 127.0.0.1:2222"]
+async fn docker_f02_install_key_then_connect_key_only() {
+    let h = harness(None).await;
+    let hid = h.host_id.clone();
+    let key = h
+        .state
+        .store()
+        .with_db_session(move |c, s| {
+            hosts::save(
+                c,
+                s,
+                &HostInput {
+                    id: Some(hid),
+                    label: "docker".into(),
+                    address: "127.0.0.1".into(),
+                    port: Some(2222),
+                    username: Some("test".into()),
+                    password: Some("test".into()),
+                    clear_password: false,
+                    group_id: None,
+                    key_id: None,
+                    identity_id: None,
+                    tags: vec![],
+                },
+            )?;
+            let new = crate::keys::generate(&crate::keys::GenerateInput {
+                label: "f02".into(),
+                kind: crate::keys::KeyKind::Ed25519,
+                passphrase: None,
+                save_passphrase: false,
+            })?;
+            crate::keys::store(c, s, &new)
+        })
+        .await
+        .unwrap();
+    let (etx, mut events) = mpsc::unbounded_channel();
+    let io = Arc::new(SessionIo {
+        event: Box::new(move |e| {
+            let _ = etx.send(e);
+        }),
+        data: Box::new(|_| {}),
+    });
+    let prompts = Arc::new(Prompts::default());
+    let task = tokio::spawn(client::run_export(
+        h.state.store(),
+        io,
+        Arc::clone(&prompts),
+        h.host_id.clone(),
+        key.id.clone(),
+        "~/.ssh".into(),
+        "authorized_keys".into(),
+    ));
+    loop {
+        match tokio::time::timeout(Duration::from_secs(20), events.recv())
+            .await
+            .unwrap()
+            .unwrap()
+        {
+            SessionEvent::Prompt { prompt_id, .. } => prompts
+                .answer(
+                    &prompt_id,
+                    PromptAnswer {
+                        accept: true,
+                        text: None,
+                        remember: false,
+                    },
+                )
+                .unwrap(),
+            SessionEvent::Exit { .. } => break,
+            SessionEvent::Error { message, .. } => panic!("export failed: {message}"),
+            _ => {}
+        }
+    }
+    task.await.unwrap();
+    // Now drop the password: only the key (linked by the export) can get us in.
+    let hid = h.host_id.clone();
+    h.state
+        .store()
+        .with_db_session(move |c, s| {
+            hosts::save(
+                c,
+                s,
+                &HostInput {
+                    id: Some(hid),
+                    label: "docker".into(),
+                    address: "127.0.0.1".into(),
+                    port: Some(2222),
+                    username: Some("test".into()),
+                    password: None,
+                    clear_password: true,
+                    group_id: None,
+                    key_id: Some(key.id),
+                    identity_id: None,
+                    tags: vec![],
+                },
+            )
+        })
+        .await
+        .unwrap();
+    let mut s = start(&h);
+    s.until(is_state(SessionState::Ready)).await;
+    s.cmds
+        .send(Cmd::Write(b"echo key-only-$((6*7))\n".to_vec()))
+        .unwrap();
+    assert!(s.read_until("key-only-42").await.contains("key-only-42"));
+    s.cmds.send(Cmd::Close).unwrap();
 }

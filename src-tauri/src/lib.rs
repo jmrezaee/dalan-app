@@ -47,6 +47,15 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::session::session_reconnect,
             commands::session::known_hosts_list,
             commands::session::known_host_delete,
+            commands::session::key_export_to_host,
+            commands::keychain::keys_list,
+            commands::keychain::key_generate,
+            commands::keychain::key_import,
+            commands::keychain::key_update,
+            commands::keychain::key_delete,
+            commands::keychain::identities_list,
+            commands::keychain::identity_save,
+            commands::keychain::identity_delete,
         ])
         .events(collect_events![
             events::VaultLocked,

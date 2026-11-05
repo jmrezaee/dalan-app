@@ -50,6 +50,10 @@ pub enum PromptKind {
         host: String,
         user: String,
     },
+    /// An encrypted private key needs its passphrase.
+    Passphrase {
+        key_label: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -143,7 +147,20 @@ impl Prompts {
     }
 }
 
+/// What a task does once connected.
+#[derive(Clone)]
+pub enum Job {
+    Shell,
+    /// S08: install a public key in `authorized_keys`.
+    Export {
+        key_id: String,
+        dir: String,
+        file: String,
+    },
+}
+
 struct Entry {
+    job: Job,
     host_id: String,
     cmd_tx: mpsc::UnboundedSender<Cmd>,
     io: Arc<SessionIo>,
@@ -173,8 +190,26 @@ impl SessionManager {
             cols: e.size.0,
             rows: e.size.1,
         };
+        let job = e.job.clone();
         tauri::async_runtime::spawn(async move {
-            client::run(store, Arc::clone(&io), Arc::clone(&prompts), params, rx).await;
+            match job {
+                Job::Shell => {
+                    client::run(store, Arc::clone(&io), Arc::clone(&prompts), params, rx).await
+                }
+                Job::Export { key_id, dir, file } => {
+                    drop(rx); // an export takes no keystrokes
+                    client::run_export(
+                        store,
+                        Arc::clone(&io),
+                        Arc::clone(&prompts),
+                        params.host_id,
+                        key_id,
+                        dir,
+                        file,
+                    )
+                    .await;
+                }
+            }
             prompts.cancel_all();
             running.store(false, std::sync::atomic::Ordering::SeqCst);
         });
@@ -185,6 +220,7 @@ impl SessionManager {
         &self,
         store: Store,
         host_id: String,
+        job: Job,
         cols: u32,
         rows: u32,
         io: SessionIo,
@@ -192,6 +228,7 @@ impl SessionManager {
         let id = uuid::Uuid::now_v7().to_string();
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut entry = Entry {
+            job,
             host_id,
             cmd_tx: tx,
             io: Arc::new(io),

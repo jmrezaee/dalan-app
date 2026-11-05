@@ -14,6 +14,7 @@ const overlay = computed<OverlayKind | null>(() => {
   if (s.prompt?.kind.type === 'host_key_new') return 'host-key-new'
   if (s.prompt?.kind.type === 'host_key_changed') return 'host-key-changed'
   if (s.prompt?.kind.type === 'password') return 'password'
+  if (s.prompt?.kind.type === 'passphrase') return 'passphrase'
   if (s.status === 'error') return s.error?.code === 'host_unreachable' ? 'unreachable' : 'auth-failed'
   if (s.status === 'disconnected') return 'disconnected'
   if (s.status === 'connecting' || s.status === 'authenticating') return 'connecting'
@@ -27,6 +28,7 @@ const fingerprint = computed(() => {
 })
 const oldFingerprint = computed(() => (kind.value?.type === 'host_key_changed' ? kind.value.old_fingerprint : undefined))
 const user = computed(() => (kind.value?.type === 'password' ? kind.value.user : undefined))
+const keyLabel = computed(() => (kind.value?.type === 'passphrase' ? kind.value.key_label : undefined))
 const time = computed(() => props.session.disconnectedAt?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
 const reason = computed(() => props.session.error?.message ?? '')
 
@@ -54,6 +56,7 @@ const cancel = () => sessions.respond(props.session, false)
       :fingerprint="fingerprint"
       :old-fingerprint="oldFingerprint"
       :user="user"
+      :key-label="keyLabel"
       :reason="reason"
       :time="time"
       @cancel="session.prompt ? cancel() : sessions.close(session)"

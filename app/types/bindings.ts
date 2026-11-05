@@ -38,6 +38,23 @@ export const commands = {
 	sessionReconnect: (sessionId: string) => typedError<null, AppError>(__TAURI_INVOKE("session_reconnect", { sessionId })),
 	knownHostsList: () => typedError<KnownHost_Serialize[], AppError>(__TAURI_INVOKE("known_hosts_list")),
 	knownHostDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("known_host_delete", { id })),
+	/**
+	 *  S08: installs a key's public half on a host. Same plumbing as a session: progress and prompts
+	 *  (host key, password) arrive on `events`, and answers go to `session_respond`.
+	 */
+	keyExportToHost: (keyId: string, hostId: string, dir: string, fileName: string, events: Channel<SessionEvent_Deserialize>) => typedError<SessionOpened, AppError>(__TAURI_INVOKE("key_export_to_host", { keyId, hostId, dir, fileName, events })),
+	keysList: () => typedError<KeySummary_Serialize[], AppError>(__TAURI_INVOKE("keys_list")),
+	/**
+	 *  Generating (RSA especially) is CPU work, so it runs off the async threads and before the
+	 *  database lock is taken.
+	 */
+	keyGenerate: (input: GenerateInput_Deserialize) => typedError<KeySummary_Serialize, AppError>(__TAURI_INVOKE("key_generate", { input })),
+	keyImport: (input: ImportInput_Deserialize) => typedError<KeySummary_Serialize, AppError>(__TAURI_INVOKE("key_import", { input })),
+	keyUpdate: (input: KeyUpdate_Deserialize) => typedError<KeySummary_Serialize, AppError>(__TAURI_INVOKE("key_update", { input })),
+	keyDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("key_delete", { id })),
+	identitiesList: () => typedError<IdentitySummary_Serialize[], AppError>(__TAURI_INVOKE("identities_list")),
+	identitySave: (input: IdentityInput_Deserialize) => typedError<IdentitySummary_Serialize, AppError>(__TAURI_INVOKE("identity_save", { input })),
+	identityDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("identity_delete", { id })),
 };
 
 /** Events */
@@ -64,7 +81,27 @@ export type AutoLockWarning = {
 };
 
 /**  Codes from replica/architecture.md. Add new ones there first. */
-export type ErrorCode = "locked" | "wrong_password" | "too_many_attempts" | "not_found" | "validation" | "in_use" | "auth_failed" | "host_unreachable" | "host_key_changed" | "kex_failed" | "port_in_use" | "permission_denied" | "internal";
+export type ErrorCode = "locked" | "wrong_password" | "too_many_attempts" | 
+/**  Importing an encrypted key without its passphrase. */
+"needs_passphrase" | 
+/**  The text isn't a private key we can read. */
+"invalid_key" | "not_found" | "validation" | "in_use" | "auth_failed" | "host_unreachable" | "host_key_changed" | "kex_failed" | "port_in_use" | "permission_denied" | "internal";
+
+export type GenerateInput = GenerateInput_Serialize | GenerateInput_Deserialize;
+
+export type GenerateInput_Deserialize = {
+	label: string,
+	kind: KeyKind,
+	passphrase?: string | null,
+	save_passphrase: boolean,
+};
+
+export type GenerateInput_Serialize = {
+	label: string,
+	kind: KeyKind,
+	passphrase: string | null,
+	save_passphrase: boolean,
+};
 
 export type GroupInput = GroupInput_Serialize | GroupInput_Deserialize;
 
@@ -76,6 +113,8 @@ export type GroupInput_Deserialize = {
 	username?: string | null,
 	password?: string | null,
 	clear_password: boolean,
+	key_id?: string | null,
+	identity_id?: string | null,
 };
 
 export type GroupInput_Serialize = {
@@ -86,6 +125,8 @@ export type GroupInput_Serialize = {
 	username: string | null,
 	password: string | null,
 	clear_password: boolean,
+	key_id: string | null,
+	identity_id: string | null,
 };
 
 export type GroupSummary = GroupSummary_Serialize | GroupSummary_Deserialize;
@@ -97,6 +138,8 @@ export type GroupSummary_Deserialize = {
 	username?: string | null,
 	port?: number | null,
 	has_password: boolean,
+	key_id?: string | null,
+	identity_id?: string | null,
 	/**  Hosts in this group and everything below it. */
 	host_count: number,
 	group_count: number,
@@ -111,6 +154,8 @@ export type GroupSummary_Serialize = {
 	username: string | null,
 	port: number | null,
 	has_password: boolean,
+	key_id: string | null,
+	identity_id: string | null,
 	/**  Hosts in this group and everything below it. */
 	host_count: number,
 	group_count: number,
@@ -133,6 +178,8 @@ export type HostInput_Deserialize = {
 	/**  Removes the saved password (only used on update). */
 	clear_password: boolean,
 	group_id?: string | null,
+	key_id?: string | null,
+	identity_id?: string | null,
 	/**  Tag names. Missing tags are created, and tags no host uses any more are removed. */
 	tags: string[],
 };
@@ -149,6 +196,8 @@ export type HostInput_Serialize = {
 	/**  Removes the saved password (only used on update). */
 	clear_password: boolean,
 	group_id: string | null,
+	key_id: string | null,
+	identity_id: string | null,
 	/**  Tag names. Missing tags are created, and tags no host uses any more are removed. */
 	tags: string[],
 };
@@ -173,6 +222,10 @@ export type HostSummary_Deserialize = {
 	effective_username?: string | null,
 	effective_port: number,
 	effective_has_password: boolean,
+	/**  The host's own key and identity (S07). `None` = inherit. */
+	key_id?: string | null,
+	identity_id?: string | null,
+	effective_key_id?: string | null,
 	/**  What the host would get from its groups if it set nothing itself ("from Production"). */
 	inherited: Inherited_Deserialize,
 	/**  Epoch ms. Fits a JS number safely, so it is exported as `number` rather than bigint. */
@@ -196,6 +249,10 @@ export type HostSummary_Serialize = {
 	effective_username: string | null,
 	effective_port: number,
 	effective_has_password: boolean,
+	/**  The host's own key and identity (S07). `None` = inherit. */
+	key_id: string | null,
+	identity_id: string | null,
+	effective_key_id: string | null,
 	/**  What the host would get from its groups if it set nothing itself ("from Production"). */
 	inherited: Inherited_Serialize,
 	/**  Epoch ms. Fits a JS number safely, so it is exported as `number` rather than bigint. */
@@ -212,6 +269,66 @@ export type HostsTree_Deserialize = {
 export type HostsTree_Serialize = {
 	groups: GroupSummary_Serialize[],
 	hosts: HostSummary_Serialize[],
+};
+
+export type IdentityInput = IdentityInput_Serialize | IdentityInput_Deserialize;
+
+export type IdentityInput_Deserialize = {
+	id?: string | null,
+	label: string,
+	username: string,
+	password?: string | null,
+	clear_password: boolean,
+	key_id?: string | null,
+};
+
+export type IdentityInput_Serialize = {
+	id: string | null,
+	label: string,
+	username: string,
+	password: string | null,
+	clear_password: boolean,
+	key_id: string | null,
+};
+
+export type IdentitySummary = IdentitySummary_Serialize | IdentitySummary_Deserialize;
+
+export type IdentitySummary_Deserialize = {
+	id: string,
+	label: string,
+	username: string,
+	has_password: boolean,
+	key_id?: string | null,
+};
+
+export type IdentitySummary_Serialize = {
+	id: string,
+	label: string,
+	username: string,
+	has_password: boolean,
+	key_id: string | null,
+};
+
+export type ImportInput = ImportInput_Serialize | ImportInput_Deserialize;
+
+export type ImportInput_Deserialize = {
+	label: string,
+	/**  Pasted key text. */
+	pem?: string | null,
+	/**  A file chosen in the dialog. Read here in Rust, not in the webview. */
+	path?: string | null,
+	passphrase?: string | null,
+	save_passphrase: boolean,
+};
+
+export type ImportInput_Serialize = {
+	label: string,
+	/**  Pasted key text. */
+	pem: string | null,
+	/**  A file chosen in the dialog. Read here in Rust, not in the webview. */
+	path: string | null,
+	passphrase: string | null,
+	save_passphrase: boolean,
 };
 
 /**  What this item would get if it set nothing itself. Drives the "from Production" hints. */
@@ -234,6 +351,8 @@ export type Inherited_Deserialize = {
 	port?: InheritedPort | null,
 	/**  Group label, when a password is inherited. The password itself never leaves Rust. */
 	password?: string | null,
+	/**  The inherited key: `value` is the key's id (the UI looks up its label). */
+	key?: InheritedText | null,
 };
 
 /**  What this item would get if it set nothing itself. Drives the "from Production" hints. */
@@ -242,6 +361,62 @@ export type Inherited_Serialize = {
 	port: InheritedPort | null,
 	/**  Group label, when a password is inherited. The password itself never leaves Rust. */
 	password: string | null,
+	/**  The inherited key: `value` is the key's id (the UI looks up its label). */
+	key: InheritedText | null,
+};
+
+export type KeyKind = "ed25519" | "ecdsa_p256" | "ecdsa_p384" | "ecdsa_p521" | "rsa4096";
+
+export type KeySummary = KeySummary_Serialize | KeySummary_Deserialize;
+
+export type KeySummary_Deserialize = {
+	id: string,
+	label: string,
+	/**  `ed25519`, `ecdsa-p256`, `ecdsa-p384`, `ecdsa-p521` or `rsa`. */
+	key_type: string,
+	bits?: number | null,
+	/**  OpenSSH one-line public key. Safe to show and copy. */
+	public_key: string,
+	fingerprint: string,
+	/**  The private key is protected by a passphrase. */
+	encrypted: boolean,
+	/**  ...and Dalan remembers it (otherwise it asks on every connect). */
+	passphrase_saved: boolean,
+	certificate: boolean,
+};
+
+export type KeySummary_Serialize = {
+	id: string,
+	label: string,
+	/**  `ed25519`, `ecdsa-p256`, `ecdsa-p384`, `ecdsa-p521` or `rsa`. */
+	key_type: string,
+	bits: number | null,
+	/**  OpenSSH one-line public key. Safe to show and copy. */
+	public_key: string,
+	fingerprint: string,
+	/**  The private key is protected by a passphrase. */
+	encrypted: boolean,
+	/**  ...and Dalan remembers it (otherwise it asks on every connect). */
+	passphrase_saved: boolean,
+	certificate: boolean,
+};
+
+export type KeyUpdate = KeyUpdate_Serialize | KeyUpdate_Deserialize;
+
+export type KeyUpdate_Deserialize = {
+	id: string,
+	label: string,
+	/**  Remember this passphrase (checked against the key first). `None` leaves the saved one alone. */
+	save_passphrase?: string | null,
+	forget_passphrase: boolean,
+};
+
+export type KeyUpdate_Serialize = {
+	id: string,
+	label: string,
+	/**  Remember this passphrase (checked against the key first). `None` leaves the saved one alone. */
+	save_passphrase: string | null,
+	forget_passphrase: boolean,
 };
 
 export type KnownHost = KnownHost_Serialize | KnownHost_Deserialize;
@@ -292,7 +467,9 @@ export type PromptAnswer_Serialize = {
 /**  A question the session needs answered before it can continue. */
 export type PromptKind = { type: "host_key_new"; host: string; key_type: string; fingerprint: string } | 
 /**  Blocking. The default answer is "no". */
-{ type: "host_key_changed"; host: string; key_type: string; old_fingerprint: string; new_fingerprint: string } | { type: "password"; host: string; user: string };
+{ type: "host_key_changed"; host: string; key_type: string; old_fingerprint: string; new_fingerprint: string } | { type: "password"; host: string; user: string } | 
+/**  An encrypted private key needs its passphrase. */
+{ type: "passphrase"; key_label: string };
 
 /**
  *  Raw terminal bytes. Sent over the Tauri channel as a binary body (an `ArrayBuffer` in JS),

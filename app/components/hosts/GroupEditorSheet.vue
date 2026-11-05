@@ -6,6 +6,9 @@ import { Input } from '@/components/ui/input'
 import type { GroupSummary } from '~/types/bindings'
 
 const hosts = useHostsStore()
+const keychain = useKeychainStore()
+const identityOptions = computed(() => keychain.identities.map(i => ({ value: i.id, label: `${i.label}  ·  ${i.username}` })))
+const keyOptions = computed(() => keychain.keys.map(k => ({ value: k.id, label: `${k.label}  ·  ${k.key_type}` })))
 
 const open = computed({
   get: () => hosts.editingGroup !== null,
@@ -13,7 +16,7 @@ const open = computed({
 })
 const group = computed(() => (hosts.editingGroup && hosts.editingGroup !== 'new' ? hosts.editingGroup : null))
 
-const blank = () => ({ label: '', parent_id: hosts.currentGroupId as string | null, port: '' as number | string, username: '', password: '' })
+const blank = () => ({ label: '', parent_id: hosts.currentGroupId as string | null, port: '' as number | string, username: '', password: '', identity_id: null as string | null, key_id: null as string | null })
 const form = reactive(blank())
 const clearPassword = ref(false)
 const error = ref('')
@@ -24,7 +27,7 @@ const dirty = computed(() => current.value !== snapshot.value)
 
 watch(() => hosts.editingGroup, (e) => {
   const g = e && e !== 'new' ? (e as GroupSummary) : null
-  Object.assign(form, g ? { label: g.label, parent_id: g.parent_id, port: g.port ?? '', username: g.username ?? '', password: '' } : blank())
+  Object.assign(form, g ? { label: g.label, parent_id: g.parent_id, port: g.port ?? '', username: g.username ?? '', password: '', identity_id: g.identity_id, key_id: g.key_id } : blank())
   clearPassword.value = false
   error.value = ''
   snapshot.value = current.value
@@ -44,6 +47,8 @@ async function submit() {
     username: form.username,
     password: form.password || null,
     clear_password: clearPassword.value,
+    identity_id: form.identity_id,
+    key_id: form.key_id,
   })
   busy.value = false
   if (!error.value) hosts.editingGroup = null
@@ -85,6 +90,15 @@ async function submit() {
             <Label for="group-port">Port</Label>
             <div class="w-28"><NumberInput id="group-port" v-model="form.port" :placeholder="String(inherited.port?.value ?? 22)" /></div>
             <p v-if="form.port === '' && inherited.port" class="text-2xs text-muted">from {{ inherited.port.group }}</p>
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <Label for="group-identity">Identity</Label>
+            <OptionSelect id="group-identity" v-model="form.identity_id" :options="identityOptions" none-label="None" />
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <Label for="group-key">Key</Label>
+            <OptionSelect id="group-key" v-model="form.key_id" :options="keyOptions" none-label="None" />
+            <p v-if="!form.key_id && inherited.key" class="text-xs text-muted">Uses the key {{ keychain.keyLabel(inherited.key.value) ?? 'from a group' }} from {{ inherited.key.group }}.</p>
           </div>
           <div class="flex flex-col gap-1.5">
             <Label for="group-password">Password</Label>

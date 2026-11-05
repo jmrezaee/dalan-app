@@ -8,12 +8,12 @@ Nested groups,hosts,must,yes,yes,S04
 Per-field inheritance from parent groups,hosts,must,yes,yes,source 3; resolve up the parent chain per field
 Tags with filter,hosts,must,yes,yes,S02 S03
 Drag hosts into groups,hosts,must,yes,yes,F04
-Generate SSH key (Ed25519 ECDSA RSA),keychain,must,yes,no,S06
-Import private key (paste / drop / file) with passphrase,keychain,must,yes,no,S06
-Save passphrase toggle (else prompt each connect),keychain,must,yes,no,source 7
-Identities (username + password or key) linked to hosts and groups,keychain,must,yes,no,S07
-Export public key to host authorized_keys,keychain,must,yes,no,S08 F02
-SSH connect with password key or identity,terminal,must,yes,no,S18
+Generate SSH key (Ed25519 ECDSA RSA),keychain,must,yes,yes,S06
+Import private key (paste / drop / file) with passphrase,keychain,must,yes,yes,S06
+Save passphrase toggle (else prompt each connect),keychain,must,yes,yes,source 7
+Identities (username + password or key) linked to hosts and groups,keychain,must,yes,yes,S07
+Export public key to host authorized_keys,keychain,must,yes,yes,S08 F02
+SSH connect with password key or identity,terminal,must,yes,yes,S18
 Known hosts trust-on-first-use prompt,terminal,must,yes,yes,S18 S14
 Host key changed blocking warning,terminal,must,yes,yes,F12
 Known hosts list with delete,vault,must,yes,yes,S14

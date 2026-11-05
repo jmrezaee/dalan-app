@@ -11,6 +11,10 @@ pub enum ErrorCode {
     Locked,
     WrongPassword,
     TooManyAttempts,
+    /// Importing an encrypted key without its passphrase.
+    NeedsPassphrase,
+    /// The text isn't a private key we can read.
+    InvalidKey,
     NotFound,
     Validation,
     InUse,

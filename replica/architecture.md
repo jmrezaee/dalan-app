@@ -131,7 +131,7 @@ Rust folds those rows into a `ResolvedProfile` and records which group each valu
 
 ## API: Tauri commands
 
-Notation: `cmd_name(input) -> output`. Every command except `vault_status`, `vault_create` and `vault_unlock` requires an unlocked vault. Errors come back as `{ code, message }`. Codes include `locked`, `wrong_password`, `too_many_attempts`, `not_found`, `validation`, `in_use`, `auth_failed`, `host_unreachable`, `host_key_changed`, `kex_failed`, `port_in_use` and `permission_denied`.
+Notation: `cmd_name(input) -> output`. Every command except `vault_status`, `vault_create` and `vault_unlock` requires an unlocked vault. Errors come back as `{ code, message }`. Codes include `locked`, `wrong_password`, `too_many_attempts`, `needs_passphrase`, `invalid_key`, `not_found`, `validation`, `in_use`, `auth_failed`, `host_unreachable`, `host_key_changed`, `kex_failed`, `port_in_use` and `permission_denied`.
 
 Streams use **Tauri `Channel`s** passed as a command argument. They are ordered and per call, which fits a terminal better than global events.
 

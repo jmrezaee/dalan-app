@@ -9,7 +9,7 @@ use specta::Type;
 
 use crate::db::now_ms;
 use crate::error::{AppError, AppResult};
-use crate::groups::{self, GroupMap, GroupSummary, Inherited};
+use crate::groups::{self, GroupMap, GroupSummary, IdentityMap, Inherited, Level};
 use crate::vault::{
     secrets::{self, SecretKind},
     VaultSession,
@@ -36,6 +36,10 @@ pub struct HostSummary {
     pub effective_username: Option<String>,
     pub effective_port: u16,
     pub effective_has_password: bool,
+    /// The host's own key and identity (S07). `None` = inherit.
+    pub key_id: Option<String>,
+    pub identity_id: Option<String>,
+    pub effective_key_id: Option<String>,
     /// What the host would get from its groups if it set nothing itself ("from Production").
     pub inherited: Inherited,
     /// Epoch ms. Fits a JS number safely, so it is exported as `number` rather than bigint.
@@ -62,6 +66,8 @@ pub struct HostInput {
     /// Removes the saved password (only used on update).
     pub clear_password: bool,
     pub group_id: Option<String>,
+    pub key_id: Option<String>,
+    pub identity_id: Option<String>,
     /// Tag names. Missing tags are created, and tags no host uses any more are removed.
     pub tags: Vec<String>,
 }
@@ -75,9 +81,12 @@ struct HostRow {
     has_password: bool,
     group_id: Option<String>,
     last_connected_at: Option<i64>,
+    key_id: Option<String>,
+    identity_id: Option<String>,
+    password_secret_id: Option<String>,
 }
 
-const SELECT_HOST: &str = "SELECT h.id, h.label, h.address, p.ssh_port, p.username, p.password_secret_id IS NOT NULL, h.group_id, h.last_connected_at
+const SELECT_HOST: &str = "SELECT h.id, h.label, h.address, p.ssh_port, p.username, p.password_secret_id IS NOT NULL, h.group_id, h.last_connected_at, p.key_id, p.identity_id, p.password_secret_id
      FROM hosts h JOIN connection_profiles p ON p.id = h.profile_id";
 
 fn row_to_host(r: &rusqlite::Row) -> rusqlite::Result<HostRow> {
@@ -90,6 +99,9 @@ fn row_to_host(r: &rusqlite::Row) -> rusqlite::Result<HostRow> {
         has_password: r.get(5)?,
         group_id: r.get(6)?,
         last_connected_at: r.get(7)?,
+        key_id: r.get(8)?,
+        identity_id: r.get(9)?,
+        password_secret_id: r.get(10)?,
     })
 }
 
@@ -107,22 +119,39 @@ fn tags_by_host(conn: &Connection, vault_id: &str) -> AppResult<HashMap<String, 
     Ok(map)
 }
 
-fn summarize(h: HostRow, tags: Vec<String>, groups: &GroupMap) -> HostSummary {
-    let w = groups::walk(groups, h.group_id.as_deref());
+impl HostRow {
+    fn level(&self) -> Level<'_> {
+        Level {
+            label: None,
+            username: self.username.as_deref(),
+            port: self.port,
+            password_secret_id: self.password_secret_id.as_deref(),
+            key_id: self.key_id.as_deref(),
+            identity_id: self.identity_id.as_deref(),
+        }
+    }
+}
+
+fn summarize(h: HostRow, tags: Vec<String>, groups: &GroupMap, ids: &IdentityMap) -> HostSummary {
+    let above = groups::chain(groups, h.group_id.as_deref());
+    let inherited = Inherited::from(&groups::resolve(&above, ids));
+    let mut levels = vec![h.level()];
+    levels.extend(above);
+    let r = groups::resolve(&levels, ids);
     HostSummary {
-        effective_username: h
-            .username
-            .clone()
-            .or_else(|| w.username.map(|(u, _)| u.to_string())),
-        effective_port: h.port.or(w.port.map(|(p, _)| p)).unwrap_or(DEFAULT_PORT),
-        effective_has_password: h.has_password || w.password.is_some(),
-        inherited: Inherited::from(&w),
+        effective_username: r.username.map(|s| s.value),
+        effective_port: r.port.map_or(DEFAULT_PORT, |p| p.value),
+        effective_has_password: r.password_secret_id.is_some(),
+        effective_key_id: r.key_id.map(|k| k.value),
+        inherited,
         id: h.id,
         label: h.label,
         address: h.address,
         port: h.port,
         username: h.username,
         has_password: h.has_password,
+        key_id: h.key_id,
+        identity_id: h.identity_id,
         group_id: h.group_id,
         tags,
         last_connected_at: h.last_connected_at,
@@ -131,6 +160,7 @@ fn summarize(h: HostRow, tags: Vec<String>, groups: &GroupMap) -> HostSummary {
 
 pub fn tree(conn: &Connection, vault_id: &str) -> AppResult<HostsTree> {
     let groups = groups::load(conn, vault_id)?;
+    let ids = groups::load_identities(conn, vault_id)?;
     let mut tags = tags_by_host(conn, vault_id)?;
     let mut h = conn.prepare(&format!(
         "{SELECT_HOST} WHERE h.vault_id = ?1 ORDER BY h.sort, h.label COLLATE NOCASE"
@@ -141,7 +171,7 @@ pub fn tree(conn: &Connection, vault_id: &str) -> AppResult<HostsTree> {
         .into_iter()
         .map(|row| {
             let t = tags.remove(&row.id).unwrap_or_default();
-            summarize(row, t, &groups)
+            summarize(row, t, &groups, &ids)
         })
         .collect();
     Ok(HostsTree {
@@ -162,7 +192,12 @@ pub fn get(conn: &Connection, vault_id: &str, id: &str) -> AppResult<HostSummary
     let tags = tags_by_host(conn, vault_id)?
         .remove(&row.id)
         .unwrap_or_default();
-    Ok(summarize(row, tags, &groups::load(conn, vault_id)?))
+    Ok(summarize(
+        row,
+        tags,
+        &groups::load(conn, vault_id)?,
+        &groups::load_identities(conn, vault_id)?,
+    ))
 }
 
 /// Trims and checks the fields. Returns (label, address, username, tags).
@@ -244,8 +279,8 @@ pub fn save(conn: &mut Connection, s: &VaultSession, input: &HostInput) -> AppRe
             );
             let (secret_id, _) = groups::next_secret(&tx, s, None, password, false)?;
             tx.execute(
-                "INSERT INTO connection_profiles (id, vault_id, username, password_secret_id, ssh_port, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
-                params![profile_id, s.vault_id, username, secret_id, input.port, now],
+                "INSERT INTO connection_profiles (id, vault_id, username, password_secret_id, ssh_port, key_id, identity_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+                params![profile_id, s.vault_id, username, secret_id, input.port, input.key_id, input.identity_id, now],
             )?;
             tx.execute(
                 "INSERT INTO hosts (id, vault_id, group_id, profile_id, label, address, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
@@ -266,8 +301,8 @@ pub fn save(conn: &mut Connection, s: &VaultSession, input: &HostInput) -> AppRe
             let (secret_id, orphan) =
                 groups::next_secret(&tx, s, old_secret, password, input.clear_password)?;
             tx.execute(
-                "UPDATE connection_profiles SET username = ?1, password_secret_id = ?2, ssh_port = ?3, updated_at = ?4 WHERE id = ?5",
-                params![username, secret_id, input.port, now, profile_id],
+                "UPDATE connection_profiles SET username = ?1, password_secret_id = ?2, ssh_port = ?3, key_id = ?4, identity_id = ?5, updated_at = ?6 WHERE id = ?7",
+                params![username, secret_id, input.port, input.key_id, input.identity_id, now, profile_id],
             )?;
             if let Some(o) = orphan {
                 secrets::delete(&tx, s, &o)?;
@@ -314,10 +349,12 @@ pub struct ConnectInfo {
     pub port: u16,
     pub username: Option<String>,
     pub password: Option<zeroize::Zeroizing<String>>,
+    /// Key to try first (the private key is loaded separately, in `keys`).
+    pub key_id: Option<String>,
 }
 
-/// Resolves host -> group -> parent group per field, so a host with no username of its own
-/// signs in with its group's.
+/// Resolves host -> group -> parent group per field (identities included), so a host with no
+/// username of its own signs in with its group's.
 pub fn connect_info(conn: &Connection, s: &VaultSession, host_id: &str) -> AppResult<ConnectInfo> {
     let h = conn
         .query_row(
@@ -327,17 +364,14 @@ pub fn connect_info(conn: &Connection, s: &VaultSession, host_id: &str) -> AppRe
         )
         .optional()?
         .ok_or_else(|| AppError::not_found("That host no longer exists."))?;
-    let own_secret: Option<String> = conn.query_row(
-        "SELECT p.password_secret_id FROM hosts h JOIN connection_profiles p ON p.id = h.profile_id WHERE h.id = ?1",
-        [host_id],
-        |r| r.get(0),
-    )?;
     let map = groups::load(conn, &s.vault_id)?;
-    let w = groups::walk(&map, h.group_id.as_deref());
-    let secret_id = own_secret.or_else(|| w.password.map(|(sid, _)| sid.to_string()));
-    let password = match secret_id {
-        Some(id) => {
-            let bytes = secrets::get(conn, s, &id)?;
+    let ids = groups::load_identities(conn, &s.vault_id)?;
+    let mut levels = vec![h.level()];
+    levels.extend(groups::chain(&map, h.group_id.as_deref()));
+    let r = groups::resolve(&levels, &ids);
+    let password = match &r.password_secret_id {
+        Some(sec) => {
+            let bytes = secrets::get(conn, s, &sec.value)?;
             Some(zeroize::Zeroizing::new(
                 String::from_utf8_lossy(&bytes).into_owned(),
             ))
@@ -345,13 +379,12 @@ pub fn connect_info(conn: &Connection, s: &VaultSession, host_id: &str) -> AppRe
         None => None,
     };
     Ok(ConnectInfo {
-        label: h.label,
-        address: h.address,
-        port: h.port.or(w.port.map(|(p, _)| p)).unwrap_or(DEFAULT_PORT),
-        username: h
-            .username
-            .or_else(|| w.username.map(|(u, _)| u.to_string())),
+        label: h.label.clone(),
+        address: h.address.clone(),
+        port: r.port.map_or(DEFAULT_PORT, |p| p.value),
+        username: r.username.map(|u| u.value),
         password,
+        key_id: r.key_id.map(|k| k.value),
     })
 }
 
@@ -385,6 +418,18 @@ pub fn save_password(
     Ok(())
 }
 
+/// Makes `key_id` the host's own key (after it was installed on the server).
+pub fn link_key(conn: &Connection, vault_id: &str, host_id: &str, key_id: &str) -> AppResult<()> {
+    let n = conn.execute(
+        "UPDATE connection_profiles SET key_id = ?1, updated_at = ?2 WHERE id = (SELECT profile_id FROM hosts WHERE id = ?3 AND vault_id = ?4)",
+        params![key_id, now_ms(), host_id, vault_id],
+    )?;
+    if n == 0 {
+        return Err(AppError::not_found("That host no longer exists."));
+    }
+    Ok(())
+}
+
 pub fn mark_connected(conn: &Connection, vault_id: &str, host_id: &str) -> AppResult<()> {
     conn.execute(
         "UPDATE hosts SET last_connected_at = ?1 WHERE id = ?2 AND vault_id = ?3",
@@ -414,6 +459,8 @@ mod tests {
             username: Some("deploy".into()),
             password: Some("hunter2hunter2".into()),
             clear_password: false,
+            key_id: None,
+            identity_id: None,
             group_id: None,
             tags: vec![],
         }

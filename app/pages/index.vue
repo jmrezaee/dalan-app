@@ -1,23 +1,29 @@
 <script setup lang="ts">
 // S02 Hosts. The full app shell (tabs, all vault sections) arrives in P7; until then this page
 // carries a small Hosts-only sidebar so the layout already matches the canvas.
-import { Lock, Server, Settings, ShieldCheck, Vault } from '@lucide/vue'
+import { KeyRound, Lock, Server, Settings, ShieldCheck, Vault } from '@lucide/vue'
 import { buttonVariants } from '@/components/ui/button'
 import type { Session } from '~/stores/sessions'
 
 const vault = useVaultStore()
 const hosts = useHostsStore()
 const sessions = useSessionsStore()
-const section = ref<'hosts' | 'known-hosts'>('hosts')
+const keychain = useKeychainStore()
+const section = ref<'hosts' | 'keychain' | 'known-hosts'>('hosts')
 const knownHosts = ref<{ refresh: () => void } | null>(null)
-onMounted(() => hosts.refresh())
+onMounted(() => {
+  hosts.refresh()
+  keychain.refresh()
+})
 onBeforeUnmount(() => {
   hosts.clear()
+  keychain.clear()
   sessions.clear()
 })
 
 const nav = computed(() => [
   { id: 'hosts', label: 'Hosts', icon: Server, count: hosts.hosts.length },
+  { id: 'keychain', label: 'Keychain', icon: KeyRound, count: keychain.keys.length + keychain.identities.length },
   { id: 'known-hosts', label: 'Known hosts', icon: ShieldCheck },
 ])
 
@@ -104,6 +110,7 @@ const statusLabel = (s: Session) => ({ ready: 'Connected', error: 'Connection fa
             <PageToolbar title="Known hosts" />
             <KnownHostsList ref="knownHosts" />
           </template>
+          <KeychainView v-else-if="section === 'keychain'" />
           <HostsView v-else />
         </main>
       </div>

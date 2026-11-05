@@ -1,7 +1,7 @@
 // The only place that talks to Rust. Stores call these wrappers, never `invoke` directly.
 import { Channel } from '@tauri-apps/api/core'
 import { commands } from '~/types/bindings'
-import type { AppError, GroupInput, HostInput, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
+import type { AppError, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, KeyUpdate, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -50,6 +50,20 @@ export function useTauri() {
     sessionRespond: (id: string, promptId: string, answer: PromptAnswer) => unwrap(commands.sessionRespond(id, promptId, answer)),
     sessionClose: (id: string) => commands.sessionClose(id),
     sessionReconnect: (id: string) => unwrap(commands.sessionReconnect(id)),
+    keysList: () => unwrap(commands.keysList()),
+    keyGenerate: (input: GenerateInput) => unwrap(commands.keyGenerate(input)),
+    keyImport: (input: ImportInput) => unwrap(commands.keyImport(input)),
+    keyUpdate: (input: KeyUpdate) => unwrap(commands.keyUpdate(input)),
+    keyDelete: (id: string) => unwrap(commands.keyDelete(id)),
+    identitiesList: () => unwrap(commands.identitiesList()),
+    identitySave: (input: IdentityInput) => unwrap(commands.identitySave(input)),
+    identityDelete: (id: string) => unwrap(commands.identityDelete(id)),
+    /** S08. Progress and prompts arrive on `onEvent`; answer prompts with `sessionRespond`. */
+    keyExportToHost: (keyId: string, hostId: string, dir: string, fileName: string, onEvent: (e: SessionEvent) => void) => {
+      const events = new Channel<SessionEvent>()
+      events.onmessage = onEvent
+      return unwrap(commands.keyExportToHost(keyId, hostId, dir, fileName, events as never))
+    },
     knownHostsList: () => unwrap(commands.knownHostsList()),
     knownHostDelete: (id: string) => unwrap(commands.knownHostDelete(id)),
   }
