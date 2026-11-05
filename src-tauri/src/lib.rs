@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod ai;
 pub mod commands;
 pub mod db;
 pub mod diagnostics;
@@ -81,6 +82,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::logs::log_bookmark,
             commands::logs::log_delete,
             commands::logs::log_replay,
+            commands::ai::ai_get,
+            commands::ai::ai_save,
+            commands::ai::ai_suggest,
             commands::agent::agent_get,
             commands::agent::agent_set,
             commands::proxy::proxy_get,

@@ -83,6 +83,13 @@ export const commands = {
 	logDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("log_delete", { id })),
 	/**  Sends a log's bytes, decrypted, in order, over `data` (like live terminal output). */
 	logReplay: (id: string, data: Channel<RawBytes>) => typedError<null, AppError>(__TAURI_INVOKE("log_replay", { id, data })),
+	aiGet: () => typedError<AiConfig, AppError>(__TAURI_INVOKE("ai_get")),
+	aiSave: (input: AiSettings_Deserialize) => typedError<AiConfig, AppError>(__TAURI_INVOKE("ai_save", { input })),
+	/**
+	 *  One command for a plain-language request. `host_id` (or none for a local terminal) only picks
+	 *  the OS name that goes along; nothing else about the host is sent.
+	 */
+	aiSuggest: (request: string, hostId: string | null) => typedError<Suggestion, AppError>(__TAURI_INVOKE("ai_suggest", { request, hostId })),
 	/**  `kind` is `host` or `group`. */
 	agentGet: (kind: string, id: string) => typedError<AgentConfig_Serialize, AppError>(__TAURI_INVOKE("agent_get", { kind, id })),
 	agentSet: (kind: string, id: string, choice: AgentChoice) => typedError<null, AppError>(__TAURI_INVOKE("agent_set", { kind, id, choice })),
@@ -182,6 +189,33 @@ export type AgentConfig_Serialize = {
 	inherited_from: string | null,
 	/**  A system agent is running on this computer (`SSH_AUTH_SOCK` is set). */
 	available: boolean,
+};
+
+export type AiConfig = {
+	has_key: boolean,
+	model: string,
+	/**  Where requests go. Only change it for a gateway you run yourself. */
+	base_url: string,
+};
+
+export type AiSettings = AiSettings_Serialize | AiSettings_Deserialize;
+
+export type AiSettings_Deserialize = {
+	model: string,
+	base_url: string,
+	/**  A new key. `None` leaves the saved one alone. */
+	api_key?: string | null,
+	/**  Removes the saved key. */
+	clear_key: boolean,
+};
+
+export type AiSettings_Serialize = {
+	model: string,
+	base_url: string,
+	/**  A new key. `None` leaves the saved one alone. */
+	api_key: string | null,
+	/**  Removes the saved key. */
+	clear_key: boolean,
 };
 
 export type AppError = {
@@ -1037,6 +1071,12 @@ export type SnippetsAll_Deserialize = {
 export type SnippetsAll_Serialize = {
 	packages: PackageSummary[],
 	snippets: SnippetSummary_Serialize[],
+};
+
+export type Suggestion = {
+	command: string,
+	/**  The model asked a question instead of giving a command (the text after `# `). */
+	is_question: boolean,
 };
 
 export type TemplateInput = TemplateInput_Serialize | TemplateInput_Deserialize;

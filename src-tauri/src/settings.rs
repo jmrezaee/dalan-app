@@ -8,7 +8,7 @@ use rusqlite::{params, Connection};
 use crate::db::now_ms;
 use crate::error::{AppError, AppResult};
 
-const KEYS: [&str; 7] = [
+const KEYS: [&str; 8] = [
     "appearance",
     "terminal",
     "security",
@@ -16,6 +16,7 @@ const KEYS: [&str; 7] = [
     "logs",
     "history",
     "hosts",
+    "ai",
 ];
 const MAX_VALUE_BYTES: usize = 16 * 1024;
 const MAX_AUTO_LOCK_MINUTES: u64 = 24 * 60;

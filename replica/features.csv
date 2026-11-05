@@ -62,7 +62,7 @@ Serial connections,protocols,could,yes,yes,baud data bits stop bits parity flow 
 Auto-detect remote OS icon,hosts,could,yes,yes,uses an exec channel; make it toggleable
 App lock with Touch ID / Windows Hello,security,could,yes,no,
 Own self-hosted encrypted sync between devices,sync,could,yes,no,Termius's own sync service is skip; this would be your own
-AI command generation with your own API key,terminal,could,yes,no,Termius AI itself is skip
+AI command generation with your own API key,terminal,could,yes,yes,Termius AI itself is skip
 Termius cloud account and E2E cloud vault sync,sync,could,yes,skip,their backend service; not part of what you can rebuild
 Team vaults seats and granular permissions,teams,could,yes,skip,their multi-tenant backend; personal clone
 Real-time terminal multiplayer,teams,could,yes,skip,their relay service

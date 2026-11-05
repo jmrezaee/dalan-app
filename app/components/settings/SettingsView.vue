@@ -7,15 +7,41 @@ import { cn } from '@/lib/utils'
 import { SHORTCUT_ACTIONS, defaultCombo, eventCombo, formatCombo } from '~/utils/shortcuts'
 
 const settings = useSettingsStore()
-const sections = ['Appearance', 'Terminal', 'Logs', 'Shortcuts', 'Security', 'About'] as const
+const sections = ['Appearance', 'Terminal', 'Logs', 'AI', 'Shortcuts', 'Security', 'About'] as const
 const section = ref<typeof sections[number]>('Appearance')
 const changeOpen = ref(false)
+
+// ---- AI: your own API key, used by the side panel's "Ask AI" tab. The key goes to Rust once and is never shown again.
+const ai = reactive({ hasKey: false, model: '', baseUrl: '', newKey: '', loaded: false, busy: false, error: '' })
+async function loadAi() {
+  try {
+    const c = await api.aiGet()
+    Object.assign(ai, { hasKey: c.has_key, model: c.model, baseUrl: c.base_url, newKey: '', loaded: true, error: '' })
+  }
+  catch {
+    ai.error = 'Couldn\'t load the AI settings.'
+  }
+}
+async function saveAi(clearKey = false) {
+  ai.busy = true
+  ai.error = ''
+  try {
+    const c = await api.aiSave({ model: ai.model, base_url: ai.baseUrl, api_key: ai.newKey || null, clear_key: clearKey })
+    Object.assign(ai, { hasKey: c.has_key, model: c.model, baseUrl: c.base_url, newKey: '' })
+    toast(clearKey ? 'API key removed.' : 'AI settings saved.')
+  }
+  catch (e) {
+    ai.error = e instanceof Error ? e.message : 'Couldn\'t save.'
+  }
+  ai.busy = false
+}
 
 // ---- About: version, updates, diagnostics.
 const api = useTauri()
 const info = ref<{ version: string, platform: string, data_dir: string } | null>(null)
 const update = ref<{ state: 'idle' | 'checking' | 'none' | 'found' | 'installing' | 'error', version?: string, notes?: string | null, error?: string }>({ state: 'idle' })
 watch(section, async (s) => {
+  if (s === 'AI' && !ai.loaded) await loadAi()
   if (s === 'About' && !info.value) info.value = await api.appInfo().catch(() => null)
 })
 async function checkUpdate() {
@@ -162,6 +188,28 @@ const num = (v: string | number, fallback: number) => (Number.isFinite(Number(v)
           </div>
           <p v-if="shortcutError" role="alert" class="pt-3 text-sm text-danger">{{ shortcutError }}</p>
           <p class="pt-3 text-xs text-muted">Shortcuts use the {{ formatCombo('Mod+X').startsWith('⌘') ? '⌘' : 'Ctrl' }} key. Press Change, then the new combination.</p>
+        </template>
+
+        <template v-else-if="section === 'AI'">
+          <p class="py-3 text-sm text-muted">The side panel's <strong class="font-medium text-text">Ask AI</strong> tab turns a request like "find files over 1 GB" into a shell command using your own Anthropic API key. It only types the command into the terminal for you to check and run.</p>
+          <div class="row">
+            <span class="flex flex-1 flex-col">API key<span class="text-xs text-muted">{{ ai.hasKey ? 'A key is saved, encrypted with your master password. Paste a new one to replace it.' : 'Stored encrypted with your master password. It never leaves this computer except in requests to the service below.' }}</span></span>
+            <div class="w-64"><PasswordInput v-model="ai.newKey" aria-label="API key" :placeholder="ai.hasKey ? '••••••••' : 'sk-ant-…'" autocomplete="off" /></div>
+          </div>
+          <div class="row">
+            <span class="flex-1">Model</span>
+            <input v-model="ai.model" aria-label="Model" spellcheck="false" autocomplete="off" class="h-9 w-64 rounded-md border border-border-input bg-bg px-3 font-mono text-xs outline-none focus:border-accent">
+          </div>
+          <div class="row">
+            <span class="flex flex-1 flex-col">Service address<span class="text-xs text-muted">Leave as is unless you run your own gateway. Must be https.</span></span>
+            <input v-model="ai.baseUrl" aria-label="Service address" spellcheck="false" autocomplete="off" class="h-9 w-64 rounded-md border border-border-input bg-bg px-3 font-mono text-xs outline-none focus:border-accent">
+          </div>
+          <p v-if="ai.error" role="alert" class="pt-3 text-sm text-danger">{{ ai.error }}</p>
+          <div class="flex gap-2 pt-4">
+            <Button :loading="ai.busy" @click="saveAi(false)">Save</Button>
+            <Button v-if="ai.hasKey" variant="secondary" :disabled="ai.busy" @click="saveAi(true)">Remove key</Button>
+          </div>
+          <p class="pt-4 text-xs text-muted">What is sent: your request text and the server's OS name. Not sent: terminal output, host names, files or other servers. Usage is billed by your provider.</p>
         </template>
 
         <template v-else-if="section === 'About'">
