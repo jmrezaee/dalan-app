@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// S24. First-run (password + confirm + strength) and unlock variants. Logic arrives in P2.
+// S24. First-run (password + confirm + strength) and unlock variants.
 import { TriangleAlert } from '@lucide/vue'
 import { cn } from '@/lib/utils'
 

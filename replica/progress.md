@@ -169,7 +169,7 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
     - **Rust:** jump hop with a changed key blocks before the target; populated old database upgrades through 0005 (secrets, plain history, unlock, password change); locking ends live sessions and every guarded call says `locked`; output backpressure pauses and resumes (real pty). Earlier phases already cover the key-type switch and the AI address bypasses.
     - **CI:** new `e2e` job (Playwright Chromium) and `docker-ssh` job (`scripts/test-servers.sh up`, then `cargo test -- --ignored`, the 5 real-OpenSSH tests; they pass locally).
   - **Not covered:** tunnels and edit copies being closed by a lock (only sessions are asserted); `locked` is checked on the shared guards, not command by command; the keyboard-interactive path is tested against an in-process server only; xterm text is not read back (it paints to a canvas), so output is proven by the acknowledgement.
-- [ ] **P20 Housekeeping and release readiness:**
+- [x] **P20 Housekeeping and release readiness:**
   - Bring `features.csv` in line with what actually works (PuTTY/MobaXterm import is done, SecureCRT isn't; split the SSH-config row).
   - Remove the stale "arrives in P2/P7" header comments.
   - Exclude `/design` from production builds.
@@ -180,6 +180,8 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
     - the optional Windows signing
   - Make the first draft release once he has.
 
+  - **Done (2026-11-06):** `features.csv` split and corrected (SSH config import yes; keys and known_hosts import, SecureCRT no; PuTTY and MobaXterm partial: parsers tested on samples only). Stale "arrives in P2 / P7" comments removed. `/design` is dropped from production builds (a `pages:extend` hook; checked: the showcase isn't in `.output`). `.git/audit.bundle` deleted. `replica/launch/release-setup.md` lists what Mehrdad must create.
+  - **Not done, needs Mehrdad:** the GitHub repo, the updater key pair and secrets, then the first draft release (nothing was pushed or tagged).
 ## Backlog (not scheduled; Mehrdad picks from here after P20)
 
 - Touch ID / Windows Hello unlock (M4 item 5).
@@ -235,3 +237,5 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
 - 2026-11-06 P18 done in two parts; open hand checks listed in its note. `features.csv` tab-dot row can go to yes once Mehrdad has seen the dots.
 
 - 2026-11-06 P19 done. `pnpm test:e2e` needs Google Chrome locally (or `PW_CHANNEL=` plus `pnpm exec playwright install chromium`).
+
+- 2026-11-06 P20 done except the first draft release, which waits for the GitHub repo and the updater key. All of P0 to P20 are built; open hand checks are listed in each phase's note.

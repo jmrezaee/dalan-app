@@ -1,6 +1,5 @@
 <script setup lang="ts">
-// S02 Hosts. The full app shell (tabs, all vault sections) arrives in P7; until then this page
-// carries a small Hosts-only sidebar so the layout already matches the canvas.
+// The app shell: tab bar, the Vault sections (S02 Hosts and the rest), terminals kept mounted, and the global shortcuts.
 import { ScrollText, ArrowDownUp, Code2, LayoutGrid, KeyRound, Lock, Server, Settings, ShieldCheck, Trash2, Vault, Waypoints } from '@lucide/vue'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { buttonVariants } from '@/components/ui/button'

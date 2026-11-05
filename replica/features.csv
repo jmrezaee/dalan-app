@@ -44,7 +44,8 @@ SFTP permissions (chmod),sftp,should,unknown,partial,not in Termius docs; expect
 Environment variables per host/group (SendEnv),hosts,should,yes,partial,source 12; smoke 2026-11-05: not run against a real server
 SOCKS5 / HTTP proxy per host,hosts,should,yes,partial,source 2; smoke 2026-11-05: not run through a real proxy
 SSH agent forwarding,hosts,should,yes,partial,source 2; shells only since P17; not run against a real server
-Import from ~/.ssh/config and known_hosts and keys,import,should,yes,no,S25 F10
+Import hosts from ~/.ssh/config,import,should,yes,yes,S25 F10; smoke 2026-11-05 in the real window: jump chain, ProxyCommand and Include notes, duplicates unticked; Include is not followed
+Import keys and known_hosts from ssh config,import,could,yes,no,not built: only hosts come across
 Import hosts from CSV,import,should,yes,partial,source 2; smoke 2026-11-05: CSV import not run in the real window (SSH config import was)
 Terminal themes per host/group,terminal,should,yes,partial,S20; smoke 2026-11-05: not run in the real window
 Command history side panel,terminal,should,yes,yes,S20; encrypted with the data key since P17; secret-looking lines are not saved
@@ -55,7 +56,8 @@ FIDO2 hardware keys (sk-ed25519),keychain,could,yes,no,source 7; needs OpenSSH 8
 Terminal autocomplete (history paths snippets),terminal,could,yes,no,needs shell integration; Termius disables for some routers
 Find in terminal,terminal,could,unknown,partial,not documented; xterm search addon; smoke 2026-11-05: checked only in a browser against a stub
 Customisable keyboard shortcuts,settings,could,yes,partial,S23; smoke 2026-11-05: recorder not run in the real window
-Import PuTTY / MobaXterm / SecureCRT,import,could,yes,no,source 2
+Import from PuTTY and MobaXterm,import,could,yes,partial,source 2; parsers are tested on samples, never run on a real export file
+Import from SecureCRT,import,could,yes,no,not built
 Mosh,protocols,could,yes,partial,needs mosh client binary; not logged by Termius; smoke 2026-11-05: not run with real mosh
 Telnet,protocols,could,yes,partial,plaintext warning; smoke 2026-11-05: not run against a real Telnet server
 Serial connections,protocols,could,yes,partial,baud data bits stop bits parity flow control; smoke 2026-11-05: not run with real serial hardware

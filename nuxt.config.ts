@@ -18,5 +18,14 @@ export default defineNuxtConfig({
     clearScreen: false,
   },
   ignore: ['**/src-tauri/**'],
+  // /design is the component showcase: dev only, not part of the shipped app.
+  hooks: {
+    'pages:extend'(pages) {
+      if (process.env.NODE_ENV === 'production') {
+        const at = pages.findIndex(p => p.path === '/design')
+        if (at >= 0) pages.splice(at, 1)
+      }
+    },
+  },
   typescript: { strict: true },
 })
