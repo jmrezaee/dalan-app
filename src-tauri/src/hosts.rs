@@ -446,40 +446,6 @@ pub fn duplicate(conn: &mut Connection, s: &VaultSession, id: &str) -> AppResult
     get(conn, &s.vault_id, &new_host)
 }
 
-/// Hosts that save the same username and the same password, as groups of host ids (two or more each).
-/// Passwords are decrypted and compared here, in Rust, and dropped (zeroized); only ids go to the UI.
-pub fn shared_logins(conn: &Connection, s: &VaultSession) -> AppResult<Vec<Vec<String>>> {
-    let mut st = conn.prepare(
-        "SELECT h.id, p.username, p.password_secret_id FROM hosts h
-         JOIN connection_profiles p ON p.id = h.profile_id
-         WHERE h.vault_id = ?1 AND p.username IS NOT NULL AND p.password_secret_id IS NOT NULL",
-    )?;
-    let rows: Vec<(String, String, String)> = st
-        .query_map([&s.vault_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
-        .collect::<Result<_, _>>()?;
-    let mut logins = Vec::new();
-    for (id, user, secret) in rows {
-        logins.push((id, user, secrets::get(conn, s, &secret)?));
-    }
-    // Few hosts have a saved password, so comparing each pair is fine.
-    let mut groups: Vec<Vec<usize>> = Vec::new();
-    'next: for i in 0..logins.len() {
-        for g in groups.iter_mut() {
-            let first = &logins[g[0]];
-            if first.1 == logins[i].1 && first.2.as_slice() == logins[i].2.as_slice() {
-                g.push(i);
-                continue 'next;
-            }
-        }
-        groups.push(vec![i]);
-    }
-    Ok(groups
-        .into_iter()
-        .filter(|g| g.len() > 1)
-        .map(|g| g.into_iter().map(|i| logins[i].0.clone()).collect())
-        .collect())
-}
-
 /// Re-encrypts a secret as a new row, so two owners never share one. `None` stays `None`.
 fn copy_secret(
     tx: &rusqlite::Transaction,
@@ -939,22 +905,6 @@ mod tests {
         );
         delete(&mut c, &s, &a.id).unwrap();
         assert!(connect_info(&c, &s, &copy.id).unwrap().password.is_some());
-    }
-
-    #[test]
-    fn shared_logins_lists_only_ids_of_hosts_with_the_same_user_and_password() {
-        let (mut c, s) = fresh();
-        let a = save(&mut c, &s, &input("a")).unwrap();
-        let b = save(&mut c, &s, &input("b")).unwrap();
-        let mut other = input("c");
-        other.password = Some("a-different-one".into());
-        save(&mut c, &s, &other).unwrap();
-        let mut groups = shared_logins(&c, &s).unwrap();
-        assert_eq!(groups.len(), 1);
-        groups[0].sort();
-        let mut want = vec![a.id, b.id];
-        want.sort();
-        assert_eq!(groups[0], want);
     }
 
     #[test]

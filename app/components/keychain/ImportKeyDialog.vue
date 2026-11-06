@@ -24,7 +24,7 @@ watch(open, (o) => {
 
 async function choose() {
   try {
-    const p = await useTauri().pickFile()
+    const p = await keychain.pickFile()
     if (p) {
       form.path = p
       form.pem = ''

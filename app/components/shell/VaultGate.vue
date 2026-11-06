@@ -26,6 +26,9 @@ watch(() => vault.phase, () => {
   localError.value = ''
 })
 
+// The message goes away as soon as the user edits either field.
+watch([password, confirm], () => { localError.value = '' })
+
 async function submit() {
   localError.value = ''
   if (vault.phase === 'needs-setup') {

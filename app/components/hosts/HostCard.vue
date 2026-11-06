@@ -74,7 +74,7 @@ defineEmits<{ open: []; select: []; dragstart: [event: DragEvent]; dragend: [] }
     <span v-if="list" class="hidden truncate text-xs text-muted sm:block"><template v-if="user">{{ user }}@</template><span class="font-mono">{{ address }}</span><template v-if="port && port !== 22">:{{ port }}</template></span>
     <DropdownMenu v-if="!draft">
       <DropdownMenuTrigger as-child>
-        <IconButton label="Host actions" size="xs" class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100" @click.stop><Ellipsis /></IconButton>
+        <IconButton label="Host actions" :tip="false" size="xs" class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100" @click.stop><Ellipsis /></IconButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <ItemMenuList :items="menu ?? []" mode="dropdown" />

@@ -6,7 +6,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import type { HostSummary } from '~/types/bindings'
 import { osLetter, osName } from '~/utils/os'
 import { cn } from '@/lib/utils'
-import { parseQuickConnect } from '~/utils/quickConnect'
+import { findQuickHost, parseQuickConnect } from '~/utils/quickConnect'
 
 const emit = defineEmits<{ newHost: [] }>()
 const hosts = useHostsStore()
@@ -40,14 +40,17 @@ watch(query, () => { index.value = 0 })
 
 // `user@host[:port]` that matches no saved host: connect to it. It is saved first (a connection needs a host
 // record in the vault), so it also shows up under Recent next time and can be deleted from Hosts.
+const { label: shortcutLabel } = useShortcutLabel()
 const quick = computed(() => (results.value.length ? null : parseQuickConnect(query.value)))
 const quickLabel = computed(() => (quick.value ? `${quick.value.username ? `${quick.value.username}@` : ''}${quick.value.address}${quick.value.port ? `:${quick.value.port}` : ''}` : ''))
 async function connectQuick() {
   const q = quick.value
   if (!q) return
+  const existing = findQuickHost(hosts.hosts, q)
+  if (existing) return void sessions.open(existing)
   const err = await hosts.save({ id: null, label: q.address, address: q.address, port: q.port, username: q.username, password: null, clear_password: false, group_id: null, key_id: null, identity_id: null, startup_snippet_id: null, jump_mode: 'inherit', jump_host_ids: [], tags: [] })
   if (err) return void toast.error(err)
-  const saved = hosts.hosts.find(h => h.address === q.address && h.label === q.address && (h.effective_username ?? null) === q.username)
+  const saved = findQuickHost(hosts.hosts, q)
   if (saved) sessions.open(saved)
 }
 
@@ -127,7 +130,7 @@ defineExpose({ focus: () => input.value?.focus() })
         </button>
       </section>
       <p class="mt-2 flex flex-wrap gap-4 text-xs text-muted">
-        <span><Kbd>↵</Kbd> connect</span><span><Kbd>↑↓</Kbd> choose</span><span><Kbd>Ctrl Space</Kbd> select for workspace</span><span><Kbd>⌘K</Kbd> everything</span>
+        <span><Kbd>↵</Kbd> connect</span><span><Kbd>↑↓</Kbd> choose</span><span><Kbd>Ctrl Space</Kbd> select for workspace</span><span><Kbd>{{ shortcutLabel('palette') }}</Kbd> everything</span>
       </p>
     </div>
   </main>

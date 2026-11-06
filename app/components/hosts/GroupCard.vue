@@ -29,7 +29,7 @@ defineEmits<{ open: []; edit: []; delete: []; drop: [event: DragEvent]; dragover
     </div>
     <DropdownMenu>
       <DropdownMenuTrigger as-child>
-        <IconButton label="Group actions" size="xs" class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100" @click.stop><Ellipsis /></IconButton>
+        <IconButton label="Group actions" :tip="false" size="xs" class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100" @click.stop><Ellipsis /></IconButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem @select="$emit('edit')"><Pencil />Edit</DropdownMenuItem>

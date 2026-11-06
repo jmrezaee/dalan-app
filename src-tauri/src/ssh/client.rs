@@ -391,6 +391,12 @@ pub async fn connect_authenticated(
             None => step(io, format!("Connecting to {pattern}.")),
         }
 
+        // "Try another way" is for the target. Earlier hops sign in automatically; the choice waits for the last one.
+        let held = if i < last {
+            prompts.take_forced_method()
+        } else {
+            None
+        };
         let handle = match hops.last() {
             // Later hops ride a direct-tcpip channel opened on the previous hop.
             Some(prev) => {
@@ -468,6 +474,7 @@ pub async fn connect_authenticated(
                 .await?
             }
         };
+        prompts.force_method(held);
         if i == last {
             return Some(Connected {
                 handle,

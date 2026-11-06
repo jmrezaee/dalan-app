@@ -65,7 +65,11 @@ function refit() {
 
 /** A 120 ms soft tone. The audio context is made on first use, as browsers require a user gesture before sound. */
 let audio: AudioContext | null = null
+let lastBeep = 0
 function beep() {
+  // A program that rings in a loop would start an oscillator per bell: at most one beep every 250 ms.
+  if (Date.now() - lastBeep < 250) return
+  lastBeep = Date.now()
   try {
     audio ??= new AudioContext()
     const osc = audio.createOscillator()

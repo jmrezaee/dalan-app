@@ -32,6 +32,8 @@ export interface Session {
   autorun: string
   /** Output arrived while the tab was not showing (the tab dot turns green until you look). */
   unread: boolean
+  /** The shell ended on its own (`exit`): no automatic retry, and not counted as a dropped connection. */
+  exited: boolean
   // ---- workspace tabs only (S19)
   panes: Session[]
   mode: 'split' | 'focus'
@@ -98,7 +100,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   /** Open workspaces, for "Add to workspace". */
   const workspaceTabs = computed(() => sessions.value.filter(s => s.kind === 'workspace'))
   /** Sessions whose connection dropped (tabs and workspace panes). */
-  const dropped = computed(() => sessions.value.flatMap(s => (s.kind === 'workspace' ? s.panes : [s])).filter(s => s.kind === 'session' && s.status === 'disconnected'))
+  const dropped = computed(() => sessions.value.flatMap(s => (s.kind === 'workspace' ? s.panes : [s])).filter(s => s.kind === 'session' && s.status === 'disconnected' && !s.exited))
   const dismissedDrops = ref<Set<string>>(new Set())
   /** Two or more drops at once get one card ("Reconnect all") on top of each tab's own message. */
   const droppedCard = computed(() => {
@@ -121,6 +123,7 @@ export const useSessionsStore = defineStore('sessions', () => {
       case 'state':
         sess.error = null
         if (e.state === 'connecting') sess.steps = [] // a new attempt starts a new log
+        if (e.state === 'connecting') sess.exited = false
         if (e.state === 'connecting') sess.authMethods = []
         if (e.state === 'connecting' || e.state === 'authenticating' || e.state === 'ready') {
           sess.status = e.state
@@ -135,7 +138,7 @@ export const useSessionsStore = defineStore('sessions', () => {
         else if (e.state === 'disconnected') {
           sess.status = 'disconnected'
           sess.disconnectedAt = new Date()
-          scheduleRetry(sess)
+          if (!sess.exited) scheduleRetry(sess)
         }
         else if (e.state === 'closed') close(sess)
         break
@@ -160,6 +163,9 @@ export const useSessionsStore = defineStore('sessions', () => {
         if (sess.steps.length > 80) sess.steps.shift()
         break
       case 'exit':
+        // Rust sends `exit` and then `disconnected`; the user ended this one, so leave it alone.
+        sess.exited = true
+        clearRetry(sess.key)
         break
     }
   }
@@ -213,6 +219,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     parent: '',
     autorun: '',
     unread: false,
+    exited: false,
     panes: [],
     mode: 'split',
     focus: 0,

@@ -50,6 +50,8 @@ pub struct ImportPreview {
 pub struct ImportResult {
     pub created: u32,
     pub skipped: u32,
+    /// Jump hosts a row named that are not in the vault or in this import (unticked, or named differently).
+    pub jumps_missing: u32,
 }
 
 // ------------------------------------------------------------------ ssh_config
@@ -459,8 +461,14 @@ pub fn apply(
         }
     }
     // Second pass: every host exists now, so chains can point at hosts from the same file.
+    let mut jumps_missing = 0;
     for (r, id) in rows.iter().zip(&new_ids) {
         let Some(id) = id else { continue };
+        jumps_missing += r
+            .jump
+            .iter()
+            .filter(|j| !by_name.contains_key(&j.to_lowercase()))
+            .count() as u32;
         let hops: Vec<String> = r
             .jump
             .iter()
@@ -484,7 +492,11 @@ pub fn apply(
         groups::write_jumps(&tx, &profile_id, &hops)?;
         tx.commit()?;
     }
-    Ok(ImportResult { created, skipped })
+    Ok(ImportResult {
+        created,
+        skipped,
+        jumps_missing,
+    })
 }
 
 fn new_group(label: &str) -> GroupInput {
@@ -556,6 +568,7 @@ mod tests {
         rows[1].jump = vec!["bastion".into(), "ghost".into()];
         let r = apply(&mut c, &s, &rows, None).unwrap();
         assert_eq!((r.created, r.skipped), (2, 0));
+        assert_eq!(r.jumps_missing, 1); // "ghost" is reported, not lost silently
         let tree = hosts::tree(&c, &s.vault_id).unwrap();
         assert_eq!(tree.groups.len(), 1); // "Prod" shared by both rows
         let web = tree.hosts.iter().find(|h| h.label == "web").unwrap();

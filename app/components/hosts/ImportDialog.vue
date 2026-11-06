@@ -11,7 +11,6 @@ import { toast } from 'vue-sonner'
 
 const open = defineModel<boolean>('open', { required: true })
 const hosts = useHostsStore()
-const api = useTauri()
 
 type Kind = ImportKind
 const kind = ref<Kind>('ssh_config')
@@ -40,7 +39,7 @@ async function load(path: string | null) {
   busy.value = true
   error.value = ''
   try {
-    const p = await api.importPreview(kind.value, path)
+    const p = await hosts.importPreview(kind.value, path)
     rows.value = p.rows
     fileWarnings.value = p.warnings
     // Hosts you already have start unticked.
@@ -55,7 +54,7 @@ async function load(path: string | null) {
 
 async function choose() {
   try {
-    const p = await useTauri().pickFile()
+    const p = await hosts.pickFile()
     if (p) await load(p)
   }
   catch {
@@ -97,9 +96,10 @@ async function submit() {
   busy.value = true
   try {
     const chosen = rows.value.filter((_, i) => picked.value.has(i))
-    const r = await api.importApply(chosen, groupId.value)
+    const r = await hosts.importApply(chosen, groupId.value)
     await hosts.refresh()
-    toast(r.skipped ? `Imported ${r.created} hosts. ${r.skipped} couldn't be added.` : `Imported ${r.created} ${r.created === 1 ? 'host' : 'hosts'}.`)
+    const missing = r.jumps_missing ? ` ${r.jumps_missing} jump ${r.jumps_missing === 1 ? 'host was' : 'hosts were'} not found, so the route was left out. Tick them too, or add the route in the host editor.` : ''
+    toast((r.skipped ? `Imported ${r.created} hosts. ${r.skipped} couldn't be added.` : `Imported ${r.created} ${r.created === 1 ? 'host' : 'hosts'}.`) + missing)
     open.value = false
   }
   catch (e) {

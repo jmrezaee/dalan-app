@@ -22,7 +22,6 @@ const open = computed({
 })
 const host = computed(() => (hosts.editing && hosts.editing !== 'new' ? hosts.editing : null))
 
-const api = useTauri()
 /** SSH and Mosh both sign in over SSH, so they share the credential, connection and proxy sections. */
 const sshLike = computed(() => form.protocol === 'ssh' || form.protocol === 'mosh')
 const serialPorts = ref<string[]>([])
@@ -34,14 +33,14 @@ const envLoaded = ref(true)
 async function loadEnv(id: string) {
   envLoaded.value = false
   try {
-    const c = await api.envGet('host', id)
+    const c = await hosts.envGet('host', id)
     form.env_mode = c.mode
     form.env_vars = c.vars.map(v => ({ ...v }))
     envInherited.value = c.inherited
-    const px = await api.proxyGet('host', id)
+    const px = await hosts.proxyGet('host', id)
     form.proxy = { ...px.own }
     proxyInherited.value = px
-    const ag = await api.agentGet('host', id)
+    const ag = await hosts.agentGet('host', id)
     form.agent = ag.own.kind
     agentInfo.value = ag
     snapshot.value = current.value
@@ -55,7 +54,7 @@ async function loadEnv(id: string) {
 const blank = () => ({ label: '', address: '', port: '' as number | string, username: '', password: '', group_id: hosts.currentGroupId as string | null, tags: [] as string[], identity_id: null as string | null, key_id: null as string | null, startup_snippet_id: null as string | null, jump_mode: 'inherit', jump_host_ids: [] as string[], terminal_theme: null as string | null, env_mode: 'inherit', env_vars: [] as EnvVar[], proxy: { kind: 'inherit', host: '', port: null } as ProxyChoice, agent: 'inherit', protocol: 'ssh', serial: { baud: 9600, data_bits: 8, stop_bits: 1, parity: 'none', flow: 'none' } as SerialConfig })
 const form = reactive(blank())
 // Must come after `form`: a watch reads its getter straight away.
-watch(() => form.protocol, async (p) => { if (p === 'serial' && !serialPorts.value.length) serialPorts.value = await api.serialPorts().catch(() => []) })
+watch(() => form.protocol, async (p) => { if (p === 'serial' && !serialPorts.value.length) serialPorts.value = await hosts.serialPorts().catch(() => []) })
 const clearPassword = ref(false)
 
 // ---- Pages: the main page shows the basics and one line per advanced block; a block opens on its own page with a back arrow.
@@ -75,18 +74,12 @@ const summaries = computed<Record<Exclude<Page, 'main'>, string>>(() => {
 })
 const morePages = computed<Exclude<Page, 'main'>[]>(() => (sshLike.value ? ['jump', 'proxy', 'env', 'agent', 'startup', 'theme'] : ['theme']))
 
-// ---- Other hosts that save the same username and password (ids come from Rust; the passwords never do).
-const sharedWith = ref<string[]>([])
-async function loadShared() {
-  sharedWith.value = []
+// ---- A copy made with Duplicate shares its source's saved login; suggest an identity (no password is compared).
+const sharedWith = computed(() => {
   const id = host.value?.id
-  if (!id) return
-  try {
-    const group = (await api.hostsSharedLogins()).find(g => g.includes(id))
-    sharedWith.value = (group ?? []).filter(x => x !== id).map(labelOfHost)
-  }
-  catch { /* the hint is optional */ }
-}
+  const from = id ? hosts.copiedFrom[id] : undefined
+  return from && host.value?.has_password && !form.password && !clearPassword.value ? [from] : []
+})
 const error = ref('')
 const busy = ref(false)
 // "Unsaved changes" = the form differs from how it looked when the sheet opened.
@@ -101,14 +94,13 @@ watch(() => hosts.editing, (e) => {
   clearPassword.value = false
   page.value = 'main'
   error.value = ''
-  loadShared()
   snapshot.value = current.value
   envInherited.value = []
   proxyInherited.value = null
   agentInfo.value = null
   envLoaded.value = true
   if (h) loadEnv(h.id)
-  if (h?.protocol === 'serial') api.serialGet(h.id).then((c) => { form.serial = c; snapshot.value = current.value }).catch(() => {})
+  if (h?.protocol === 'serial') hosts.serialGet(h.id).then((c) => { form.serial = c; snapshot.value = current.value }).catch(() => {})
 })
 
 // The list shows what is being typed as a draft card until it is saved.

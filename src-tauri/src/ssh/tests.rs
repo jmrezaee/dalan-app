@@ -1849,3 +1849,26 @@ async fn a_failed_sign_in_lists_what_the_server_accepts_and_a_chosen_method_is_t
         _ => unreachable!(),
     }
 }
+
+#[tokio::test]
+async fn try_another_way_applies_to_the_target_not_the_bastion() {
+    let h = harness(Some("right-pw")).await;
+    let (bastion, _server) = add_bastion(&h).await;
+    set_target(&h, "custom", vec![bastion]).await;
+    let mut s = start(&h);
+    s.prompts.force_method(Some(crate::ssh::AuthMethod::Key));
+    for _ in 0..2 {
+        let (id, _) = s.expect_prompt().await;
+        s.answer(&id, true, None, true);
+    }
+    // The bastion signs in by itself; the chosen method (a key) is tried on test-box, which has none.
+    match s.until(|e| matches!(e, SessionEvent::Error { .. })).await {
+        SessionEvent::Error { message, .. } => {
+            assert!(
+                message.contains("test-box") && message.contains("no saved key"),
+                "{message}"
+            )
+        }
+        _ => unreachable!(),
+    }
+}

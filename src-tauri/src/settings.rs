@@ -52,6 +52,16 @@ pub fn open_with_set(conn: &Connection, ext: &str, app: &str) -> AppResult<()> {
     )
 }
 
+pub fn open_with_remove(conn: &Connection, ext: &str) -> AppResult<()> {
+    let mut map = open_with_all(conn);
+    map.remove(ext);
+    set(
+        conn,
+        "sftp",
+        &serde_json::json!({ "open_with": map }).to_string(),
+    )
+}
+
 pub fn get_all(conn: &Connection) -> AppResult<HashMap<String, String>> {
     let mut st = conn.prepare("SELECT key, value FROM settings")?;
     let rows = st
@@ -106,6 +116,8 @@ mod tests {
         let m = open_with_all(&c);
         assert_eq!(m["txt"], "/Apps/New.app");
         assert_eq!(m["md"], "/Apps/Other.app");
+        open_with_remove(&c, "md").unwrap();
+        assert!(!open_with_all(&c).contains_key("md"));
     }
 
     #[test]

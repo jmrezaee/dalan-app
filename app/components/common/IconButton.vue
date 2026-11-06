@@ -12,11 +12,25 @@ const props = withDefaults(defineProps<{
   pressed?: boolean
   disabled?: boolean
   shortcut?: string
-}>(), { size: 'sm', shortcut: undefined })
+  /** Off for menu triggers: a tooltip and a menu on one button make the first click only show the tooltip. */
+  tip?: boolean
+}>(), { size: 'sm', shortcut: undefined, tip: true })
 </script>
 
 <template>
-  <Tooltip>
+  <Button
+    v-if="!tip"
+    variant="ghost"
+    :size="props.size === 'xs' ? 'icon-xs' : 'icon-sm'"
+    :aria-label="label"
+    :title="label"
+    :disabled="disabled"
+    v-bind="$attrs"
+    :class="cn(pressed && 'bg-surface-hover text-accent', $attrs.class as string)"
+  >
+    <slot />
+  </Button>
+  <Tooltip v-else>
     <TooltipTrigger as-child>
       <Button
         variant="ghost"

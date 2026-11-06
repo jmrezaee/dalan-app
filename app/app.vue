@@ -11,6 +11,7 @@ const bypass = computed(() => import.meta.dev && route.path === '/design')
   <TooltipProvider :delay-duration="500" :skip-delay-duration="0">
     <NuxtPage v-if="bypass" />
     <VaultGate v-else><NuxtPage /></VaultGate>
-    <Toaster />
+    <!-- Bottom centre: the right-hand editor sheets keep their footer buttons uncovered. -->
+    <Toaster position="bottom-center" />
   </TooltipProvider>
 </template>

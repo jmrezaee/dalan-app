@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { toast } from 'vue-sonner'
 import type { Choice, EditApp, FsEntry, HostSummary, PromptKind, SessionEvent, TransferEvent } from '~/types/bindings'
 import { CommandError, useTauri } from '~/composables/useTauri'
+import { needsResolving } from '~/utils/typedPath'
 
 export interface Pane {
   /** `local` or an sftp id. `''` = nothing chosen yet (an empty pane). */
@@ -144,6 +145,8 @@ export const useSftpStore = defineStore('sftp', () => {
         return
       }
       toast.success(`Uploaded ${name}.`, { id: `edit-${id}` })
+      // The size and time in the list are the old ones until the folder is read again.
+      panes.forEach((p, i) => { if (p.endpoint === edits.get(id)?.endpoint) void load(i) })
     }
     catch (e) {
       toast.error(message(e), { id: `edit-${id}` })
@@ -161,6 +164,15 @@ export const useSftpStore = defineStore('sftp', () => {
     }
   }
   loadOpenWith()
+  async function forgetOpenWith(ext: string) {
+    try {
+      await api.editAppForget(ext)
+    }
+    catch (e) {
+      toast.error(message(e))
+    }
+    await loadOpenWith()
+  }
 
   /** `with`: the default app, the one remembered for this file type, or ask (then remember). */
   async function edit(i: number, name: string, withApp: EditApp = 'default') {
@@ -217,7 +229,19 @@ export const useSftpStore = defineStore('sftp', () => {
   }
 
   const refresh = (i: number) => load(i)
-  const go = (i: number, path: string) => load(i, path)
+  /** A typed path: `~` becomes the home folder, and `..` / `.` are resolved by the server before listing. */
+  async function go(i: number, typed: string) {
+    const p = panes[i]!
+    let path = typed.trim()
+    if (p.endpoint && needsResolving(path)) {
+      try {
+        if (path === '~' || path.startsWith('~/')) path = (await api.fsHome(p.endpoint)).replace(/\/$/, '') + path.slice(1)
+        if (/(^|\/)\.\.?(\/|$)/.test(path)) path = await api.fsRealpath(p.endpoint, path)
+      }
+      catch { /* the listing below reports a path that does not exist */ }
+    }
+    return load(i, path)
+  }
   const up = (i: number) => load(i, parentPath(panes[i]!))
 
   function open(i: number, e: FsEntry) {
@@ -330,5 +354,5 @@ export const useSftpStore = defineStore('sftp', () => {
     prompt.value = null
   }
 
-  return { openWith, panes, transfers, prompt, dragging, clipboard, sorted, load, showLocal, connect, edit, answer, refresh, go, up, open, toggleHidden, mkdir, rename, chmod, remove, copy, resolveConflict, cancel, clearFinished, dropOn, clear }
+  return { openWith, forgetOpenWith, panes, transfers, prompt, dragging, clipboard, sorted, load, showLocal, connect, edit, answer, refresh, go, up, open, toggleHidden, mkdir, rename, chmod, remove, copy, resolveConflict, cancel, clearFinished, dropOn, clear }
 })

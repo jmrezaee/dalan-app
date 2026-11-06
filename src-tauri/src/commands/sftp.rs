@@ -247,6 +247,22 @@ fn ext_of(path: &str) -> String {
         .unwrap_or_default()
 }
 
+/// File types the system would run instead of showing. A server file of these types is never handed
+/// to the system's default app, and the binary or bundle ones are never opened at all.
+const SCRIPT_TYPES: [&str; 8] = [
+    "command", "desktop", "terminal", "sh", "bat", "cmd", "ps1", "scpt",
+];
+const PROGRAM_TYPES: [&str; 11] = [
+    "app", "exe", "jar", "pkg", "dmg", "msi", "com", "scr", "vbs", "workflow", "action",
+];
+
+/// `true` when opening this file would run it. `chosen_app`: the user picked an editor themselves,
+/// which makes plain scripts safe to open as text.
+fn runs_when_opened(name: &str, chosen_app: bool) -> bool {
+    let ext = ext_of(name);
+    PROGRAM_TYPES.contains(&ext.as_str()) || (!chosen_app && SCRIPT_TYPES.contains(&ext.as_str()))
+}
+
 /// "Visual Studio Code.app" -> "Visual Studio Code".
 fn app_name(path: &str) -> String {
     std::path::Path::new(path)
@@ -264,6 +280,16 @@ pub async fn edit_apps(state: State<'_, AppState>) -> AppResult<HashMap<String, 
         .with_db(|c| Ok(crate::settings::open_with_all(c)))
         .await?;
     Ok(all.into_iter().map(|(k, v)| (k, app_name(&v))).collect())
+}
+
+/// Forgets the app remembered for a file type.
+#[tauri::command]
+#[specta::specta]
+pub async fn edit_app_forget(state: State<'_, AppState>, ext: String) -> AppResult<()> {
+    state.require_unlocked()?;
+    state
+        .with_db(move |c| crate::settings::open_with_remove(c, &ext))
+        .await
 }
 
 /// Downloads a server file, opens it in an app and watches it. A `changed` event means the local
@@ -316,6 +342,11 @@ pub async fn edit_open(
             Some(p)
         }
     };
+    if runs_when_opened(&path, program.is_some()) {
+        return Err(AppError::validation(
+            "That kind of file would run on your computer if opened. Choose Open with… and pick an editor.",
+        ));
+    }
     let root = app
         .path()
         .app_data_dir()
@@ -332,7 +363,8 @@ pub async fn edit_open(
         state.sftp.edits.close(&edit_id);
         return Err(AppError::internal(format!("Couldn't open the file: {e}")));
     }
-    if let (EditApp::Choose, Some(p)) = (open_with, program) {
+    // Files without an extension would share one entry for every such file, so they are not remembered.
+    if let (EditApp::Choose, Some(p), false) = (open_with, program, ext.is_empty()) {
         // Remember it only once it really opened the file.
         state
             .with_db(move |c| crate::settings::open_with_set(c, &ext, &p))
@@ -358,4 +390,35 @@ pub async fn edit_upload(
 #[specta::specta]
 pub fn edit_close(state: State<'_, AppState>, edit_id: String) {
     state.sftp.edits.close(&edit_id);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn programs_and_scripts_are_refused_for_the_default_app() {
+        for n in [
+            "a.command",
+            "x.APP",
+            "setup.exe",
+            "run.sh",
+            "t.Terminal",
+            "a.jar",
+            "m.desktop",
+            "s.ps1",
+        ] {
+            assert!(runs_when_opened(n, false), "{n}");
+        }
+        assert!(!runs_when_opened("notes.txt", false));
+        assert!(!runs_when_opened(".bashrc", false));
+    }
+
+    #[test]
+    fn a_chosen_editor_may_open_scripts_but_never_programs() {
+        assert!(!runs_when_opened("deploy.sh", true));
+        assert!(!runs_when_opened("a.command", true));
+        assert!(runs_when_opened("Tool.app", true));
+        assert!(runs_when_opened("setup.EXE", true));
+    }
 }

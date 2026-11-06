@@ -98,5 +98,5 @@ export const useVaultStore = defineStore('vault', () => {
     for (const ev of ['mousemove', 'keydown', 'pointerdown', 'wheel']) window.addEventListener(ev, ping, { passive: true })
   }
 
-  return { phase, error, busy, cooldown, autoLockMinutes, refresh, create, unlock, lock, startWatching }
+  return { phase, error, busy, cooldown, autoLockMinutes, refresh, create, unlock, lock, startWatching, changePassword: api.vaultChangePassword }
 })

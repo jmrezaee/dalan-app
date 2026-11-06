@@ -119,7 +119,7 @@ const fileMenu = computed<MenuItem[]>(() => {
         <IconButton label="New folder" @click="emit('newFolder')"><FolderPlus /></IconButton>
         <IconButton label="Refresh" @click="sftp.refresh(index)"><RefreshCw /></IconButton>
         <DropdownMenu>
-          <DropdownMenuTrigger as-child><IconButton label="Actions"><Ellipsis /></IconButton></DropdownMenuTrigger>
+          <DropdownMenuTrigger as-child><IconButton label="Actions" :tip="false"><Ellipsis /></IconButton></DropdownMenuTrigger>
           <DropdownMenuContent align="end"><ItemMenuList :items="fileMenu" mode="dropdown" /></DropdownMenuContent>
         </DropdownMenu>
       </template>

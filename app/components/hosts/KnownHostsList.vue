@@ -4,10 +4,10 @@ import { filterSort } from '~/utils/listView'
 import { ShieldCheck, Trash2 } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import type { KnownHost } from '~/types/bindings'
-import { CommandError, useTauri } from '~/composables/useTauri'
+import { CommandError } from '~/composables/useTauri'
 import { buttonVariants } from '@/components/ui/button'
 
-const api = useTauri()
+const hosts = useHostsStore()
 const rows = ref<KnownHost[]>([])
 const loaded = ref(false)
 const listQuery = ref('')
@@ -18,7 +18,7 @@ const confirmOpen = ref(false)
 
 async function refresh() {
   try {
-    rows.value = await api.knownHostsList()
+    rows.value = await hosts.knownHostsList()
     loaded.value = true
   }
   catch {
@@ -37,7 +37,7 @@ async function forget() {
   confirmOpen.value = false
   if (!r) return
   try {
-    await api.knownHostDelete(r.id)
+    await hosts.knownHostDelete(r.id)
     toast(`Forgot ${r.host_pattern}.`)
   }
   catch (e) {

@@ -3,10 +3,10 @@
 import { toast } from 'vue-sonner'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
-import { CommandError, useTauri } from '~/composables/useTauri'
+import { CommandError } from '~/composables/useTauri'
 
 const open = defineModel<boolean>('open', { required: true })
-const api = useTauri()
+const vault = useVaultStore()
 const form = reactive({ old: '', next: '', confirm: '' })
 const error = ref('')
 const busy = ref(false)
@@ -17,13 +17,15 @@ watch(open, (o) => {
   error.value = ''
 })
 
+watch(form, () => { error.value = '' })
+
 async function submit() {
   if (busy.value) return
   if (form.next.length < 8) return void (error.value = 'Use at least 8 characters.')
   if (form.next !== form.confirm) return void (error.value = 'The new passwords don\'t match.')
   busy.value = true
   try {
-    await api.vaultChangePassword(form.old, form.next)
+    await vault.changePassword(form.old, form.next)
     toast('Master password changed.')
     open.value = false
   }

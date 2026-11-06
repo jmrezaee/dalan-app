@@ -205,6 +205,28 @@ describe('sessions store', () => {
     }
   })
 
+  it('exit never reconnects by itself and is not counted as a dropped connection', async () => {
+    vi.useFakeTimers()
+    try {
+      settingsMock.terminal.auto_reconnect = true
+      const s = useSessionsStore()
+      s.open(host(1))
+      s.open(host(2))
+      await vi.advanceTimersByTimeAsync(5)
+      ready(opened[0]!)
+      ready(opened[1]!)
+      opened[0]!.onEvent({ type: 'exit', status: 0 } as SessionEvent)
+      opened[0]!.onEvent({ type: 'state', state: 'disconnected' })
+      opened[1]!.onEvent({ type: 'state', state: 'disconnected' })
+      expect(s.droppedCard).toHaveLength(0) // only the real drop counts
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(reconnects).toEqual(['s2'])
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('two or more dropped sessions raise one card; Reconnect all reconnects each', async () => {
     const s = useSessionsStore()
     s.open(host(1))

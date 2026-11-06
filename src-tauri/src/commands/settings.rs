@@ -19,10 +19,16 @@ pub async fn settings_get_all(state: State<'_, AppState>) -> AppResult<HashMap<S
 #[specta::specta]
 pub async fn settings_set(state: State<'_, AppState>, key: String, value: String) -> AppResult<()> {
     state.require_unlocked()?;
-    // The AI settings hold where the API key is sent, so only `ai_save` (which checks them) may write them.
-    if key == "ai" || key == "sftp" {
+    // `ai` holds where the API key is sent, so only `ai_save` (which checks it) may write it. `sftp` holds
+    // the apps Dalan launches, so only the SFTP commands may write that.
+    if key == "ai" {
         return Err(crate::error::AppError::validation(
             "Use the AI settings page for that.",
+        ));
+    }
+    if key == "sftp" {
+        return Err(crate::error::AppError::validation(
+            "That setting can't be changed from here.",
         ));
     }
     state.with_db(move |c| settings::set(c, &key, &value)).await

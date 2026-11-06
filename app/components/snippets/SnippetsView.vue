@@ -40,6 +40,18 @@ const groups = computed(() => {
 })
 const targets = (s: SnippetSummary) => (s.target_host_ids.length ? s.target_host_ids.map(id => hosts.hosts.find(h => h.id === id)?.label ?? '?').join(', ') : 'any')
 
+// ---- drag a snippet onto a package
+const dropOn = ref('')
+function onDrop(e: DragEvent, packageId: string | null) {
+  dropOn.value = ''
+  const id = e.dataTransfer?.getData('application/x-dalan-snippet')
+  const s = snippets.snippets.find(x => x.id === id)
+  if (s) {
+    e.preventDefault()
+    void snippets.move(s, packageId)
+  }
+}
+
 // ---- package create / rename
 const pkgOpen = ref(false)
 const pkgEditing = ref<PackageSummary | null>(null)
@@ -102,7 +114,12 @@ function snippetMenu(s: (typeof snippets.snippets)[number]): MenuItem[] {
     </EmptyState>
 
     <div v-else class="flex max-w-[760px] flex-col gap-5">
-      <section v-for="g in groups" :key="g.id ?? 'none'" class="flex flex-col gap-1.5">
+      <section
+        v-for="g in groups" :key="g.id ?? 'none'" class="flex flex-col gap-1.5 rounded-lg" :class="dropOn === (g.id ?? 'none') && 'ring-2 ring-accent'"
+        @dragover="(e: DragEvent) => { if (e.dataTransfer?.types.includes('application/x-dalan-snippet')) { e.preventDefault(); dropOn = g.id ?? 'none' } }"
+        @dragleave="dropOn = ''"
+        @drop="(e: DragEvent) => onDrop(e, g.id)"
+      >
         <h2 class="flex items-center gap-2 text-xs font-medium text-muted">
           {{ g.label }}
           <template v-if="g.pkg">
@@ -115,6 +132,8 @@ function snippetMenu(s: (typeof snippets.snippets)[number]): MenuItem[] {
           <ContextMenuTrigger as-child>
         <div
           class="flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5 hover:border-muted/40 hover:bg-surface-raised"
+          draggable="true"
+          @dragstart="(e: DragEvent) => e.dataTransfer?.setData('application/x-dalan-snippet', s.id)"
         >
           <button type="button" class="flex min-w-0 flex-1 flex-col text-left" @click="openSheet(s)">
             <span class="font-medium">{{ s.label }}</span>

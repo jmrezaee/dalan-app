@@ -37,7 +37,7 @@ const menu = computed<MenuItem[]>(() => [
     <IconButton label="Copy public key" size="xs" @click="$emit('copyPublic')"><Copy /></IconButton>
     <DropdownMenu>
       <DropdownMenuTrigger as-child>
-        <IconButton label="Key actions" size="xs" class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"><Ellipsis /></IconButton>
+        <IconButton label="Key actions" :tip="false" size="xs" class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"><Ellipsis /></IconButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <ItemMenuList :items="menu" mode="dropdown" />

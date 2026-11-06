@@ -58,7 +58,7 @@ A personal desktop SSH client for Mehrdad and his team. It is a clean-room rebui
 ## Conventions
 
 - **Nuxt:** `srcDir` is `app/`. The app is a single-page shell: vault sections, `sftp` and `settings` switch on a ref in `pages/index.vue`, because terminal tabs must stay mounted. Components are grouped by area (`hosts/`, `keychain/`, `terminal/`, `sftp/`, `workspace/`, `shell/`). shadcn-vue components go in `components/ui/`.
-- **State:** one Pinia store per area. Stores call typed wrappers in `composables/useTauri.ts`. Components reach Rust through stores, not through `useTauri()` or `invoke` directly (10 older components still do; P27 moves them).
+- **State:** one Pinia store per area. Stores call typed wrappers in `composables/useTauri.ts`. Components reach Rust through stores, not through `useTauri()` or `invoke` directly (P27 moved the last ones).
 - **Rust:** `commands/` holds thin `#[tauri::command]` functions. The logic lives in modules (`db`, `vault`, `ssh`, `sftp`, `tunnels`, `keys`, `pty`, `import`, `logs`). DB access goes through `spawn_blocking` and one `Mutex<Connection>`.
 - **Mehrdad is a TypeScript/Nuxt developer** who is growing his Rust. In Rust code, add short comments explaining ownership, async and lifetimes where they are not obvious. Prefer clear code over clever code.
 - **Inheritance:** NULL in `connection_profiles` means inherit. Resolve host → group → parent group → app defaults per field, and return which group each value came from (for "from group X" hints in S03).
@@ -100,7 +100,8 @@ cd src-tauri && cargo clippy -- -D warnings && cargo test
 - **P15 to P25 are built.** The second audit (`replica/audit-2026-11-06.md`) lists what's left.
 - **Testing:** the test strategy is `replica/testing/test-plan.md`: layers, fake backend, coverage matrix, `pnpm walk` and `pnpm walk:app`.
 - **P26 is done.** `origin` is `jmrezaee/dalan-app` on GitHub; CI is green on the old `v0.1.0` commit; the P21 onward commits are not pushed.
-- **Next:** P27, then T1 to T7, then P28 (hand checks) and P29 (first release), in `replica/progress.md`. Type `go` to run the next one.
+- **P27 is built** (`[h]`, waiting for the hand-check session).
+- **Next:** T1 to T7, then P28 (hand checks) and P29 (first release), in `replica/progress.md`. Type `go` to run the next one.
 - **Manual checks:** a phase that needs Mehrdad to test something by hand is not done until he has reported back.
 - **M1 is done when F01, F11 and F12 work against a real server:**
   - unlock

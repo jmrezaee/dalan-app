@@ -8,3 +8,15 @@ export function parseQuickConnect(text: string): { username: string | null, addr
   if (!m[1] && !m[3] && !/[.:]/.test(m[2]!)) return null
   return { username: m[1] ?? null, address: m[2]!.replace(/^\[|\]$/g, ''), port }
 }
+
+/** The saved host a quick-connect text points at: same address, user and port (no port = 22). Newest first wins. */
+export function findQuickHost<H extends { address: string, effective_username?: string | null, effective_port: number }>(
+  hosts: H[],
+  q: { username: string | null, address: string, port: number | null },
+): H | undefined {
+  return hosts.find(h =>
+    h.address.toLowerCase() === q.address.toLowerCase()
+    && (h.effective_username ?? null) === q.username
+    && h.effective_port === (q.port ?? 22),
+  )
+}

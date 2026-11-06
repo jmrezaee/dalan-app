@@ -38,7 +38,6 @@ export function useTauri() {
     serialPorts: () => unwrap(commands.serialPorts()),
     hostSetProtocol: (id: string, protocol: string) => unwrap(commands.hostSetProtocol(id, protocol)),
     hostDelete: (id: string) => unwrap(commands.hostDelete(id)),
-    hostsSharedLogins: () => unwrap(commands.hostsSharedLogins()),
     hostDuplicate: (id: string) => unwrap(commands.hostDuplicate(id)),
     groupSave: (input: GroupInput) => unwrap(commands.groupSave(input)),
     groupDelete: (id: string) => unwrap(commands.groupDelete(id)),
@@ -102,6 +101,7 @@ export function useTauri() {
       return unwrap(commands.editOpen(endpoint, path, withApp, events as never))
     },
     editApps: () => unwrap(commands.editApps()),
+    editAppForget: (ext: string) => unwrap(commands.editAppForget(ext)),
     editUpload: (editId: string, force: boolean) => unwrap(commands.editUpload(editId, force)),
     editClose: (editId: string) => commands.editClose(editId),
     updateCheck: () => unwrap(commands.updateCheck()),

@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 const { label: shortcutLabel } = useShortcutLabel()
 
 const settings = useSettingsStore()
+const sftp = useSftpStore()
 const sections = ['Appearance', 'Terminal', 'Logs', 'AI', 'Shortcuts', 'Security', 'About'] as const
 const section = ref<typeof sections[number]>('Appearance')
 const changeOpen = ref(false)
@@ -18,7 +19,7 @@ const changeOpen = ref(false)
 const ai = reactive({ hasKey: false, model: '', baseUrl: '', newKey: '', loaded: false, busy: false, error: '' })
 async function loadAi() {
   try {
-    const c = await api.aiGet()
+    const c = await settings.aiGet()
     Object.assign(ai, { hasKey: c.has_key, model: c.model, baseUrl: c.base_url, newKey: '', loaded: true, error: '' })
   }
   catch {
@@ -29,7 +30,7 @@ async function saveAi(clearKey = false) {
   ai.busy = true
   ai.error = ''
   try {
-    const c = await api.aiSave({ model: ai.model, base_url: ai.baseUrl, api_key: ai.newKey || null, clear_key: clearKey })
+    const c = await settings.aiSave({ model: ai.model, base_url: ai.baseUrl, api_key: ai.newKey || null, clear_key: clearKey })
     Object.assign(ai, { hasKey: c.has_key, model: c.model, baseUrl: c.base_url, newKey: '' })
     toast(clearKey ? 'API key removed.' : 'AI settings saved.')
   }
@@ -40,17 +41,16 @@ async function saveAi(clearKey = false) {
 }
 
 // ---- About: version, updates, diagnostics.
-const api = useTauri()
 const info = ref<{ version: string, platform: string, data_dir: string } | null>(null)
 const update = ref<{ state: 'idle' | 'checking' | 'none' | 'found' | 'installing' | 'error', version?: string, notes?: string | null, error?: string }>({ state: 'idle' })
 watch(section, async (s) => {
   if (s === 'AI' && !ai.loaded) await loadAi()
-  if (s === 'About' && !info.value) info.value = await api.appInfo().catch(() => null)
+  if (s === 'About' && !info.value) info.value = await settings.appInfo().catch(() => null)
 })
 async function checkUpdate() {
   update.value = { state: 'checking' }
   try {
-    const u = await api.updateCheck()
+    const u = await settings.updateCheck()
     update.value = u ? { state: 'found', version: u.version, notes: u.notes } : { state: 'none' }
   }
   catch (e) {
@@ -60,7 +60,7 @@ async function checkUpdate() {
 async function installUpdate() {
   update.value = { ...update.value, state: 'installing' }
   try {
-    await api.updateInstall() // restarts the app when it works
+    await settings.updateInstall() // restarts the app when it works
   }
   catch (e) {
     update.value = { state: 'error', error: e instanceof Error ? e.message : 'The update failed.' }
@@ -68,7 +68,7 @@ async function installUpdate() {
 }
 async function copyDiagnostics() {
   try {
-    await navigator.clipboard.writeText(await api.diagnosticsText())
+    await navigator.clipboard.writeText(await settings.diagnosticsText())
     toast('Diagnostics copied. Servers, addresses and usernames are removed.')
   }
   catch {
@@ -182,6 +182,16 @@ const num = (v: string | number, fallback: number) => (Number.isFinite(Number(v)
             <div class="w-56"><Input :model-value="settings.localShell" placeholder="Your own shell" aria-label="Local shell path" autocomplete="off" spellcheck="false" @change="(e: Event) => settings.setLocalShell((e.target as HTMLInputElement).value)" /></div>
           </div>
           <div class="row"><span class="flex flex-1 flex-col">Post-quantum key exchange<span class="text-xs text-muted">Offers the ML-KEM hybrid when connecting, so recorded traffic stays safe from future quantum computers. Turn off only for a server that fails to connect with it. Applies to new connections.</span></span><Switch :model-value="settings.postQuantum" aria-label="Post-quantum key exchange" @update:model-value="(v: boolean) => settings.setPostQuantum(v)" /></div>
+          <div class="row items-start">
+            <span class="flex flex-1 flex-col">Apps for opening server files<span class="text-xs text-muted">Remembered when you choose Open with… on a file in SFTP. One app per file type.</span></span>
+            <ul class="w-64 space-y-1">
+              <li v-if="!Object.keys(sftp.openWith).length" class="text-xs text-muted">None yet.</li>
+              <li v-for="(app, ext) in sftp.openWith" :key="ext" class="flex items-center gap-2 text-sm">
+                <span class="flex-1 truncate">{{ ext ? `.${ext}` : 'No extension' }}: {{ app }}</span>
+                <Button variant="ghost" size="xs" :aria-label="`Forget the app for ${ext ? `.${ext}` : 'files without an extension'}`" @click="sftp.forgetOpenWith(String(ext))">Forget</Button>
+              </li>
+            </ul>
+          </div>
           <p class="pt-3 text-xs text-muted">Changes apply to open terminals straight away.</p>
         </template>
 

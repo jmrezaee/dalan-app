@@ -84,5 +84,5 @@ export const useKeychainStore = defineStore('keychain', () => {
     loaded.value = false
   }
 
-  return { keys, identities, loaded, keyLabel, refresh, generate, importKey, updateKey, setCertificate, saveIdentity, removeKey, removeIdentity, copyPublic, clear }
+  return { keys, identities, loaded, keyLabel, refresh, generate, importKey, updateKey, setCertificate, saveIdentity, removeKey, removeIdentity, copyPublic, clear, pickFile: api.pickFile, keyExportToHost: api.keyExportToHost, sessionClose: api.sessionClose, sessionRespond: api.sessionRespond }
 })

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // S20: snippets and command history for the current session. A snippet or command row types into the shell.
-import { CornerDownLeft, Copy, Play, Sparkles, Trash2, X } from '@lucide/vue'
+import { Check, CornerDownLeft, Copy, Play, Sparkles, Trash2, X } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import type { HistoryEntry } from '~/types/bindings'
 import type { SideTab } from '~/stores/settings'
@@ -12,7 +12,7 @@ const { label: shortcutLabel } = useShortcutLabel()
 const snippets = useSnippetsStore()
 const sessions = useSessionsStore()
 const settings = useSettingsStore()
-const api = useTauri()
+const historyApi = useHistoryStore()
 const hosts = useHostsStore()
 // The tab you used last comes back next time.
 const tab = computed({ get: () => settings.terminal.side_tab, set: (v: SideTab) => settings.setTerminal({ side_tab: v }) })
@@ -32,7 +32,7 @@ const history = ref<HistoryEntry[]>([])
 const hostId = computed(() => sessions.activeSession?.hostId || null)
 async function loadHistory() {
   try {
-    history.value = await api.historyList(hostId.value, tab.value === 'history' ? query.value.trim() || null : null, 200)
+    history.value = await historyApi.historyList(hostId.value, tab.value === 'history' ? query.value.trim() || null : null, 200)
   }
   catch {
     history.value = []
@@ -54,7 +54,7 @@ async function suggest() {
   ask.error = ''
   ask.suggestion = null
   try {
-    ask.suggestion = await api.aiSuggest(ask.text, hostId.value)
+    ask.suggestion = await historyApi.aiSuggest(ask.text, hostId.value)
   }
   catch (e) {
     ask.error = e instanceof Error ? e.message : 'Something went wrong. Try again.'
@@ -69,7 +69,8 @@ async function copySuggestion() {
   if (ask.suggestion) await navigator.clipboard.writeText(ask.suggestion.command).then(() => toast('Copied.')).catch(() => {})
 }
 // ---- A command you keep typing becomes a snippet suggestion.
-const hintDismissed = reactive(new Set<string>())
+// Kept in the store, so "Not now" survives closing and reopening the panel.
+const hintDismissed = historyApi.dismissedHints
 const hint = computed(() => (query.value ? null : repeatedCommand(history.value.map(h => h.command), snippets.snippets.map(s => s.script.trim()), hintDismissed)))
 async function saveHint() {
   const h = hint.value
@@ -79,7 +80,7 @@ async function saveHint() {
 }
 async function clearHistory() {
   try {
-    await api.historyClear(hostId.value, false)
+    await historyApi.historyClear(hostId.value, false)
     toast('History cleared.')
   }
   catch {
@@ -151,7 +152,9 @@ async function clearHistory() {
       <p v-if="!hostId" class="px-2 py-4 text-sm text-muted">The local shell uses the default theme. Pick one under Settings.</p>
       <template v-else>
         <button type="button" :aria-pressed="!hosts.themes.hosts[hostId]?.own" class="mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-surface-hover" @click="hosts.setHostTheme(hostId, null)">
-          <span class="grid size-4 place-items-center">{{ !hosts.themes.hosts[hostId]?.own ? '✓' : '' }}</span>Use the default
+          <span class="grid size-4 place-items-center"><Check v-if="!hosts.themes.hosts[hostId]?.own" class="size-3.5" /></span>
+          <template v-if="hosts.themes.hosts[hostId]?.inherited_from">Same as {{ hosts.themes.hosts[hostId]?.inherited_from }} ({{ terminalThemeLabels[hosts.themes.hosts[hostId]?.inherited ?? ''] ?? hosts.themes.hosts[hostId]?.inherited }})</template>
+          <template v-else>Use the default</template>
         </button>
         <button
           v-for="(label, key) in terminalThemeLabels"
@@ -161,7 +164,7 @@ async function clearHistory() {
           class="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-surface-hover"
           @click="hosts.setHostTheme(hostId, key)"
         >
-          <span class="grid size-4 place-items-center">{{ hosts.themes.hosts[hostId]?.own === key ? '✓' : '' }}</span>
+          <span class="grid size-4 place-items-center"><Check v-if="hosts.themes.hosts[hostId]?.own === key" class="size-3.5" /></span>
           <span class="flex-1 truncate">{{ label }}</span>
           <span class="flex h-5 items-center gap-0.5 rounded px-1" :style="{ background: terminalThemes[key]?.background }" aria-hidden="true">
             <span v-for="c in (['red', 'green', 'yellow', 'blue', 'magenta'] as const)" :key="c" class="size-2 rounded-full" :style="{ background: terminalThemes[key]?.[c] }" />

@@ -194,9 +194,13 @@ export const useHostsStore = defineStore('hosts', () => {
   }
 
   /** Copies a host with its tags and saved password (done in Rust). */
+  /** New host id -> label of the host it was copied from. A copy has the same saved login by construction, so the
+   *  "make an identity" hint needs no comparison of passwords (that would let a guess test passwords). */
+  const copiedFrom = ref<Record<string, string>>({})
   async function duplicate(h: HostSummary) {
     try {
-      await api.hostDuplicate(h.id)
+      const copy = await api.hostDuplicate(h.id)
+      copiedFrom.value = { ...copiedFrom.value, [copy.id]: h.label }
     }
     catch (e) {
       toast.error(message(e))
@@ -246,6 +250,7 @@ export const useHostsStore = defineStore('hosts', () => {
   return {
     hosts, groups, loaded, tagInfos, recent, importOpen, themes, themeFor, query, view, draft, currentGroupId, selectedTags, editing, editingGroup,
     allTags, searching, currentGroup, breadcrumb, childGroups, visibleHosts,
-    groupLabel, groupOptions, inheritedFor, toggleTag, deleteTag, refresh, save, saveGroup, remove, removeGroup, duplicate, setHostTheme, move, clear,
+    groupLabel, groupOptions, inheritedFor, toggleTag, deleteTag, refresh, save, saveGroup, remove, removeGroup, duplicate, copiedFrom, setHostTheme, move, clear,
+    importPreview: api.importPreview, importApply: api.importApply, pickFile: api.pickFile, agentGet: api.agentGet, envGet: api.envGet, proxyGet: api.proxyGet, serialGet: api.serialGet, serialPorts: api.serialPorts, knownHostsList: api.knownHostsList, knownHostDelete: api.knownHostDelete,
   }
 })

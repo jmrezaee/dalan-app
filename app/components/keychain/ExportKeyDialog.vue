@@ -6,12 +6,11 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import type { KeySummary, PromptKind, SessionEvent } from '~/types/bindings'
-import { useTauri } from '~/composables/useTauri'
 
 const open = defineModel<boolean>('open', { required: true })
 const props = defineProps<{ keyItem: KeySummary | null }>()
 const hosts = useHostsStore()
-const api = useTauri()
+const keychain = useKeychainStore()
 
 const form = reactive({ hostId: null as string | null, dir: '~/.ssh', file: 'authorized_keys' })
 const phase = ref<'idle' | 'running' | 'done' | 'error'>('idle')
@@ -57,7 +56,7 @@ async function start() {
   step.value = `Connecting to ${hostLabel.value}…`
   message.value = ''
   try {
-    sessionId = (await api.keyExportToHost(props.keyItem.id, form.hostId, form.dir, form.file, onEvent)).session_id
+    sessionId = (await keychain.keyExportToHost(props.keyItem.id, form.hostId, form.dir, form.file, onEvent)).session_id
   }
   catch {
     phase.value = 'error'
@@ -69,10 +68,10 @@ async function reply(accept: boolean, text: string | null, remember: boolean) {
   const p = prompt.value
   if (!p) return
   prompt.value = null
-  await api.sessionRespond(sessionId, p.id, { accept, text, remember }).catch(() => {})
+  await keychain.sessionRespond(sessionId, p.id, { accept, text, remember }).catch(() => {})
 }
 function close() {
-  if (phase.value === 'running') api.sessionClose(sessionId)
+  if (phase.value === 'running') keychain.sessionClose(sessionId)
   open.value = false
 }
 </script>

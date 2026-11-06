@@ -25,8 +25,6 @@ export const commands = {
 	hostDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("host_delete", { id })),
 	/**  Copies a host (profile, chain, tags, environment, saved secrets) as "<label> copy". */
 	hostDuplicate: (id: string) => typedError<HostSummary_Serialize, AppError>(__TAURI_INVOKE("host_duplicate", { id })),
-	/**  Groups of hosts that save the same username and password (ids only, never the passwords). */
-	hostsSharedLogins: () => typedError<string[][], AppError>(__TAURI_INVOKE("hosts_shared_logins")),
 	/**  Switches a host between `ssh` and `telnet`. */
 	hostSetProtocol: (id: string, protocol: string) => typedError<null, AppError>(__TAURI_INVOKE("host_set_protocol", { id, protocol })),
 	serialGet: (hostId: string) => typedError<SerialConfig, AppError>(__TAURI_INVOKE("serial_get", { hostId })),
@@ -140,6 +138,8 @@ export const commands = {
 	transferCancel: (transferId: string) => typedError<null, AppError>(__TAURI_INVOKE("transfer_cancel", { transferId })),
 	/**  The apps remembered per file type: extension -> display name, for the menu labels. */
 	editApps: () => typedError<{ [key in string]: string }, AppError>(__TAURI_INVOKE("edit_apps")),
+	/**  Forgets the app remembered for a file type. */
+	editAppForget: (ext: string) => typedError<null, AppError>(__TAURI_INVOKE("edit_app_forget", { ext })),
 	forwardsList: () => typedError<ForwardSummary_Serialize[], AppError>(__TAURI_INVOKE("forwards_list")),
 	forwardSave: (input: ForwardInput_Deserialize) => typedError<ForwardSummary_Serialize, AppError>(__TAURI_INVOKE("forward_save", { input })),
 	forwardDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("forward_delete", { id })),
@@ -722,6 +722,8 @@ export type ImportPreview_Serialize = {
 export type ImportResult = {
 	created: number,
 	skipped: number,
+	/**  Jump hosts a row named that are not in the vault or in this import (unticked, or named differently). */
+	jumps_missing: number,
 };
 
 export type ImportRow = ImportRow_Serialize | ImportRow_Deserialize;

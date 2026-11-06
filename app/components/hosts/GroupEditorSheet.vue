@@ -19,7 +19,6 @@ const open = computed({
 })
 const group = computed(() => (hosts.editingGroup && hosts.editingGroup !== 'new' ? hosts.editingGroup : null))
 
-const api = useTauri()
 /** Variables from the groups above, and whether this item's own were loaded (so a failed load can't wipe them on save). */
 const envInherited = ref<InheritedVar[]>([])
 const agentInfo = ref<AgentConfig | null>(null)
@@ -28,14 +27,14 @@ const envLoaded = ref(true)
 async function loadEnv(id: string) {
   envLoaded.value = false
   try {
-    const c = await api.envGet('group', id)
+    const c = await hosts.envGet('group', id)
     form.env_mode = c.mode
     form.env_vars = c.vars.map(v => ({ ...v }))
     envInherited.value = c.inherited
-    const px = await api.proxyGet('group', id)
+    const px = await hosts.proxyGet('group', id)
     form.proxy = { ...px.own }
     proxyInherited.value = px
-    const ag = await api.agentGet('group', id)
+    const ag = await hosts.agentGet('group', id)
     form.agent = ag.own.kind
     agentInfo.value = ag
     snapshot.value = current.value
