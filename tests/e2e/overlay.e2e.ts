@@ -93,6 +93,22 @@ describe('unlock and the connection overlay (F01, F11, F12)', () => {
     await page.close()
   })
 
+  it('S20: the side panel has Theme and Font tabs and opens on the tab you used last', async () => {
+    const page = await openApp(browser, url, { unlocked: true })
+    await page.getByText('web-1').dblclick()
+    const [id] = await sessionIds(page)
+    await fakeEvent(page, id!, { type: 'state', state: 'ready' })
+    await page.getByRole('button', { name: /^Snippets/ }).click()
+    for (const name of ['Snippets', 'History', 'Theme', 'Font', 'Ask AI'])
+      await seen(page.getByRole('tab', { name, exact: true }))
+    await page.getByRole('tab', { name: 'Font', exact: true }).click()
+    await seen(page.getByLabel('Font family'))
+    await page.getByRole('button', { name: /^Snippets/ }).click() // close
+    await page.getByRole('button', { name: /^Snippets/ }).click() // open again
+    await seen(page.getByLabel('Font family'))
+    await page.close()
+  })
+
   it('F12: a changed key blocks; Close is the default and replacing needs the typed name', async () => {
     const page = await openApp(browser, url, { unlocked: true })
     await page.getByText('web-1').dblclick()

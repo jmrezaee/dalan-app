@@ -3,6 +3,9 @@
 import { CornerDownLeft, Copy, Play, Sparkles, Trash2, X } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import type { HistoryEntry } from '~/types/bindings'
+import type { SideTab } from '~/stores/settings'
+import { terminalThemeLabels, terminalThemes } from '~/utils/terminal-themes'
+import { repeatedCommand } from '~/utils/historyHint'
 import { cn } from '@/lib/utils'
 const { label: shortcutLabel } = useShortcutLabel()
 
@@ -10,7 +13,9 @@ const snippets = useSnippetsStore()
 const sessions = useSessionsStore()
 const settings = useSettingsStore()
 const api = useTauri()
-const tab = ref<'snippets' | 'history' | 'ai'>('snippets')
+const hosts = useHostsStore()
+// The tab you used last comes back next time.
+const tab = computed({ get: () => settings.terminal.side_tab, set: (v: SideTab) => settings.setTerminal({ side_tab: v }) })
 const query = ref('')
 
 const matches = computed(() => {
@@ -63,6 +68,15 @@ function insertSuggestion() {
 async function copySuggestion() {
   if (ask.suggestion) await navigator.clipboard.writeText(ask.suggestion.command).then(() => toast('Copied.')).catch(() => {})
 }
+// ---- A command you keep typing becomes a snippet suggestion.
+const hintDismissed = reactive(new Set<string>())
+const hint = computed(() => (query.value ? null : repeatedCommand(history.value.map(h => h.command), snippets.snippets.map(s => s.script.trim()), hintDismissed)))
+async function saveHint() {
+  const h = hint.value
+  if (!h) return
+  const err = await snippets.save({ id: null, label: h.command.slice(0, 40), script: h.command, package_id: null, target_host_ids: [] })
+  if (!err) hintDismissed.add(h.command)
+}
 async function clearHistory() {
   try {
     await api.historyClear(hostId.value, false)
@@ -80,7 +94,7 @@ async function clearHistory() {
     <div class="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
       <div role="tablist" aria-label="Side panel" class="flex gap-1">
         <button
-          v-for="t in [{ v: 'snippets', l: 'Snippets' }, { v: 'history', l: 'History' }, { v: 'ai', l: 'Ask AI' }] as const"
+          v-for="t in [{ v: 'snippets', l: 'Snippets' }, { v: 'history', l: 'History' }, { v: 'theme', l: 'Theme' }, { v: 'font', l: 'Font' }, { v: 'ai', l: 'Ask AI' }] as const"
           :key="t.v"
           type="button"
           role="tab"
@@ -93,7 +107,7 @@ async function clearHistory() {
       </div>
       <IconButton label="Close side panel" :shortcut="shortcutLabel('side-panel')" size="xs" class="ml-auto" @click="sessions.panelOpen = false"><X /></IconButton>
     </div>
-    <div v-if="tab !== 'ai'" class="p-2"><SearchInput v-model="query" class="w-full" :placeholder="tab === 'snippets' ? 'Find a snippet' : 'Find a command'" :result-count="tab === 'snippets' ? matches.length : history.length" /></div>
+    <div v-if="tab === 'snippets' || tab === 'history'" class="p-2"><SearchInput v-model="query" class="w-full" :placeholder="tab === 'snippets' ? 'Find a snippet' : 'Find a command'" :result-count="tab === 'snippets' ? matches.length : history.length" /></div>
 
     <div v-if="tab === 'snippets'" class="flex-1 overflow-auto px-2 pb-2">
       <p v-if="!snippets.snippets.length" class="px-2 py-4 text-sm text-muted">No snippets yet. Create some under Snippets in the vault.</p>
@@ -133,7 +147,45 @@ async function clearHistory() {
       <p class="text-2xs text-muted">Sends your text and the server's OS name to your AI provider. Nothing from the terminal.</p>
     </div>
 
+    <div v-else-if="tab === 'theme'" class="flex-1 overflow-auto p-2">
+      <p v-if="!hostId" class="px-2 py-4 text-sm text-muted">The local shell uses the default theme. Pick one under Settings.</p>
+      <template v-else>
+        <button type="button" :aria-pressed="!hosts.themes.hosts[hostId]?.own" class="mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-surface-hover" @click="hosts.setHostTheme(hostId, null)">
+          <span class="grid size-4 place-items-center">{{ !hosts.themes.hosts[hostId]?.own ? '✓' : '' }}</span>Use the default
+        </button>
+        <button
+          v-for="(label, key) in terminalThemeLabels"
+          :key="key"
+          type="button"
+          :aria-pressed="hosts.themes.hosts[hostId]?.own === key"
+          class="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-surface-hover"
+          @click="hosts.setHostTheme(hostId, key)"
+        >
+          <span class="grid size-4 place-items-center">{{ hosts.themes.hosts[hostId]?.own === key ? '✓' : '' }}</span>
+          <span class="flex-1 truncate">{{ label }}</span>
+          <span class="flex h-5 items-center gap-0.5 rounded px-1" :style="{ background: terminalThemes[key]?.background }" aria-hidden="true">
+            <span v-for="c in (['red', 'green', 'yellow', 'blue', 'magenta'] as const)" :key="c" class="size-2 rounded-full" :style="{ background: terminalThemes[key]?.[c] }" />
+          </span>
+        </button>
+      </template>
+    </div>
+
+    <div v-else-if="tab === 'font'" class="flex flex-col gap-4 p-3">
+      <div class="flex flex-col gap-1.5">
+        <span class="text-xs text-muted">Size</span>
+        <div class="w-24"><NumberInput :model-value="settings.terminal.font_size" :min="8" :max="32" @update:model-value="(v: string | number) => settings.setTerminal({ font_size: Number(v) || 14 })" /></div>
+      </div>
+      <label class="flex flex-col gap-1.5 text-xs text-muted">Family
+        <Input :model-value="settings.terminal.font_family" placeholder="JetBrains Mono (bundled)" aria-label="Font family" autocomplete="off" @change="settings.setTerminal({ font_family: ($event.target as HTMLInputElement).value.trim() })" />
+      </label>
+      <p class="text-2xs text-muted">Applies to every terminal. Use the name of a monospace font installed on this computer.</p>
+    </div>
+
     <div v-else class="flex min-h-0 flex-1 flex-col">
+      <div v-if="hint" class="m-2 flex flex-col gap-2 rounded-md border border-border bg-surface-raised p-2.5">
+        <p class="text-xs">You ran <code class="font-mono">{{ hint.command }}</code> {{ hint.count }} times. Save it as a snippet?</p>
+        <div class="flex gap-2"><Button size="sm" @click="saveHint">Save snippet</Button><Button size="sm" variant="ghost" @click="hintDismissed.add(hint.command)">Not now</Button></div>
+      </div>
       <div class="flex-1 overflow-auto px-2 pb-2">
         <p v-if="!settings.historyEnabled" class="px-2 py-4 text-sm text-muted">Command history is off. Turn it on in Settings, under Logs.</p>
         <p v-else-if="!history.length" class="px-2 py-4 text-sm text-muted">{{ query ? 'No commands match.' : 'Commands you type here will show up.' }}</p>

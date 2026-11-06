@@ -4,6 +4,8 @@ import { useTauri } from '~/composables/useTauri'
 import { SHORTCUT_ACTIONS, comboProblem, defaultCombo, effectiveCombos } from '~/utils/shortcuts'
 
 export type Theme = 'system' | 'dark' | 'light'
+export const SIDE_TABS = ['snippets', 'history', 'theme', 'font', 'ai'] as const
+export type SideTab = (typeof SIDE_TABS)[number]
 export type CursorStyle = 'block' | 'bar' | 'underline'
 
 export interface TerminalSettings {
@@ -18,9 +20,11 @@ export interface TerminalSettings {
   default_theme: string
   /** Reconnect by itself after a drop (2, 4, 8, 16, 30 s, then stop). Off until switched on. */
   auto_reconnect: boolean
+  /** The side panel tab that was open last. */
+  side_tab: SideTab
 }
 
-const TERMINAL_DEFAULTS: TerminalSettings = { font_size: 14, cursor: 'block', cursor_blink: true, scrollback: 10000, copy_on_select: false, font_family: '', default_theme: '', auto_reconnect: false }
+const TERMINAL_DEFAULTS: TerminalSettings = { font_size: 14, cursor: 'block', cursor_blink: true, scrollback: 10000, copy_on_select: false, font_family: '', default_theme: '', auto_reconnect: false, side_tab: 'snippets' }
 const clamp = (n: unknown, lo: number, hi: number, fallback: number) => (typeof n === 'number' && Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n))) : fallback)
 
 /** S23. Loaded from Rust after unlock, saved back on change. Terminals read `terminal` live. */
@@ -57,6 +61,7 @@ export const useSettingsStore = defineStore('settings', () => {
     terminal.font_family = typeof v.font_family === 'string' ? v.font_family.slice(0, 80) : ''
     terminal.default_theme = typeof v.default_theme === 'string' ? v.default_theme : ''
     terminal.auto_reconnect = v.auto_reconnect === true
+    terminal.side_tab = SIDE_TABS.find(t => t === v.side_tab) ?? 'snippets'
   }
 
   async function load() {

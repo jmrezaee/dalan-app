@@ -139,7 +139,7 @@ function maximize(i: number) {
           v-show="ws.mode === 'split' || i === ws.focus"
           :key="p.key"
           :aria-label="p.label"
-          :class="cn('flex min-h-0 min-w-0 flex-col bg-terminal-bg', i === ws.focus && 'ring-1 ring-inset ring-accent')"
+          :class="cn('flex min-h-0 min-w-0 flex-col bg-terminal-bg', i === ws.focus && 'ring-1 ring-inset ring-accent', ws.broadcast && p.status === 'ready' && 'outline-dashed outline-2 -outline-offset-2 outline-warning')"
           @focusin="sessions.focusPane(ws, i)"
           @mousedown="sessions.focusPane(ws, i)"
         >

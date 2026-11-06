@@ -84,3 +84,6 @@ Quick connect from the New tab (user@host:port),terminal,should,yes,partial,P22;
 Key and snippet right-click menus,keychain,should,yes,partial,P22; waits for hand check
 Duplicate host and snippet,hosts,should,yes,partial,P22; waits for hand check
 Search and sort on section lists,shell,should,yes,partial,P22; waits for hand check
+Side panel theme and font tabs with remembered tab,terminal,should,yes,partial,P24; waits for hand check
+Snippet suggestion from repeated commands,terminal,could,yes,partial,P24; waits for hand check
+Broadcast frame on workspace panes,terminal,should,yes,partial,P24; waits for hand check
