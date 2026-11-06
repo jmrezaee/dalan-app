@@ -2,7 +2,7 @@
 // so the real Nuxt app runs in a plain browser: commands answer from a small in-memory model, and the test
 // drives the "server side" of a session through `window.__fake` (events and terminal bytes).
 // Only what the tests need is faked; any other command is recorded in `__fake.unhandled` and answers `null`.
-import type { Page } from 'playwright'
+import type { Page } from '@playwright/test'
 
 export interface FakeHost { id: string, label: string, address: string, port?: number }
 

@@ -113,6 +113,7 @@ onMounted(() => {
   }
   catch { /* no WebGL: the default renderer is fine */ }
 
+  exposeTerm(props.session.key, term)
   term.onData(d => sessions.input(props.session, encoder.encode(d)))
   term.onBinary(d => sessions.input(props.session, Uint8Array.from(d, c => c.charCodeAt(0))))
   term.onBell(() => { if (settings.terminal.bell) beep() })
@@ -132,6 +133,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onFindKey)
   observer?.disconnect()
   sessions.detach(props.session.key)
+  forgetTerm(props.session.key)
   term?.dispose()
 })
 
@@ -169,7 +171,7 @@ watch(() => props.session.status, (s) => {
 </script>
 
 <template>
-  <div class="relative size-full">
+  <div class="relative size-full" :data-testid="tid(`terminal-${session.key}`)">
     <div ref="el" class="size-full bg-terminal-bg p-2" />
     <div v-if="finding" role="search" class="absolute right-3 top-2 z-20 flex items-center gap-1 rounded-md border border-border bg-surface p-1 shadow-lg" @keydown.esc.stop.prevent="closeFind">
       <input

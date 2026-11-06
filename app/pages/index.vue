@@ -172,6 +172,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
       <AppTab
         v-for="s in sessions.sessions"
         :key="s.key"
+        :data-testid="tid(`tab-${s.key}`)"
         :label="s.label"
         :active="sessions.activeKey === s.key"
         :unsaved="s.kind === 'workspace' && s.dirty"

@@ -13,3 +13,8 @@ src-tauri/target
 src-tauri/gen/schemas
 Claude outputs/
 .test-servers/
+
+# browser tests
+.output-test
+test-results
+playwright-report

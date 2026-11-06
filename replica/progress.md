@@ -255,7 +255,9 @@ Order: P26 and P27 first, then T1 to T7, then P28 (one hand-check session for ev
      - snippet-hint dismissal survives a remount
      - `NewTab.vue:130` shortcut label from the user's shortcuts
      - check whether CSP `style-src 'unsafe-inline'` can go
-- [ ] **T1 Test foundations** (`test-plan.md` §3 to §5, phase T1).
+- [~] **T1 Test foundations** (`test-plan.md` §3 to §5, phase T1): T1a done, T1b to do.
+  - **T1a done (2026-11-06):** browser tests run on `@playwright/test` (1.64.1, Playwright's own Chromium): `playwright.config.ts` with an `e2e` project, `tests/e2e/*.spec.ts` (the two old files moved; 11 tests green), `tests/support/serve.mjs` (builds with `DALAN_TEST=1` into `.output-test` when missing or older than `app/`, then serves it with the SPA fallback), `harness.ts` now uses the runner's `page` and Playwright's own assertions, `vitest.e2e.config.ts` removed. `pnpm test:e2e` is now `playwright test --project=e2e`; CI uploads `playwright-report`. Test hooks (`app/utils/testHooks.ts`): `tid()` for `data-testid` (`app-tabbar`, `tab-<key>`, `terminal-<key>`) and `window.__dalanTerm[key]` (the xterm instance), both on only when `__DALAN_TEST__` (set by `DALAN_TEST=1`). `pnpm check:hooks` fails if `__dalanTerm` is in the production `.output` (run in CI after `pnpm build`; checked both ways: clean in `.output`, present in `.output-test`). Not yet: the `e2e-light` project (no `@theme` tests yet) and other test IDs (`host-card-*`, `sftp-pane-*`, …), which come with the tests that use them.
+  - **T1b to do:** the typed fake backend in `tests/fake/` (command table keyed by `keyof typeof commands`, `team` and `empty` scenarios, scripted servers, `window.__fake` controls, fake clock), moving `tests/e2e/fakeBackend.ts` into it, and the contract test (`typecheck` fails when a command has no fake; demonstrate once, then revert). Plan it as two sessions.
 - [ ] **T2 Test servers** (§11, phase T2).
 - [ ] **T3 Walkthrough: `pnpm walk`** (§8, phase T3).
 - [ ] **T4 Browser coverage, visual, accessibility, rule and security tests** (§6, §7, §9.1 to §9.3, phase T4). This is a big phase: split it by flow and mark it `[~]` between sessions.
