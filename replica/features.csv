@@ -87,3 +87,5 @@ Search and sort on section lists,shell,should,yes,partial,P22; waits for hand ch
 Side panel theme and font tabs with remembered tab,terminal,should,yes,partial,P24; waits for hand check
 Snippet suggestion from repeated commands,terminal,could,yes,partial,P24; waits for hand check
 Broadcast frame on workspace panes,terminal,should,yes,partial,P24; waits for hand check
+Host editor with drill-in blocks and draft card,hosts,should,yes,partial,P23; waits for hand check
+Shared login hint,hosts,could,yes,partial,P23; waits for hand check

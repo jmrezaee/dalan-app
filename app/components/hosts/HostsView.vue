@@ -183,11 +183,19 @@ const nothingHere = computed(() => hosts.loaded && !empty.value && !hosts.childG
         </div>
       </section>
 
-      <section v-if="hosts.visibleHosts.length" class="flex flex-col gap-2.5">
+      <section v-if="hosts.visibleHosts.length || hosts.draft" class="flex flex-col gap-2.5">
         <h2 v-if="hosts.childGroups.length || hosts.searching" class="text-xs font-medium text-muted">
           {{ hosts.searching ? 'Matching hosts' : (hosts.currentGroup?.label ?? 'Not in a group') }}
         </h2>
         <div role="grid" aria-label="Hosts" :class="hosts.view === 'grid' ? 'grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3' : 'flex flex-col gap-1.5'">
+          <HostCard
+            v-if="hosts.draft"
+            draft
+            :label="hosts.draft.label || hosts.draft.address || 'New host'"
+            :user="''"
+            :address="hosts.draft.address || 'No address yet'"
+            :list="hosts.view === 'list'"
+          />
           <HostCard
             v-for="h in hosts.visibleHosts"
             :key="h.id"

@@ -4,6 +4,8 @@
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
+import { ArrowLeft, ChevronRight } from '@lucide/vue'
+import { terminalThemeLabels } from '~/utils/terminal-themes'
 import type { SerialConfig, AgentConfig, EnvVar, ProxyChoice, HostSummary, InheritedVar } from '~/types/bindings'
 const { fixed: shortcutFixed } = useShortcutLabel()
 
@@ -55,6 +57,36 @@ const form = reactive(blank())
 // Must come after `form`: a watch reads its getter straight away.
 watch(() => form.protocol, async (p) => { if (p === 'serial' && !serialPorts.value.length) serialPorts.value = await api.serialPorts().catch(() => []) })
 const clearPassword = ref(false)
+
+// ---- Pages: the main page shows the basics and one line per advanced block; a block opens on its own page with a back arrow.
+type Page = 'main' | 'jump' | 'env' | 'proxy' | 'agent' | 'startup' | 'theme'
+const page = ref<Page>('main')
+const PAGE_TITLES: Record<Exclude<Page, 'main'>, string> = { jump: 'Jump hosts', env: 'Environment variables', proxy: 'Proxy', agent: 'SSH agent', startup: 'On connect', theme: 'Terminal theme' }
+const labelOfHost = (id: string) => hosts.hosts.find(h => h.id === id)?.label ?? 'a deleted host'
+const summaries = computed<Record<Exclude<Page, 'main'>, string>>(() => {
+  const inh = inherited.value
+  const jump = form.jump_mode === 'custom' ? (form.jump_host_ids.length ? `Through ${form.jump_host_ids.map(labelOfHost).join(', ')}` : 'None chosen yet') : form.jump_mode === 'none' ? 'Direct' : inh.jump?.host_ids.length ? `From ${inh.jump.group}: ${inh.jump.host_ids.map(labelOfHost).join(', ')}` : 'Direct'
+  const named = form.env_vars.filter((v: EnvVar) => v.name.trim()).length
+  const env = named ? `${named} ${named === 1 ? 'variable' : 'variables'}${form.env_mode === 'replace' ? ' (replace)' : ''}` : envInherited.value.length ? 'From groups' : 'None'
+  const px = form.proxy.kind === 'socks5' || form.proxy.kind === 'http' ? `${form.proxy.kind === 'socks5' ? 'SOCKS5' : 'HTTP'} ${form.proxy.host || '…'}${form.proxy.port ? `:${form.proxy.port}` : ''}` : form.proxy.kind === 'none' ? 'No proxy' : proxyInherited.value?.inherited ? `${proxyInherited.value.inherited} (from group)` : 'None'
+  const agent = form.agent === 'inherit' ? 'Same as the group' : form.agent === 'none' || form.agent === 'off' ? 'Off' : 'Forwarded'
+  const snippet = form.startup_snippet_id ? (snippets.snippetLabel(form.startup_snippet_id) ?? 'A snippet') : inh.startup_snippet ? `${snippets.snippetLabel(inh.startup_snippet.value) ?? 'A snippet'} (from group)` : 'None'
+  return { jump, env, proxy: px, agent, startup: snippet, theme: form.terminal_theme ? (terminalThemeLabels[form.terminal_theme] ?? form.terminal_theme) : 'Default' }
+})
+const morePages = computed<Exclude<Page, 'main'>[]>(() => (sshLike.value ? ['jump', 'proxy', 'env', 'agent', 'startup', 'theme'] : ['theme']))
+
+// ---- Other hosts that save the same username and password (ids come from Rust; the passwords never do).
+const sharedWith = ref<string[]>([])
+async function loadShared() {
+  sharedWith.value = []
+  const id = host.value?.id
+  if (!id) return
+  try {
+    const group = (await api.hostsSharedLogins()).find(g => g.includes(id))
+    sharedWith.value = (group ?? []).filter(x => x !== id).map(labelOfHost)
+  }
+  catch { /* the hint is optional */ }
+}
 const error = ref('')
 const busy = ref(false)
 // "Unsaved changes" = the form differs from how it looked when the sheet opened.
@@ -67,7 +99,9 @@ watch(() => hosts.editing, (e) => {
   const h = e && e !== 'new' ? (e as HostSummary) : null
   Object.assign(form, h ? { label: h.label, address: h.address, port: h.port ?? '', username: h.username ?? '', password: '', group_id: h.group_id, tags: [...h.tags], identity_id: h.identity_id, key_id: h.key_id, startup_snippet_id: h.startup_snippet_id, jump_mode: h.jump_mode, jump_host_ids: [...h.jump_host_ids], terminal_theme: hosts.themes.hosts[h.id]?.own ?? null, env_mode: 'inherit', env_vars: [], proxy: { kind: 'inherit', host: '', port: null }, agent: 'inherit', protocol: h.protocol, serial: { baud: 9600, data_bits: 8, stop_bits: 1, parity: 'none', flow: 'none' } } : blank())
   clearPassword.value = false
+  page.value = 'main'
   error.value = ''
+  loadShared()
   snapshot.value = current.value
   envInherited.value = []
   proxyInherited.value = null
@@ -76,6 +110,12 @@ watch(() => hosts.editing, (e) => {
   if (h) loadEnv(h.id)
   if (h?.protocol === 'serial') api.serialGet(h.id).then((c) => { form.serial = c; snapshot.value = current.value }).catch(() => {})
 })
+
+// The list shows what is being typed as a draft card until it is saved.
+watch([() => hosts.editing, () => form.label, () => form.address], () => {
+  hosts.draft = hosts.editing === 'new' ? { label: form.label.trim(), address: form.address.trim() } : null
+})
+onBeforeUnmount(() => { hosts.draft = null })
 
 const inherited = computed(() => hosts.inheritedFor(form.group_id))
 /** The theme the chosen group (or its ancestors) would give this host. */
@@ -96,7 +136,7 @@ async function submit() {
   busy.value = true
   error.value = await hosts.save({
     id: host.value?.id ?? null,
-    label: form.label,
+    label: form.label.trim() || form.address.trim(), // the label can be left out: it defaults to the address
     address: form.address,
     port: form.port === '' ? null : Number(form.port),
     username: form.username,
@@ -124,24 +164,22 @@ async function submit() {
     >
       <SheetDescription class="sr-only">Connection details for this server.</SheetDescription>
       <div class="flex h-14 shrink-0 items-center gap-2 border-b border-border px-5">
-        <SheetTitle class="text-base">{{ host ? 'Edit host' : 'New host' }}</SheetTitle>
+        <IconButton v-if="page !== 'main'" label="Back to the host" size="sm" @click="page = 'main'"><ArrowLeft /></IconButton>
+        <SheetTitle class="text-base">{{ page === 'main' ? (host ? 'Edit host' : 'New host') : PAGE_TITLES[page] }}</SheetTitle>
         <span v-if="dirty" class="text-xs text-warning">· Unsaved changes</span>
       </div>
 
       <form class="flex flex-1 flex-col gap-6 overflow-auto p-5" @submit.prevent="submit">
+        <template v-if="page === 'main'">
         <section class="flex flex-col gap-3">
           <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">General</h3>
           <Segmented v-model="form.protocol" label="Protocol" :options="[{ value: 'ssh', label: 'SSH' }, { value: 'telnet', label: 'Telnet' }, { value: 'serial', label: 'Serial' }, { value: 'mosh', label: 'Mosh' }]" />
           <p v-if="form.protocol === 'mosh'" role="note" class="rounded-md border border-border bg-surface-raised p-2.5 text-xs text-muted">Mosh keeps a session alive across network changes and sleep. It needs mosh installed here and on the server, can't use jump hosts or a proxy, and talks to the server directly over UDP.</p>
           <p v-if="form.protocol === 'telnet'" role="note" class="rounded-md border border-warning/40 bg-warning/10 p-2.5 text-xs">Telnet isn't encrypted. Everything you type, including passwords, can be read on the network, and Dalan won't save a password for it. Use it only for devices that have nothing better.</p>
-          <div class="flex flex-col gap-1.5">
-            <Label for="host-label">Label</Label>
-            <Input id="host-label" v-model="form.label" placeholder="web-1" autofocus autocomplete="off" />
-          </div>
           <div :class="form.protocol === 'serial' ? '' : 'grid grid-cols-[3fr_1fr] gap-2.5'">
             <div class="flex flex-col gap-1.5">
               <Label for="host-address">{{ form.protocol === 'serial' ? 'Device' : 'Address' }}</Label>
-              <Input id="host-address" v-model="form.address" :list="form.protocol === 'serial' ? 'serial-ports' : undefined" :placeholder="form.protocol === 'serial' ? '/dev/tty.usbserial-1410 or COM3' : '10.0.0.5'" autocomplete="off" spellcheck="false" class="font-mono" />
+              <Input id="host-address" v-model="form.address" autofocus :list="form.protocol === 'serial' ? 'serial-ports' : undefined" :placeholder="form.protocol === 'serial' ? '/dev/tty.usbserial-1410 or COM3' : '10.0.0.5'" autocomplete="off" spellcheck="false" class="font-mono" />
               <datalist v-if="form.protocol === 'serial'" id="serial-ports"><option v-for="p in serialPorts" :key="p" :value="p" /></datalist>
             </div>
             <div v-if="form.protocol !== 'serial'" class="flex flex-col gap-1.5">
@@ -151,6 +189,10 @@ async function submit() {
               </div>
               <p v-if="form.port === '' && inherited.port" class="text-2xs text-muted">from {{ inherited.port.group }}</p>
             </div>
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <Label for="host-label">Label</Label>
+            <Input id="host-label" v-model="form.label" placeholder="Same as the address"  autocomplete="off" />
           </div>
           <SerialEditor v-if="form.protocol === 'serial'" v-model="form.serial" />
           <div class="flex flex-col gap-1.5">
@@ -196,11 +238,27 @@ async function submit() {
             <p v-else-if="clearPassword" class="text-xs text-muted">The saved password is removed when you save.</p>
             <p v-if="!hasOwnPassword && !form.password && inherited.password" class="text-xs text-muted">Uses the password from {{ inherited.password }}. Type one here to override it.</p>
           </div>
+          <p v-if="sharedWith.length" class="rounded-md border border-border bg-surface-raised p-2.5 text-xs text-muted">Same login as {{ sharedWith.join(', ') }}. An identity in the Keychain keeps it in one place.</p>
         </section>
 
-        <section v-if="sshLike" class="flex flex-col gap-3">
-          <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">Connection</h3>
-          <div class="flex flex-col gap-1.5">
+          <section class="flex flex-col gap-1">
+            <h3 class="mb-1 text-2xs font-medium uppercase tracking-wider text-muted">More</h3>
+            <button
+              v-for="p in morePages"
+              :key="p"
+              type="button"
+              class="flex h-11 items-center gap-3 rounded-md border border-border bg-surface px-3 text-left text-sm hover:bg-surface-hover"
+              @click="page = p"
+            >
+              <span class="w-36 shrink-0">{{ PAGE_TITLES[p] }}</span>
+              <span class="min-w-0 flex-1 truncate text-xs text-muted">{{ summaries[p] }}</span>
+              <ChevronRight class="size-4 shrink-0 text-muted" aria-hidden="true" />
+            </button>
+          </section>
+        </template>
+
+        <div v-else-if="page === 'jump'" class="flex flex-col gap-1.5">
+
             <Label>Jump hosts</Label>
             <ChainPicker
               v-model:mode="form.jump_mode"
@@ -210,40 +268,30 @@ async function submit() {
               :inherited-from="inherited.jump?.group"
               :target="form.label"
             />
-          </div>
-        </section>
 
-        <section class="flex flex-col gap-3">
-          <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">Terminal</h3>
-          <div class="flex flex-col gap-1.5">
+        </div>
+        <div v-else-if="page === 'theme'" class="flex flex-col gap-1.5">
+
             <Label for="host-theme">Theme</Label>
             <ThemeSelect id="host-theme" v-model="form.terminal_theme" :inherited-theme="groupTheme?.inherited" :inherited-from="groupTheme?.inherited_from" />
-          </div>
-        </section>
 
-        <section v-if="sshLike" class="flex flex-col gap-3">
-          <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">Environment variables</h3>
-          <EnvVarsEditor v-model:mode="form.env_mode" v-model:vars="form.env_vars" :inherited="envInherited" />
-        </section>
+        </div>
+        <div v-else-if="page === 'startup'" class="flex flex-col gap-1.5">
 
-        <section v-if="sshLike" class="flex flex-col gap-3">
-          <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">Proxy</h3>
-          <ProxyEditor v-model="form.proxy" :inherited="proxyInherited?.inherited ?? null" :inherited-from="proxyInherited?.inherited_from ?? null" />
-        </section>
-
-        <section v-if="sshLike" class="flex flex-col gap-3">
-          <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">SSH agent</h3>
-          <AgentEditor v-model="form.agent" :info="agentInfo" />
-        </section>
-
-        <section v-if="sshLike" class="flex flex-col gap-3">
-          <h3 class="text-2xs font-medium uppercase tracking-wider text-muted">On connect</h3>
-          <div class="flex flex-col gap-1.5">
             <Label for="host-startup">Startup snippet</Label>
             <OptionSelect id="host-startup" v-model="form.startup_snippet_id" :options="snippetOptions" none-label="None" />
             <p v-if="!form.startup_snippet_id && inherited.startup_snippet" class="text-xs text-muted">Runs {{ snippets.snippetLabel(inherited.startup_snippet.value) ?? 'a snippet' }} from {{ inherited.startup_snippet.group }}.</p>
-          </div>
-        </section>
+
+        </div>
+        <div v-else-if="page === 'env'">
+          <EnvVarsEditor v-model:mode="form.env_mode" v-model:vars="form.env_vars" :inherited="envInherited" />
+        </div>
+        <div v-else-if="page === 'proxy'">
+          <ProxyEditor v-model="form.proxy" :inherited="proxyInherited?.inherited ?? null" :inherited-from="proxyInherited?.inherited_from ?? null" />
+        </div>
+        <div v-else-if="page === 'agent'">
+          <AgentEditor v-model="form.agent" :info="agentInfo" />
+        </div>
 
         <p v-if="error" role="alert" class="text-sm text-danger">{{ error }}</p>
         <button type="submit" class="hidden" tabindex="-1" aria-hidden="true" />

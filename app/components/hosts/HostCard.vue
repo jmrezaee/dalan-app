@@ -25,6 +25,8 @@ defineProps<{
   checked?: boolean
   /** Row layout (h 44) for the list view. */
   list?: boolean
+  /** Being typed into the editor: dashed, no menu. */
+  draft?: boolean
   /** The actions, shown on right-click and in the "…" menu. */
   menu?: MenuItem[]
 }>()
@@ -33,7 +35,7 @@ defineEmits<{ open: []; select: []; dragstart: [event: DragEvent]; dragend: [] }
 
 <template>
   <ContextMenu>
-    <ContextMenuTrigger as-child>
+    <ContextMenuTrigger as-child :disabled="draft">
   <div
     role="row"
     draggable="true"
@@ -43,6 +45,7 @@ defineEmits<{ open: []; select: []; dragstart: [event: DragEvent]; dragend: [] }
       'group flex gap-3 rounded-lg border border-border bg-surface p-3 transition-colors duration-100 hover:border-muted/40 hover:bg-surface-raised',
       list && 'h-11 items-center py-0',
       selected && 'ring-2 ring-accent',
+      draft && 'border-dashed border-accent/60',
       dragging && 'opacity-50',
     )"
     @dragstart="$emit('dragstart', $event)"
@@ -60,7 +63,8 @@ defineEmits<{ open: []; select: []; dragstart: [event: DragEvent]; dragend: [] }
       <div class="flex items-center gap-2">
         <input v-if="multiSelect" type="checkbox" :checked="checked" :aria-label="`Select ${label}`" class="accent-[var(--accent)]">
         <span class="truncate text-base">{{ label }}</span>
-        <Badge v-if="protocol === 'telnet'" variant="warning" title="Telnet is not encrypted">Telnet</Badge>
+        <Badge v-if="draft">Draft</Badge>
+        <Badge v-else-if="protocol === 'telnet'" variant="warning" title="Telnet is not encrypted">Telnet</Badge>
         <Badge v-else-if="protocol === 'serial'" title="Serial line">Serial</Badge>
         <Badge v-else-if="protocol === 'mosh'" title="Mosh: survives network changes">Mosh</Badge>
       </div>
@@ -68,7 +72,7 @@ defineEmits<{ open: []; select: []; dragstart: [event: DragEvent]; dragend: [] }
       <div v-if="tags?.length && !list" class="mt-1.5 flex flex-wrap gap-1"><TagChip v-for="t in tags" :key="t" :label="t" /></div>
     </div>
     <span v-if="list" class="hidden truncate text-xs text-muted sm:block"><template v-if="user">{{ user }}@</template><span class="font-mono">{{ address }}</span><template v-if="port && port !== 22">:{{ port }}</template></span>
-    <DropdownMenu>
+    <DropdownMenu v-if="!draft">
       <DropdownMenuTrigger as-child>
         <IconButton label="Host actions" size="xs" class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100" @click.stop><Ellipsis /></IconButton>
       </DropdownMenuTrigger>

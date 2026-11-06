@@ -25,6 +25,8 @@ export const commands = {
 	hostDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("host_delete", { id })),
 	/**  Copies a host (profile, chain, tags, environment, saved secrets) as "<label> copy". */
 	hostDuplicate: (id: string) => typedError<HostSummary_Serialize, AppError>(__TAURI_INVOKE("host_duplicate", { id })),
+	/**  Groups of hosts that save the same username and password (ids only, never the passwords). */
+	hostsSharedLogins: () => typedError<string[][], AppError>(__TAURI_INVOKE("hosts_shared_logins")),
 	/**  Switches a host between `ssh` and `telnet`. */
 	hostSetProtocol: (id: string, protocol: string) => typedError<null, AppError>(__TAURI_INVOKE("host_set_protocol", { id, protocol })),
 	serialGet: (hostId: string) => typedError<SerialConfig, AppError>(__TAURI_INVOKE("serial_get", { hostId })),

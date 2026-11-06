@@ -109,6 +109,24 @@ describe('unlock and the connection overlay (F01, F11, F12)', () => {
     await page.close()
   })
 
+  it('S03: the host editor asks for the address first, shows a draft card, and opens advanced blocks on their own page', async () => {
+    const page = await openApp(browser, url, { unlocked: true })
+    await page.getByRole('button', { name: 'New host', exact: true }).click()
+    const address = page.getByLabel('Address')
+    const label = page.getByLabel('Label')
+    expect((await address.boundingBox())!.y).toBeLessThan((await label.boundingBox())!.y)
+    await address.fill('10.1.2.3')
+    await seen(page.getByText('Draft', { exact: true })) // behind the sheet, so not reachable by role
+    await seen(page.getByPlaceholder('Same as the address'))
+    // More: one line per block with a summary; a block opens on its own page with a back arrow.
+    await page.getByRole('button', { name: /^Jump hosts/ }).click()
+    await seen(page.getByRole('button', { name: 'Back to the host' }))
+    await seen(page.getByRole('list', { name: /you/i }))
+    await page.getByRole('button', { name: 'Back to the host' }).click()
+    await seen(page.getByRole('button', { name: /^Proxy/ }))
+    await page.close()
+  })
+
   it('F12: a changed key blocks; Close is the default and replacing needs the typed name', async () => {
     const page = await openApp(browser, url, { unlocked: true })
     await page.getByText('web-1').dblclick()

@@ -48,6 +48,15 @@ const route = computed(() => ['you', ...shown.value.map(labelOf), props.target |
       </div>
       <div class="p-1.5"><OptionSelect v-model="adding" :options="available" none-label="Add jump host…" /></div>
     </div>
-    <p class="font-mono text-xs text-muted">{{ route }}</p>
+    <ol class="flex flex-col gap-0 text-sm" :aria-label="route">
+      <li v-for="(name, i) in ['You', ...shown.map(labelOf), target || 'This host']" :key="i" class="flex items-center gap-2.5">
+        <span class="flex w-3 flex-col items-center self-stretch" aria-hidden="true">
+          <span :class="['w-px flex-1', i === 0 ? 'bg-transparent' : 'bg-border-input']" />
+          <span :class="['size-2.5 rounded-full border', i === 0 || i === shown.length + 1 ? 'border-accent bg-accent' : 'border-border-input bg-surface']" />
+          <span :class="['w-px flex-1', i === shown.length + 1 ? 'bg-transparent' : 'bg-border-input']" />
+        </span>
+        <span class="truncate py-1.5" :class="i === 0 || i === shown.length + 1 ? 'font-medium' : 'text-muted'">{{ name }}</span>
+      </li>
+    </ol>
   </div>
 </template>

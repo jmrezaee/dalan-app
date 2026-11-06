@@ -28,6 +28,8 @@ export const useHostsStore = defineStore('hosts', () => {
   const selectedTags = ref<string[]>([])
   /** `null` = sheet closed, `'new'` = creating, an item = editing it. */
   const editing = ref<HostSummary | 'new' | null>(null)
+  /** The host being typed into the editor, shown as a draft card in the list until it is saved. */
+  const draft = ref<{ label: string, address: string } | null>(null)
   const editingGroup = ref<GroupSummary | 'new' | null>(null)
 
   watch(view, v => localStorage.setItem(VIEW_KEY, v))
@@ -242,7 +244,7 @@ export const useHostsStore = defineStore('hosts', () => {
   }
 
   return {
-    hosts, groups, loaded, tagInfos, recent, importOpen, themes, themeFor, query, view, currentGroupId, selectedTags, editing, editingGroup,
+    hosts, groups, loaded, tagInfos, recent, importOpen, themes, themeFor, query, view, draft, currentGroupId, selectedTags, editing, editingGroup,
     allTags, searching, currentGroup, breadcrumb, childGroups, visibleHosts,
     groupLabel, groupOptions, inheritedFor, toggleTag, deleteTag, refresh, save, saveGroup, remove, removeGroup, duplicate, setHostTheme, move, clear,
   }

@@ -32,6 +32,15 @@ pub async fn host_save(state: State<'_, AppState>, input: HostInput) -> AppResul
         .await
 }
 
+/// Groups of hosts that save the same username and password (ids only, never the passwords).
+#[tauri::command]
+#[specta::specta]
+pub async fn hosts_shared_logins(state: State<'_, AppState>) -> AppResult<Vec<Vec<String>>> {
+    state
+        .with_db_session(move |c, s| hosts::shared_logins(c, s))
+        .await
+}
+
 /// Copies a host (profile, chain, tags, environment, saved secrets) as "<label> copy".
 #[tauri::command]
 #[specta::specta]
