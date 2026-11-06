@@ -14,8 +14,7 @@ export function chapter(n: number, opts: { scenario: FakeOptions['scenario'], un
     test.skip(!selected(n), 'not selected')
     startChapter(n, info.title)
     const theme = process.env.WALK_THEME === 'light' ? 'light' : 'dark'
-    const fake = await installFakeBackend(page, { scenario: opts.scenario, unlocked: opts.unlocked ?? false, clock: true })
-    if (theme === 'light') await page.addInitScript(`localStorage.setItem('nuxt-color-mode','light')`)
+    const fake = await installFakeBackend(page, { scenario: opts.scenario, unlocked: opts.unlocked ?? false, clock: true, theme })
     await page.goto('/')
     await body(page, fake)
   })

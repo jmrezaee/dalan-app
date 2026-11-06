@@ -57,6 +57,7 @@ function submit() {
   <div class="absolute inset-0 z-20 grid place-items-center bg-bg/80 backdrop-blur-[2px]">
     <div
       ref="card"
+      :data-testid="tid('status-overlay')"
       :role="needsAnswer ? 'alertdialog' : 'status'"
       class="flex w-[420px] flex-col gap-3 rounded-lg border border-border bg-surface-raised p-5 shadow-pop"
       @keydown.esc.stop.prevent="onEscape"

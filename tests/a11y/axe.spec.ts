@@ -13,8 +13,7 @@ const runs = SCREENS.flatMap(s => [{ s, theme: 'dark' as const }, ...(LIGHT.has(
 
 for (const { s, theme } of runs) {
   test(`axe: ${s.id}${theme === 'light' ? ' (light)' : ''}`, async ({ page }) => {
-    const fake = await installFakeBackend(page, { scenario: s.scenario, unlocked: s.unlocked ?? true })
-    if (theme === 'light') await page.addInitScript(`localStorage.setItem('nuxt-color-mode', 'light')`)
+    const fake = await installFakeBackend(page, { scenario: s.scenario, unlocked: s.unlocked ?? true, theme })
     await page.goto('/')
     if (s.unlocked === false) await expect(page.getByLabel('Master password')).toBeVisible()
     else await expect(page.getByLabel('Vault', { exact: true })).toBeVisible()

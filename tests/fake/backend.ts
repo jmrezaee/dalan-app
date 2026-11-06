@@ -7,13 +7,15 @@ import { scenarios, type ScenarioName } from './scenarios'
 import { scripts } from './scripts'
 import type { Args, Ctx } from './types'
 
-export interface Options { scenario: ScenarioName, unlocked?: boolean, seed?: Seed }
+export interface Options { scenario: ScenarioName, unlocked?: boolean, seed?: Seed, theme?: 'light' | 'dark' }
 
 const camel = (s: string) => s.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
 
 export function install(opts: Options) {
   const w = window as unknown as Record<string, any>
   const seed = opts.seed ?? scenarios[opts.scenario]()
+  // The theme is a saved setting (Appearance), not a browser flag: the app reads it after unlock.
+  if (opts.theme) seed.settings = { ...seed.settings, appearance: JSON.stringify({ theme: opts.theme }) }
   const m = createModel({ ...seed, vault: { exists: true, autoLockMinutes: 15, ...seed.vault, unlocked: opts.unlocked ?? seed.vault?.unlocked ?? false } })
 
   let counter = 1

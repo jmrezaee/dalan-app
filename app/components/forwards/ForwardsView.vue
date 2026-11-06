@@ -57,6 +57,7 @@ const promptRule = computed(() => forwards.rules.find(r => r.id === forwards.pro
       <RuleCard
         v-for="r in shownRules"
         :key="r.id"
+        :data-testid="tid(`rule-card-${r.id}`)"
         :kind="letter(r)"
         :label="r.label"
         :route="route(r)"

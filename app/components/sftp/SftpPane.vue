@@ -91,7 +91,7 @@ const fileMenu = computed<MenuItem[]>(() => {
 </script>
 
 <template>
-  <section :aria-label="pane.label || 'Empty pane'" class="flex min-h-0 min-w-0 flex-col bg-bg" @keydown="onKey">
+  <section :aria-label="pane.label || 'Empty pane'" :data-testid="tid(index === 0 ? 'sftp-pane-left' : 'sftp-pane-right')" class="flex min-h-0 min-w-0 flex-col bg-bg" @keydown="onKey">
     <div class="flex h-10 shrink-0 items-center gap-2 border-b border-border px-2.5">
       <DropdownMenu>
         <DropdownMenuTrigger as-child>

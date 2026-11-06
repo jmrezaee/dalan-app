@@ -86,6 +86,7 @@ const arrow = (by: Pane['sort']['by']) => (props.sort.by === by ? (props.sort.de
         <tr
           v-for="e in shown"
           :key="e.name"
+          :data-testid="tid(`file-row-${e.name}`)"
           role="row"
           tabindex="0"
           draggable="true"

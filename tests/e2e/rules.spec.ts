@@ -17,7 +17,7 @@ test.describe('rule 1: secrets never reach JavaScript', () => {
       await invoke('ai_save', { input: { model: 'm', base_url: 'https://api.example.com/v1', api_key: 'sk-ant-test-key', clear_key: false } })
       await invoke('hosts_tree'); await invoke('keys_list'); await invoke('identities_list'); await invoke('ai_get')
     })
-    const tree = JSON.parse((await fake.answers()).find(a => a.startsWith('hosts_tree '))!.slice('hosts_tree '.length))
+    const tree = JSON.parse((await fake.answers()).filter(a => a.startsWith('hosts_tree ')).pop()!.slice('hosts_tree '.length))
     expect(tree.hosts.find((h: any) => h.label === 'secret-host')).toMatchObject({ has_password: true })
     const all = (await fake.answers()).join('\n')
     for (const secret of TEST_SECRETS) expect(all, secret).not.toContain(secret)

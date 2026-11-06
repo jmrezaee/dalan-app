@@ -71,7 +71,7 @@ export const team = (): Seed => ({
     { id: 'c4', command: 'df -h', ran_at: NOW - 5 * H, host_id: 'h-web1' },
   ],
 
-  settings: { logs: JSON.stringify({ enabled: true }), history: JSON.stringify({ enabled: true }) },
+  settings: { terminal: JSON.stringify({ cursor_blink: false }), logs: JSON.stringify({ enabled: true }), history: JSON.stringify({ enabled: true }) },
   files: {
     local: [dir('home', [dir('me', [file('notes.txt', 412), file('.profile', 807), file('report.pdf', 2_400_000), dir('projects')])])],
     'h-web1': [

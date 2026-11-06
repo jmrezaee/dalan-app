@@ -71,3 +71,16 @@ test('tunnel(): a state change reaches the Port forwarding list', async ({ page 
   await fake.tunnel('f-web').state('error', 'Port 8081 is already in use.')
   await expect(page.getByText('Port 8081 is already in use.')).toBeVisible()
 })
+
+test('the test build names the elements a role or label cannot (test IDs)', async ({ page }) => {
+  const fake = await open(page)
+  await expect(page.getByTestId('host-card-h-roam')).toBeVisible()
+  await expect(page.getByTestId('group-card-g-prod')).toBeVisible()
+  await expect(page.getByTestId('app-tabbar')).toBeVisible()
+  await page.getByTestId('host-card-h-roam').dblclick()
+  const [id] = await fake.sessionIds()
+  await expect(page.getByTestId('status-overlay')).toBeVisible()
+  const key = await page.evaluate(() => Object.keys((window as any).__dalanTerm ?? {})[0] ?? '')
+  await expect(page.getByTestId(`terminal-${key}`)).toBeVisible()
+  await fake.session(id!).state('ready')
+})

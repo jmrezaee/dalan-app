@@ -23,6 +23,8 @@ defineProps<{
   dragging?: boolean
   multiSelect?: boolean
   checked?: boolean
+  /** `data-testid` for browser tests (empty in production). */
+  testId?: string
   /** Row layout (h 44) for the list view. */
   list?: boolean
   /** Being typed into the editor: dashed, no menu. */
@@ -38,6 +40,7 @@ defineEmits<{ open: []; select: []; dragstart: [event: DragEvent]; dragend: [] }
     <ContextMenuTrigger as-child :disabled="draft">
   <div
     role="row"
+    :data-testid="testId"
     draggable="true"
     tabindex="0"
     :aria-selected="selected"

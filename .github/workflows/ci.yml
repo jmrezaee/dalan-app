@@ -73,6 +73,25 @@ jobs:
             walk-report
           retention-days: 7
 
+  # Screenshots of every screen state, dark and light, against the baselines in tests/visual/__screenshots__.
+  # They run in the same pinned Playwright image the baselines were made in, so the pixels match.
+  visual:
+    runs-on: ubuntu-latest
+    container: mcr.microsoft.com/playwright:v1.64.1-noble
+    steps:
+      - uses: actions/checkout@v4
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/sync-tokens.mjs && pnpm exec nuxt prepare
+      - run: pnpm exec playwright test --project=visual
+      - name: Upload the differences
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-diff
+          path: test-results
+          retention-days: 7
+
   # The tests that talk to real servers (L3): shell, jump host, key install, SFTP, tunnels, two-step sign-in, old key
   # exchange, a rotated host key, proxies, Telnet and a slow link. The containers come from tests/servers/compose.yml
   # through `scripts/test-servers.sh up` (a service container can't set the user and password).

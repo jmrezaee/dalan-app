@@ -51,7 +51,7 @@ const hasFinished = computed(() => sftp.transfers.some(t => t.finished))
             <Button size="sm" @click="resolve(t, 'replace')">Replace</Button>
           </div>
           <div v-else>
-            <ProgressRow :name="i.name" :direction="direction(i)" :percent="percent(i)" :speed="speed(i)" :status="status(i)" @cancel="sftp.cancel(t)" />
+            <ProgressRow :data-testid="tid(`transfer-row-${t.id}-${i.name}`)" :name="i.name" :direction="direction(i)" :percent="percent(i)" :speed="speed(i)" :status="status(i)" @cancel="sftp.cancel(t)" />
             <p v-if="i.status === 'failed'" role="alert" class="pl-7 text-xs text-danger">{{ i.message }}</p>
           </div>
         </template>

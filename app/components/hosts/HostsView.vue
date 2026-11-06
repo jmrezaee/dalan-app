@@ -169,6 +169,7 @@ const nothingHere = computed(() => hosts.loaded && !empty.value && !hosts.childG
           <GroupCard
             v-for="g in hosts.childGroups"
             :key="g.id"
+            :data-testid="tid(`group-card-${g.id}`)"
             :label="g.label"
             :hosts="g.host_count"
             :groups="g.group_count"
@@ -199,6 +200,7 @@ const nothingHere = computed(() => hosts.loaded && !empty.value && !hosts.childG
           <HostCard
             v-for="h in hosts.visibleHosts"
             :key="h.id"
+            :test-id="tid(`host-card-${h.id}`)"
             :label="h.label"
             :user="h.effective_username ?? ''"
             :address="h.address"
