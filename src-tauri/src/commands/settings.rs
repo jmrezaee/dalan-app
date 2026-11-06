@@ -20,7 +20,7 @@ pub async fn settings_get_all(state: State<'_, AppState>) -> AppResult<HashMap<S
 pub async fn settings_set(state: State<'_, AppState>, key: String, value: String) -> AppResult<()> {
     state.require_unlocked()?;
     // The AI settings hold where the API key is sent, so only `ai_save` (which checks them) may write them.
-    if key == "ai" {
+    if key == "ai" || key == "sftp" {
         return Err(crate::error::AppError::validation(
             "Use the AI settings page for that.",
         ));

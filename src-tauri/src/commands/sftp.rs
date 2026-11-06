@@ -2,10 +2,13 @@
 
 use std::sync::{Arc, Mutex};
 
-use serde::Serialize;
+use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::error::{AppError, AppResult};
@@ -224,8 +227,48 @@ pub struct EditOpened {
     pub edit_id: String,
 }
 
-/// Downloads a server file, opens it in the system's default app and watches it. A `changed`
-/// event means the local copy was saved; the UI then offers `edit_upload`.
+/// Which app opens the downloaded copy.
+#[derive(Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum EditApp {
+    /// The system's default app for the file type.
+    Default,
+    /// The app chosen last time for this file type (the default app if none or it was removed).
+    Saved,
+    /// Ask with the OS file dialog, then remember the choice for this file type.
+    Choose,
+}
+
+/// The file type used to remember an app: the lowercase extension, or "" for none.
+fn ext_of(path: &str) -> String {
+    std::path::Path::new(path)
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default()
+}
+
+/// "Visual Studio Code.app" -> "Visual Studio Code".
+fn app_name(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string())
+}
+
+/// The apps remembered per file type: extension -> display name, for the menu labels.
+#[tauri::command]
+#[specta::specta]
+pub async fn edit_apps(state: State<'_, AppState>) -> AppResult<HashMap<String, String>> {
+    state.require_unlocked()?;
+    let all = state
+        .with_db(|c| Ok(crate::settings::open_with_all(c)))
+        .await?;
+    Ok(all.into_iter().map(|(k, v)| (k, app_name(&v))).collect())
+}
+
+/// Downloads a server file, opens it in an app and watches it. A `changed` event means the local
+/// copy was saved; the UI then offers `edit_upload`. Returns `None` when the app dialog is cancelled.
+/// The app path never comes from the webview: it is the OS dialog's answer or one Rust stored.
 #[tauri::command]
 #[specta::specta]
 pub async fn edit_open(
@@ -233,10 +276,46 @@ pub async fn edit_open(
     state: State<'_, AppState>,
     endpoint: String,
     path: String,
+    open_with: EditApp,
     events: Channel<EditEvent>,
-) -> AppResult<EditOpened> {
+) -> AppResult<Option<EditOpened>> {
     state.require_unlocked()?;
     let fs = state.sftp.fs(&endpoint)?;
+    let ext = ext_of(&path);
+    let program: Option<String> = match open_with {
+        EditApp::Default => None,
+        EditApp::Saved => {
+            let saved = state
+                .with_db(|c| Ok(crate::settings::open_with_all(c)))
+                .await?;
+            saved
+                .get(&ext)
+                .filter(|p| std::path::Path::new(p).exists())
+                .cloned()
+        }
+        EditApp::Choose => {
+            // The dialog blocks until closed, so it runs off the async threads.
+            let dialog_app = app.clone();
+            let picked = tokio::task::spawn_blocking(move || {
+                let mut d = dialog_app.dialog().file().set_title("Open with");
+                if cfg!(target_os = "macos") {
+                    d = d.set_directory("/Applications");
+                }
+                d.blocking_pick_file()
+            })
+            .await
+            .map_err(|e| AppError::internal(e.to_string()))?;
+            let Some(picked) = picked else {
+                return Ok(None);
+            };
+            let p = picked
+                .into_path()
+                .map_err(|e| AppError::internal(e.to_string()))?
+                .to_string_lossy()
+                .into_owned();
+            Some(p)
+        }
+    };
     let root = app
         .path()
         .app_data_dir()
@@ -248,12 +327,18 @@ pub async fn edit_open(
     let (edit_id, local) = state.sftp.edits.open(fs, &path, &root, emit).await?;
     if let Err(e) = app
         .opener()
-        .open_path(local.to_string_lossy(), None::<&str>)
+        .open_path(local.to_string_lossy(), program.as_deref())
     {
         state.sftp.edits.close(&edit_id);
         return Err(AppError::internal(format!("Couldn't open the file: {e}")));
     }
-    Ok(EditOpened { edit_id })
+    if let (EditApp::Choose, Some(p)) = (open_with, program) {
+        // Remember it only once it really opened the file.
+        state
+            .with_db(move |c| crate::settings::open_with_set(c, &ext, &p))
+            .await?;
+    }
+    Ok(Some(EditOpened { edit_id }))
 }
 
 /// Uploads the edited copy. `RemoteChanged` means the server file changed meanwhile: ask, then

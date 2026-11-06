@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { toast } from 'vue-sonner'
-import type { Choice, FsEntry, HostSummary, PromptKind, SessionEvent, TransferEvent } from '~/types/bindings'
+import type { Choice, EditApp, FsEntry, HostSummary, PromptKind, SessionEvent, TransferEvent } from '~/types/bindings'
 import { CommandError, useTauri } from '~/composables/useTauri'
 
 export interface Pane {
@@ -150,19 +150,35 @@ export const useSftpStore = defineStore('sftp', () => {
     }
   }
 
-  async function edit(i: number, name: string) {
+  /** Apps remembered per file type (extension -> name), for the "Edit in …" menu label. */
+  const openWith = ref<Record<string, string>>({})
+  async function loadOpenWith() {
+    try {
+      openWith.value = await api.editApps()
+    }
+    catch {
+      // Plain browser or locked: no remembered apps.
+    }
+  }
+  loadOpenWith()
+
+  /** `with`: the default app, the one remembered for this file type, or ask (then remember). */
+  async function edit(i: number, name: string, withApp: EditApp = 'default') {
     const p = panes[i]!
     try {
       let id = ''
-      id = (await api.editOpen(p.endpoint, joinPath(p, name), (e) => {
+      const opened = await api.editOpen(p.endpoint, joinPath(p, name), withApp, (e) => {
         if (e.type !== 'changed') return
         toast(`${name} was saved.`, {
           id: `edit-${id}`, duration: Infinity,
           action: { label: 'Upload', onClick: () => upload(id, false) },
           cancel: { label: 'Stop editing', onClick: () => endEdit(id) },
         })
-      })).edit_id
+      })
+      if (!opened) return // the app dialog was cancelled
+      id = opened.edit_id
       edits.set(id, { endpoint: p.endpoint, name })
+      if (withApp === 'choose') loadOpenWith()
     }
     catch (e) {
       toast.error(message(e))
@@ -314,5 +330,5 @@ export const useSftpStore = defineStore('sftp', () => {
     prompt.value = null
   }
 
-  return { panes, transfers, prompt, dragging, clipboard, sorted, load, showLocal, connect, edit, answer, refresh, go, up, open, toggleHidden, mkdir, rename, chmod, remove, copy, resolveConflict, cancel, clearFinished, dropOn, clear }
+  return { openWith, panes, transfers, prompt, dragging, clipboard, sorted, load, showLocal, connect, edit, answer, refresh, go, up, open, toggleHidden, mkdir, rename, chmod, remove, copy, resolveConflict, cancel, clearFinished, dropOn, clear }
 })

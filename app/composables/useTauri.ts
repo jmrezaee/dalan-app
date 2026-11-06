@@ -2,7 +2,7 @@
 import { Channel } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { commands } from '~/types/bindings'
-import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
+import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -96,11 +96,12 @@ export function useTauri() {
     },
     transferResolve: (id: string, choice: Choice, applyToAll: boolean) => unwrap(commands.transferResolve(id, choice, applyToAll)),
     transferCancel: (id: string) => unwrap(commands.transferCancel(id)),
-    editOpen: (endpoint: string, path: string, onEvent: (e: EditEvent) => void) => {
+    editOpen: (endpoint: string, path: string, withApp: EditApp, onEvent: (e: EditEvent) => void) => {
       const events = new Channel<EditEvent>()
       events.onmessage = onEvent
-      return unwrap(commands.editOpen(endpoint, path, events as never))
+      return unwrap(commands.editOpen(endpoint, path, withApp, events as never))
     },
+    editApps: () => unwrap(commands.editApps()),
     editUpload: (editId: string, force: boolean) => unwrap(commands.editUpload(editId, force)),
     editClose: (editId: string) => commands.editClose(editId),
     updateCheck: () => unwrap(commands.updateCheck()),

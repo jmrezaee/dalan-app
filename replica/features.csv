@@ -91,3 +91,4 @@ Host editor with drill-in blocks and draft card,hosts,should,yes,partial,P23; wa
 Shared login hint,hosts,could,yes,partial,P23; waits for hand check
 Terminal bell sound setting,terminal,could,yes,partial,P25; waits for hand check
 Import review filter and group selection,hosts,should,yes,partial,P25; waits for hand check
+SFTP open with a chosen app, remembered per file type,sftp,could,yes,partial,P25 follow-up; waits for hand check

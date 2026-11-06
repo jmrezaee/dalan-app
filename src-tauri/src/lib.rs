@@ -116,6 +116,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sftp::transfer_start,
             commands::sftp::transfer_resolve,
             commands::sftp::transfer_cancel,
+            commands::sftp::edit_apps,
             commands::tunnels::forwards_list,
             commands::tunnels::forward_save,
             commands::tunnels::forward_delete,

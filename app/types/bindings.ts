@@ -67,10 +67,11 @@ export const commands = {
 	workspaceSave: (input: TemplateInput_Deserialize) => typedError<string, AppError>(__TAURI_INVOKE("workspace_save", { input })),
 	workspaceDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("workspace_delete", { id })),
 	/**
-	 *  Downloads a server file, opens it in the system's default app and watches it. A `changed`
-	 *  event means the local copy was saved; the UI then offers `edit_upload`.
+	 *  Downloads a server file, opens it in an app and watches it. A `changed` event means the local
+	 *  copy was saved; the UI then offers `edit_upload`. Returns `None` when the app dialog is cancelled.
+	 *  The app path never comes from the webview: it is the OS dialog's answer or one Rust stored.
 	 */
-	editOpen: (endpoint: string, path: string, events: Channel<EditEvent>) => typedError<EditOpened, AppError>(__TAURI_INVOKE("edit_open", { endpoint, path, events })),
+	editOpen: (endpoint: string, path: string, openWith: EditApp, events: Channel<EditEvent>) => typedError<EditOpened | null, AppError>(__TAURI_INVOKE("edit_open", { endpoint, path, openWith, events })),
 	/**
 	 *  Uploads the edited copy. `RemoteChanged` means the server file changed meanwhile: ask, then
 	 *  call again with `force`.
@@ -137,6 +138,8 @@ export const commands = {
 	transferStart: (items: TransferItem[], events: Channel<TransferEvent_Deserialize>) => typedError<TransferStarted, AppError>(__TAURI_INVOKE("transfer_start", { items, events })),
 	transferResolve: (transferId: string, choice: Choice, applyToAll: boolean) => typedError<null, AppError>(__TAURI_INVOKE("transfer_resolve", { transferId, choice, applyToAll })),
 	transferCancel: (transferId: string) => typedError<null, AppError>(__TAURI_INVOKE("transfer_cancel", { transferId })),
+	/**  The apps remembered per file type: extension -> display name, for the menu labels. */
+	editApps: () => typedError<{ [key in string]: string }, AppError>(__TAURI_INVOKE("edit_apps")),
 	forwardsList: () => typedError<ForwardSummary_Serialize[], AppError>(__TAURI_INVOKE("forwards_list")),
 	forwardSave: (input: ForwardInput_Deserialize) => typedError<ForwardSummary_Serialize, AppError>(__TAURI_INVOKE("forward_save", { input })),
 	forwardDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("forward_delete", { id })),
@@ -250,6 +253,15 @@ export type AutoLockWarning = {
 };
 
 export type Choice = "replace" | "keep_both" | "skip";
+
+/**  Which app opens the downloaded copy. */
+export type EditApp = 
+/**  The system's default app for the file type. */
+"default" | 
+/**  The app chosen last time for this file type (the default app if none or it was removed). */
+"saved" | 
+/**  Ask with the OS file dialog, then remember the choice for this file type. */
+"choose";
 
 export type EditEvent = 
 /**  The local copy was saved. The UI asks whether to upload it. */

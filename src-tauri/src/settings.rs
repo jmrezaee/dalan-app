@@ -8,7 +8,7 @@ use rusqlite::{params, Connection};
 use crate::db::now_ms;
 use crate::error::{AppError, AppResult};
 
-const KEYS: [&str; 8] = [
+const KEYS: [&str; 9] = [
     "appearance",
     "terminal",
     "security",
@@ -17,6 +17,7 @@ const KEYS: [&str; 8] = [
     "history",
     "hosts",
     "ai",
+    "sftp",
 ];
 const MAX_VALUE_BYTES: usize = 16 * 1024;
 const MAX_AUTO_LOCK_MINUTES: u64 = 24 * 60;
@@ -26,6 +27,29 @@ pub fn hosts_field(conn: &Connection, name: &str) -> Option<serde_json::Value> {
     let all = get_all(conn).ok()?;
     let doc: serde_json::Value = serde_json::from_str(all.get("hosts")?).ok()?;
     doc.get(name).cloned()
+}
+
+/// Remembered "open with" apps for the SFTP editor: file extension -> app path. Only Rust writes
+/// this (`settings_set` refuses the `sftp` key), so the webview can't make us launch a program.
+pub fn open_with_all(conn: &Connection) -> HashMap<String, String> {
+    get_all(conn)
+        .ok()
+        .and_then(|a| {
+            a.get("sftp")
+                .and_then(|v| serde_json::from_str::<serde_json::Value>(v).ok())
+        })
+        .and_then(|d| serde_json::from_value(d.get("open_with")?.clone()).ok())
+        .unwrap_or_default()
+}
+
+pub fn open_with_set(conn: &Connection, ext: &str, app: &str) -> AppResult<()> {
+    let mut map = open_with_all(conn);
+    map.insert(ext.to_string(), app.to_string());
+    set(
+        conn,
+        "sftp",
+        &serde_json::json!({ "open_with": map }).to_string(),
+    )
 }
 
 pub fn get_all(conn: &Connection) -> AppResult<HashMap<String, String>> {
@@ -71,6 +95,18 @@ mod tests {
     use super::*;
     use crate::db::open_in_memory;
     use crate::vault::auto_lock_minutes;
+
+    #[test]
+    fn open_with_is_remembered_per_extension() {
+        let c = open_in_memory().unwrap();
+        assert!(open_with_all(&c).is_empty());
+        open_with_set(&c, "txt", "/Apps/Edit.app").unwrap();
+        open_with_set(&c, "md", "/Apps/Other.app").unwrap();
+        open_with_set(&c, "txt", "/Apps/New.app").unwrap();
+        let m = open_with_all(&c);
+        assert_eq!(m["txt"], "/Apps/New.app");
+        assert_eq!(m["md"], "/Apps/Other.app");
+    }
 
     #[test]
     fn roundtrip_and_validation() {

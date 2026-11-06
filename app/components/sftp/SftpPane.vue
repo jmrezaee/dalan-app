@@ -65,13 +65,22 @@ function onKey(e: KeyboardEvent) {
 }
 const dirName = computed(() => (props.index === 0 ? 'right' : 'left'))
 
+// Same rule as Rust: no extension for ".bashrc" or "Makefile".
+const fileExt = (n: string) => (n.lastIndexOf('.') > 0 ? n.slice(n.lastIndexOf('.') + 1).toLowerCase() : '')
+
 // The right-click menu and the visible "Actions" button share this list. It acts on the clicked row, or the selection.
 const fileMenu = computed<MenuItem[]>(() => {
   const one = picked.value.length === 1 ? picked.value[0]! : null
   return [
     ...(ctx.value && ctx.value.kind === 'dir' ? [{ label: 'Open', onSelect: () => sftp.open(props.index, ctx.value!) }] : []),
     ...(picked.value.length && other.value.endpoint ? [{ label: `Copy to ${dirName.value} pane`, onSelect: copyOver }] : []),
-    ...(one && remote.value && one.kind === 'file' ? [{ label: 'Edit in default app', separator: true, onSelect: () => sftp.edit(props.index, one.name) }] : []),
+    ...(one && remote.value && one.kind === 'file'
+      ? [
+          { label: 'Edit in default app', separator: true, onSelect: () => sftp.edit(props.index, one.name) },
+          ...(sftp.openWith[fileExt(one.name)] ? [{ label: `Edit in ${sftp.openWith[fileExt(one.name)]}`, onSelect: () => sftp.edit(props.index, one.name, 'saved') }] : []),
+          { label: 'Open with…', onSelect: () => sftp.edit(props.index, one.name, 'choose') },
+        ]
+      : []),
     ...(one ? [{ label: 'Rename', icon: Pencil, hint: 'F2', onSelect: () => emit('rename', one.name) }] : []),
     ...(one && remote.value ? [{ label: 'Permissions…', onSelect: () => emit('chmod', one.name) }] : []),
     ...(picked.value.length ? [{ label: 'Delete', icon: Trash2, danger: true, onSelect: () => emit('remove', picked.value.map(p => p.name)) }] : []),
