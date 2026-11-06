@@ -10,5 +10,5 @@
     "types": ["node"],
     "paths": { "~/*": ["../app/*"], "@/*": ["../app/*"] }
   },
-  "include": ["fake/**/*.ts", "e2e/**/*.ts", "walk/**/*.ts", "../app/types/bindings.ts", "../app/types/test-hooks.d.ts"]
+  "include": ["fake/**/*.ts", "e2e/**/*.ts", "walk/**/*.ts", "a11y/**/*.ts", "support/**/*.ts", "../app/types/bindings.ts", "../app/types/test-hooks.d.ts"]
 }

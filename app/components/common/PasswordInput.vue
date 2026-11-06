@@ -4,7 +4,7 @@ import { Eye, EyeOff } from '@lucide/vue'
 import { Input } from '@/components/ui/input'
 import IconButton from './IconButton.vue'
 
-const props = defineProps<{ saved?: boolean; invalid?: boolean; id?: string; disabled?: boolean }>()
+const props = defineProps<{ saved?: boolean; invalid?: boolean; id?: string; disabled?: boolean; label?: string }>()
 const model = defineModel<string>({ default: '' })
 const shown = ref(false)
 const changing = ref(false)
@@ -22,6 +22,7 @@ const showSaved = computed(() => props.saved && !changing.value)
       v-model="model"
       :type="shown ? 'text' : 'password'"
       :aria-invalid="invalid || undefined"
+      :aria-label="label"
       :disabled="disabled"
       autocomplete="off"
       class="pr-9"

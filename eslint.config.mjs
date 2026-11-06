@@ -7,7 +7,7 @@ export default withNuxt(
   {
     // The browser tests poke at `window.__fake` and Tauri's internals, which have no types.
     // Handlers return `undefined` for commands that return nothing, and arguments arrive untyped from the page.
-    files: ['tests/e2e/**', 'tests/fake/**', 'tests/walk/**'],
+    files: ['tests/e2e/**', 'tests/fake/**', 'tests/walk/**', 'tests/a11y/**', 'tests/support/**'],
     rules: { '@typescript-eslint/no-explicit-any': 'off', '@typescript-eslint/no-invalid-void-type': 'off' },
   },
 )

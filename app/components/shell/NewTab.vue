@@ -104,22 +104,22 @@ defineExpose({ focus: () => input.value?.focus() })
           <span class="ml-auto text-xs text-muted">Saved to Hosts</span>
         </button>
         <p v-else-if="!results.length" class="px-3 py-4 text-muted">{{ hosts.hosts.length ? 'No matches.' : 'No hosts yet. Add one to connect.' }}</p>
-        <button
+        <div
           v-for="(h, i) in results"
           :key="h.id"
-          type="button"
           :class="cn('group flex h-11 items-center gap-3 rounded-md px-3 text-left hover:bg-surface-hover', (i === index || checked.includes(h.id)) && 'bg-accent/10')"
           @mousemove="index = i"
-          @click="sessions.open(h)"
         >
           <Checkbox :model-value="checked.includes(h.id)" :aria-label="`Select ${h.label} for a workspace`" :class="checked.length ? '' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'" @click.stop @update:model-value="toggle(h.id)" />
-          <span class="grid size-7 shrink-0 place-items-center rounded-md bg-surface-hover text-2xs font-semibold" :title="osName(h.os_hint)">{{ osLetter(h.os_hint) ?? 'S' }}</span>
-          <span class="flex min-w-0 flex-col">
-            <span class="truncate font-medium">{{ h.label }}</span>
-            <span class="truncate font-mono text-xs text-muted"><template v-if="h.effective_username">{{ h.effective_username }}@</template>{{ h.address }}<template v-if="h.effective_port !== 22">:{{ h.effective_port }}</template></span>
-          </span>
-          <span class="ml-auto text-xs text-muted">{{ ago(h.last_connected_at) }}</span>
-        </button>
+          <button type="button" class="flex min-w-0 flex-1 items-center gap-3 text-left" @click="sessions.open(h)">
+            <span class="grid size-7 shrink-0 place-items-center rounded-md bg-surface-hover text-2xs font-semibold" :title="osName(h.os_hint)">{{ osLetter(h.os_hint) ?? 'S' }}</span>
+            <span class="flex min-w-0 flex-col">
+              <span class="truncate font-medium">{{ h.label }}</span>
+              <span class="truncate font-mono text-xs text-muted"><template v-if="h.effective_username">{{ h.effective_username }}@</template>{{ h.address }}<template v-if="h.effective_port !== 22">:{{ h.effective_port }}</template></span>
+            </span>
+            <span class="ml-auto text-xs text-muted">{{ ago(h.last_connected_at) }}</span>
+          </button>
+        </div>
       </section>
       <section v-if="templates.templates.length" class="flex flex-col gap-1" aria-label="Workspace templates">
         <h2 class="px-3 pb-1.5 text-xs font-medium text-muted">Workspaces</h2>

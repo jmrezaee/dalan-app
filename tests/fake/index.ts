@@ -44,6 +44,8 @@ export class Fake {
   }
   responses = () => this.page.evaluate(() => (window as any).__fake.state.responses as { id: string, prompt: string, answer: any }[])
   written = () => this.page.evaluate(() => (window as any).__fake.state.written as { id: string, text: string }[])
+  /** Every answer the fake gave, for the "no secret ever returned" check. */
+  answers = () => this.page.evaluate(() => (window as any).__fake.state.answers as string[])
   /** Commands the app called that the fake does not know. Always empty while the contract holds. */
   unhandled = () => this.page.evaluate(() => (window as any).__fake.state.unhandled as string[])
   commandNames = () => this.run<string[]>('commandNames')
@@ -58,6 +60,8 @@ export class Fake {
     return {
       state: (state: 'connecting' | 'authenticating' | 'ready' | 'disconnected' | 'closed') => this.run<void>('event', id, { type: 'state', state }),
       event: (e: unknown) => this.run<void>('event', id, e),
+      /** Raw terminal bytes, which need not be valid text (a split emoji, binary output). */
+      outputBytes: (bytes: number[]) => this.run<void>('outputBytes', id, bytes),
       /** Raw terminal text; ANSI escapes work. */
       output: (text: string) => this.run<void>('output', id, text),
       runScript: (name: 'ubuntu-login' | 'nginx-status' | 'apt-update' | 'sudo-prompt' | 'vim' | 'flood' | 'error-output') => this.run<void>('runScript', id, name),

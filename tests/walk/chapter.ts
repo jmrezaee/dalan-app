@@ -1,4 +1,5 @@
-import { test, type Page } from '@playwright/test'
+import type { Page } from '@playwright/test'
+import { test } from '../support/fixtures'
 import { installFakeBackend, type Fake, type FakeOptions } from '../fake'
 import { MASTER } from '../fake/commands/vault'
 import { CHAPTERS, selected } from './chapters'

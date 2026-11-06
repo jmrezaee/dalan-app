@@ -30,6 +30,7 @@ export default defineConfig({
     { name: 'e2e', testDir: 'tests/e2e', use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } } },
     // The walkthrough: one chapter after another, in order, with a video and a trace. `pnpm walk` runs this with a window.
     { name: 'walk', testDir: 'tests/walk', fullyParallel: false, timeout: 15 * 60_000, workers: 1, use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 }, video: 'on', trace: 'on', actionTimeout: 8_000 } },
+    { name: 'a11y', testDir: 'tests/a11y', use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } } },
     { name: 'fake', testDir: 'tests/fake', use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } } },
   ],
 })

@@ -18,6 +18,10 @@ defineEmits<{ submit: [] }>()
 const password = defineModel<string>('password', { default: '' })
 const confirm = defineModel<string>('confirm', { default: '' })
 const bars = [0, 1, 2, 3, 4]
+// The password field takes focus when the card appears, so the keyboard is all you need. (`autofocus` does nothing on
+// elements added after the page loaded.)
+onMounted(() => nextTick(() => document.getElementById('mp')?.focus()))
+watch(() => props.mode, () => nextTick(() => document.getElementById('mp')?.focus()))
 // Replay the shake in place. Re-mounting the form would drop keyboard focus.
 const form = ref<HTMLFormElement | null>(null)
 watch(() => props.shake, () => {
@@ -50,7 +54,7 @@ const barTone = (i: number) => (i >= (props.strength ?? 0) ? 'bg-surface-hover' 
       <Label for="mp">Master password</Label>
       <PasswordInput id="mp" v-model="password" :invalid="!!error" />
     </div>
-    <div v-if="mode === 'create'" class="flex gap-1" :aria-label="`Password strength: ${strength ?? 0} of 5`">
+    <div v-if="mode === 'create'" class="flex gap-1" role="img" :aria-label="`Password strength: ${strength ?? 0} of 5`">
       <span v-for="i in bars" :key="i" :class="cn('h-1 flex-1 rounded-sm', barTone(i))" />
     </div>
     <div v-if="mode === 'create'" class="flex flex-col gap-1.5">

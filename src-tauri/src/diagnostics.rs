@@ -23,7 +23,7 @@ pub fn redact(text: &str, home: Option<&str>, terms: &[String]) -> String {
     for t in terms {
         out = replace_ignore_case(&out, t.trim(), "[redacted]");
     }
-    mask_emails(&mask_ipv4(&out))
+    mask_emails(&mask_ipv6(&mask_ipv4(&out)))
 }
 
 fn replace_ignore_case(hay: &str, needle: &str, with: &str) -> String {
@@ -116,6 +116,33 @@ fn mask_ipv4(s: &str) -> String {
     out
 }
 
+/// IPv6 addresses (`fe80::1`, `2001:db8::7334`, eight full groups) -> `[ip]`. A run of hex digits and colons counts only
+/// when it has `::` or at least five colons, so a time like `12:30:45` and a path like `std::vector` stay as they are.
+fn mask_ipv6(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if (chars[i].is_ascii_hexdigit() || chars[i] == ':') && (i == 0 || !is_name(chars[i - 1])) {
+            let mut j = i;
+            while j < chars.len() && (chars[j].is_ascii_hexdigit() || chars[j] == ':') {
+                j += 1;
+            }
+            let run: String = chars[i..j].iter().collect();
+            let colons = run.matches(':').count();
+            let clean_end = j >= chars.len() || !chars[j].is_ascii_alphanumeric();
+            if clean_end && run.len() >= 3 && (run.contains("::") || colons >= 5) {
+                out.push_str("[ip]");
+                i = j;
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
 /// Names from the vault that must not appear in a pasted report.
 pub fn private_terms(conn: &Connection) -> AppResult<Vec<String>> {
     let mut terms = Vec::new();
@@ -155,6 +182,18 @@ pub fn tail_log(dir: &std::path::Path, n: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ipv6_addresses_are_removed_but_times_and_paths_stay() {
+        let r = redact(
+            "from fe80::1 and 2001:db8::7334 and [::1]:22 and 2001:0db8:0000:0000:0000:0000:0000:0001 at 12:30:45 in std::vector",
+            None,
+            &[],
+        );
+        assert_eq!(r.matches("[ip]").count(), 4, "{r}");
+        assert!(r.contains("12:30:45") && r.contains("std::vector"), "{r}");
+        assert!(!r.contains("fe80") && !r.contains("db8"), "{r}");
+    }
 
     #[test]
     fn hostnames_users_ips_and_home_are_removed() {

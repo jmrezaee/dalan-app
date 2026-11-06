@@ -54,6 +54,7 @@ defineEmits<{ open: []; select: []; dragstart: [event: DragEvent]; dragend: [] }
     @dblclick="$emit('open')"
     @keydown.enter="$emit('open')"
   >
+    <div role="gridcell" class="contents">
     <div class="relative grid size-8 shrink-0 place-items-center rounded-md bg-surface-hover text-2xs font-semibold" :title="osName">
       <LoaderCircle v-if="connecting" class="size-4 animate-spin text-accent" aria-label="Connecting" />
       <template v-else>{{ osLetter ?? 'S' }}</template>
@@ -80,6 +81,7 @@ defineEmits<{ open: []; select: []; dragstart: [event: DragEvent]; dragend: [] }
         <ItemMenuList :items="menu ?? []" mode="dropdown" />
       </DropdownMenuContent>
     </DropdownMenu>
+    </div>
   </div>
     </ContextMenuTrigger>
     <ContextMenuContent>

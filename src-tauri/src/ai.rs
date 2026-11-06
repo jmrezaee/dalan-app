@@ -478,6 +478,22 @@ mod tests {
     }
 
     #[test]
+    fn odd_spellings_of_an_address_are_judged_by_what_they_mean() {
+        // The URL parser turns these into plain IPv4: loopback is fine over http, anything else is not.
+        for loopback in ["http://0x7f.1", "http://2130706433", "http://127.1"] {
+            assert!(check_base(loopback).is_ok(), "{loopback}");
+        }
+        for elsewhere in [
+            "http://0xc0a80001",
+            "http://3232235521",
+            "http://192.168.1",
+            "http://[::ffff:8.8.8.8]",
+        ] {
+            assert!(check_base(elsewhere).is_err(), "{elsewhere}");
+        }
+    }
+
+    #[test]
     fn changing_the_address_needs_the_key_again() {
         let mut c = open_in_memory().unwrap();
         let s = vault::create(&c, "correct-horse-staple", KdfParams::cheap()).unwrap();

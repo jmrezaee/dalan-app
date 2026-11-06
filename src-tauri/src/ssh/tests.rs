@@ -2079,3 +2079,36 @@ async fn l3_key_only_server_accepts_the_test_key() {
     s.until(is_state(SessionState::Ready)).await;
     s.cmds.send(Cmd::Close).unwrap();
 }
+
+/// Hard rule 3: terminal output is bytes. Bytes that are not valid UTF-8 arrive exactly as the server sent them.
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_terminal_output_that_is_not_utf8_arrives_byte_identical() {
+    let h = harness(None).await;
+    point_host_at(&h, &crate::testservers::server("a"), Some("test")).await;
+    let mut s = start(&h);
+    let (id, _) = s.expect_prompt().await;
+    s.answer(&id, true, None, false);
+    s.until(is_state(SessionState::Ready)).await;
+    // 0xFF 0xFE 0x80 can never start or continue a UTF-8 character; the marker lets us find them.
+    s.cmds
+        .send(Cmd::Write(b"printf 'AA\\377\\376\\200ZZ\\n'\n".to_vec()))
+        .unwrap();
+    let mut all = Vec::new();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while let Some(chunk) = s.data.recv().await {
+            all.extend(chunk);
+            if all.windows(2).any(|w| w == b"ZZ") {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for the bytes");
+    assert!(
+        all.windows(7)
+            .any(|w| w == [b'A', b'A', 0xFF, 0xFE, 0x80, b'Z', b'Z']),
+        "the bytes changed on the way: {all:?}"
+    );
+    s.cmds.send(Cmd::Close).unwrap();
+}

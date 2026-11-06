@@ -107,6 +107,8 @@ export interface Model {
   responses: { id: string, prompt: string, answer: unknown }[]
   calls: string[]
   unhandled: string[]
+  /** Every answer the fake gave, as JSON, so a test can check no secret ever left Rust. */
+  answerLog: string[]
   /** Commands that fail once with this error (`fake.failNext`). */
   failNext: Map<string, { code: string, message: string }>
 }
@@ -142,6 +144,7 @@ export function createModel(seed: Seed): Model {
     responses: [],
     calls: [],
     unhandled: [],
+    answerLog: [],
     failNext: new Map(),
   }
 }

@@ -9,6 +9,7 @@ export default defineNuxtConfig({
   // Folders group components by area, but names stay short (HostCard, not HostsHostCard).
   components: [{ path: '~/components', pathPrefix: false }],
   css: ['~/assets/css/main.css'],
+  app: { head: { title: 'Dalan', htmlAttrs: { lang: 'en' } } },
   colorMode: { preference: 'dark', fallback: 'dark', classSuffix: '' },
   shadcn: { prefix: '', componentDir: './app/components/ui' },
   devServer: { port: 4000, host: '127.0.0.1' },

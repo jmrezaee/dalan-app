@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../support/fixtures'
 import { enabled, focused, fakeEvent, gone, hasAttr, seen, fakeOutput, openApp, sessionIds, unlock } from './harness'
 
 test.describe('unlock and the connection overlay (F01, F11, F12)', () => {

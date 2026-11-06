@@ -75,7 +75,10 @@ export function install(opts: Options) {
       // Like the real IPC, nothing is shared between the app and the fake: arguments and answers are copies.
       const copy = Object.fromEntries(Object.entries(args).map(([k, v]) => [k, typeof (v as { toJSON?: unknown } | null)?.toJSON === 'function' ? v : v === undefined ? v : JSON.parse(JSON.stringify(v))]))
       const answer = await h(copy, ctx)
-      return answer === undefined ? undefined : JSON.parse(JSON.stringify(answer))
+      if (answer === undefined) return undefined
+      const text = JSON.stringify(answer)
+      m.answerLog.push(`${cmd} ${text}`)
+      return JSON.parse(text)
     },
   }
 
@@ -100,6 +103,7 @@ export function install(opts: Options) {
       get responses() { return m.responses },
       get written() { return m.written },
       get unhandled() { return m.unhandled },
+      get answers() { return m.answerLog },
       get unlocked() { return m.vault.unlocked },
     },
     master: MASTER,
@@ -111,6 +115,11 @@ export function install(opts: Options) {
     output: (id: string, text: string) => {
       const ch = sessionEvents(id).data
       if (ch !== null) sendBytes(ch, new TextEncoder().encode(text))
+    },
+    /** Server side of a session: raw terminal bytes (they need not be valid text). */
+    outputBytes: (id: string, bytes: number[]) => {
+      const ch = sessionEvents(id).data
+      if (ch !== null) sendBytes(ch, new Uint8Array(bytes))
     },
     /** Plays a scripted server (ubuntu-login, nginx-status, ...). Resolves when the last step has printed. */
     runScript: async (id: string, name: string) => {

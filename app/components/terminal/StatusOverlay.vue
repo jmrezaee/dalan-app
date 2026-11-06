@@ -39,6 +39,11 @@ function focusDefault() {
   focusPassword()
   nextTick(() => card.value?.querySelector<HTMLElement>('[data-autofocus]')?.focus())
 }
+// Escape picks the safe answer: refuse, or close the blocked connection. Error cards have no destructive default.
+function onEscape() {
+  if (['connecting', 'password', 'passphrase', 'question', 'host-key-new'].includes(props.kind)) emit('cancel')
+  else if (props.kind === 'host-key-changed') emit('close')
+}
 onMounted(focusDefault)
 watch(() => props.kind, focusDefault)
 function submit() {
@@ -54,6 +59,7 @@ function submit() {
       ref="card"
       :role="needsAnswer ? 'alertdialog' : 'status'"
       class="flex w-[420px] flex-col gap-3 rounded-lg border border-border bg-surface-raised p-5 shadow-pop"
+      @keydown.esc.stop.prevent="onEscape"
     >
       <template v-if="kind === 'connecting'">
         <LoaderCircle class="size-6 animate-spin text-accent" aria-hidden="true" />
@@ -68,7 +74,7 @@ function submit() {
         <h2 class="text-lg">{{ kind === 'passphrase' ? `Passphrase for ${keyLabel}` : `Password for ${host}` }}</h2>
         <p v-if="kind === 'passphrase'" class="text-muted">This key is protected. Dalan opens it to sign in to {{ host }}.</p>
         <p v-else-if="user" class="text-muted">Signing in as <span class="font-mono">{{ user }}</span>.</p>
-        <PasswordInput id="session-password" v-model="password" />
+        <PasswordInput id="session-password" v-model="password" :label="kind === 'passphrase' ? 'Key passphrase' : 'Password'" />
         <label class="flex items-center gap-2 text-sm"><Checkbox v-model="remember" />Remember it on this computer</label>
         <div class="flex justify-end gap-2"><Button type="button" variant="secondary" @click="$emit('cancel')">Cancel</Button><Button type="submit">Continue</Button></div>
       </form>
@@ -88,7 +94,7 @@ function submit() {
         <h2 class="text-lg">First time connecting to {{ host }}</h2>
         <p class="text-muted">Check that this fingerprint matches the server:</p>
         <code class="break-all rounded-md bg-bg px-2 py-1.5 font-mono text-xs">{{ fingerprint }}</code>
-        <div class="flex justify-end gap-2"><Button variant="secondary" @click="$emit('cancel')">Cancel</Button><Button variant="secondary" @click="$emit('trustOnce')">Connect once</Button><Button @click="$emit('trust')">Trust and connect</Button></div>
+        <div class="flex justify-end gap-2"><Button variant="secondary" data-autofocus @click="$emit('cancel')">Cancel</Button><Button variant="secondary" @click="$emit('trustOnce')">Connect once</Button><Button @click="$emit('trust')">Trust and connect</Button></div>
         <p class="text-xs text-muted">"Connect once" signs in now and saves nothing, so you are asked again next time.</p>
       </template>
 

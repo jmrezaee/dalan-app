@@ -91,6 +91,42 @@ impl From<tokio::task::JoinError> for AppError {
 mod tests {
     use super::*;
 
+    /// Hard rule 7: every code serialises to exactly `{ code, message }`, and `ErrorCode` can't grow without this list.
+    #[test]
+    fn every_error_code_serialises_to_exactly_code_and_message() {
+        use ErrorCode::*;
+        let all = [
+            Locked,
+            WrongPassword,
+            TooManyAttempts,
+            NeedsPassphrase,
+            InvalidKey,
+            NotFound,
+            Validation,
+            InUse,
+            AuthFailed,
+            HostUnreachable,
+            HostKeyChanged,
+            KexFailed,
+            PortInUse,
+            PermissionDenied,
+            SftpDisabled,
+            Internal,
+        ];
+        // An exhaustive match: adding a variant is a compile error here until the list above has it.
+        for c in all {
+            match c {
+                Locked | WrongPassword | TooManyAttempts | NeedsPassphrase | InvalidKey
+                | NotFound | Validation | InUse | AuthFailed | HostUnreachable | HostKeyChanged
+                | KexFailed | PortInUse | PermissionDenied | SftpDisabled | Internal => {}
+            }
+            let json = serde_json::to_value(AppError::new(c, "m")).unwrap();
+            let obj = json.as_object().unwrap();
+            assert_eq!(obj.len(), 2, "{c:?}");
+            assert!(obj["code"].is_string() && obj["message"] == "m", "{c:?}");
+        }
+    }
+
     #[test]
     fn serialises_to_code_and_message() {
         let json = serde_json::to_value(AppError::new(ErrorCode::HostKeyChanged, "x")).unwrap();

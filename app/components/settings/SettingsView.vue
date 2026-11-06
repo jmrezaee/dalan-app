@@ -154,18 +154,18 @@ const num = (v: string | number, fallback: number) => (Number.isFinite(Number(v)
         <template v-else-if="section === 'Terminal'">
           <div class="row">
             <span class="flex-1">Font size</span>
-            <div class="w-24"><NumberInput :model-value="settings.terminal.font_size" :min="8" :max="32" @update:model-value="(v: string | number) => settings.setTerminal({ font_size: num(v, 14) })" /></div>
+            <div class="w-24"><NumberInput label="Font size" :model-value="settings.terminal.font_size" :min="8" :max="32" @update:model-value="(v: string | number) => settings.setTerminal({ font_size: num(v, 14) })" /></div>
           </div>
           <div class="row">
             <span class="flex-1">Cursor</span>
             <div class="w-64"><Segmented :model-value="settings.terminal.cursor" label="Cursor" :options="[{ value: 'block', label: 'Block' }, { value: 'bar', label: 'Bar' }, { value: 'underline', label: 'Underline' }]" @update:model-value="(v: string) => settings.setTerminal({ cursor: v as 'block' | 'bar' | 'underline' })" /></div>
           </div>
-          <div class="row"><span class="flex-1">Blinking cursor</span><Switch :model-value="settings.terminal.cursor_blink" @update:model-value="(v: boolean) => settings.setTerminal({ cursor_blink: v })" /></div>
+          <div class="row"><span class="flex-1">Blinking cursor</span><Switch aria-label="Blinking cursor" :model-value="settings.terminal.cursor_blink" @update:model-value="(v: boolean) => settings.setTerminal({ cursor_blink: v })" /></div>
           <div class="row">
             <span class="flex-1">Scrollback lines</span>
-            <div class="w-32"><NumberInput :model-value="settings.terminal.scrollback" :min="500" :max="100000" @update:model-value="(v: string | number) => settings.setTerminal({ scrollback: num(v, 10000) })" /></div>
+            <div class="w-32"><NumberInput label="Scrollback lines" :model-value="settings.terminal.scrollback" :min="500" :max="100000" @update:model-value="(v: string | number) => settings.setTerminal({ scrollback: num(v, 10000) })" /></div>
           </div>
-          <div class="row"><span class="flex flex-1 flex-col">Copy on select<span class="text-xs text-muted">Copies whatever you highlight in a terminal.</span></span><Switch :model-value="settings.terminal.copy_on_select" @update:model-value="(v: boolean) => settings.setTerminal({ copy_on_select: v })" /></div>
+          <div class="row"><span class="flex flex-1 flex-col">Copy on select<span class="text-xs text-muted">Copies whatever you highlight in a terminal.</span></span><Switch aria-label="Copy on select" :model-value="settings.terminal.copy_on_select" @update:model-value="(v: boolean) => settings.setTerminal({ copy_on_select: v })" /></div>
           <div class="row"><span class="flex flex-1 flex-col">Detect server OS<span class="text-xs text-muted">On the first connect to a server, runs <span class="font-mono">uname</span> once to show its OS on the host card. Nothing else is read.</span></span><Switch :model-value="settings.detectOs" aria-label="Detect server OS" @update:model-value="(v: boolean) => settings.setDetectOs(v)" /></div>
           <div class="row"><span class="flex flex-1 flex-col">Bell sound<span class="text-xs text-muted">A short beep when a program rings the terminal bell, for example on a tab-completion with no match.</span></span><Switch :model-value="settings.terminal.bell" aria-label="Bell sound" @update:model-value="(v: boolean) => settings.setTerminal({ bell: v })" /></div>
           <div class="row"><span class="flex flex-1 flex-col">Reconnect automatically<span class="text-xs text-muted">After a connection drops, try again after 2, 4, 8, 16 and 30 seconds, then stop. It never retries after a wrong password or a changed server key.</span></span><Switch :model-value="settings.terminal.auto_reconnect" aria-label="Reconnect automatically" @update:model-value="(v: boolean) => settings.setTerminal({ auto_reconnect: v })" /></div>
@@ -175,7 +175,7 @@ const num = (v: string | number, fallback: number) => (Number.isFinite(Number(v)
           </div>
           <div class="row">
             <span class="flex flex-1 flex-col">Default theme<span class="text-xs text-muted">For servers that have no theme of their own.</span></span>
-            <div class="w-56"><OptionSelect id="default-theme" :model-value="settings.terminal.default_theme || null" :options="Object.entries(terminalThemeLabels).map(([value, label]) => ({ value, label }))" none-label="Match the app" @update:model-value="(v: string | null) => settings.setTerminal({ default_theme: v ?? '' })" /></div>
+            <div class="w-56"><OptionSelect id="default-theme" label="Default theme" :model-value="settings.terminal.default_theme || null" :options="Object.entries(terminalThemeLabels).map(([value, label]) => ({ value, label }))" none-label="Match the app" @update:model-value="(v: string | null) => settings.setTerminal({ default_theme: v ?? '' })" /></div>
           </div>
           <div class="row">
             <span class="flex flex-1 flex-col">Local shell<span class="text-xs text-muted">Full path of the program for "This computer", for example /opt/homebrew/bin/fish. Empty uses your own shell. Applies to new terminals.</span></span>
@@ -226,7 +226,7 @@ const num = (v: string | number, fallback: number) => (Number.isFinite(Number(v)
           <p class="py-3 text-sm text-muted">The side panel's <strong class="font-medium text-text">Ask AI</strong> tab turns a request like "find files over 1 GB" into a shell command using your own Anthropic API key. It only types the command into the terminal for you to check and run.</p>
           <div class="row">
             <span class="flex flex-1 flex-col">API key<span class="text-xs text-muted">{{ ai.hasKey ? 'A key is saved, encrypted with your master password. Paste a new one to replace it.' : 'Stored encrypted with your master password. It never leaves this computer except in requests to the service below.' }}</span></span>
-            <div class="w-64"><PasswordInput v-model="ai.newKey" aria-label="API key" :placeholder="ai.hasKey ? '••••••••' : 'sk-ant-…'" autocomplete="off" /></div>
+            <div class="w-64"><PasswordInput v-model="ai.newKey" label="API key" :placeholder="ai.hasKey ? '••••••••' : 'sk-ant-…'" autocomplete="off" /></div>
           </div>
           <div class="row">
             <span class="flex-1">Model</span>

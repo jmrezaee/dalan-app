@@ -24,7 +24,7 @@ const openTabs = computed(() => sessions.sessions.filter(s => s.kind === 'sessio
 <template>
   <CommandDialog v-model:open="open" title="Command palette" description="Jump to a host, a tab or an action.">
     <CommandInput placeholder="Search hosts, tabs and actions" />
-    <CommandList>
+    <CommandList aria-label="Results">
       <CommandEmpty>No matches. Press {{ shortcutLabel('new-host') }} to add a host.</CommandEmpty>
 
       <CommandGroup v-if="openTabs.length" heading="Tabs">
@@ -43,7 +43,7 @@ const openTabs = computed(() => sessions.sessions.filter(s => s.kind === 'sessio
         <CommandItem v-for="t in templates.templates" :key="t.id" :value="`workspace ${t.name}`" @select="run(() => templates.open(t))"><LayoutGrid />{{ t.name }}</CommandItem>
       </CommandGroup>
 
-      <CommandSeparator />
+      <CommandSeparator role="none" aria-hidden="true" />
       <CommandGroup heading="Actions">
         <CommandItem value="action new host add" @select="act('new-host')"><Plus />New host<CommandShortcut>{{ shortcutLabel('new-host') }}</CommandShortcut></CommandItem>
         <CommandItem value="action new tab" @select="act('new-tab')"><Plus />New tab<CommandShortcut>{{ shortcutLabel('new-tab') }}</CommandShortcut></CommandItem>

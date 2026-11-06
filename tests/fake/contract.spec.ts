@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../support/fixtures'
 import { installFakeBackend } from './index'
 
 // The contract: every command the generated bindings can call has a fake. `pnpm typecheck` already fails when a
