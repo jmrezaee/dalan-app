@@ -1,18 +1,18 @@
 feature,area,priority,original,clone,notes
 Master password unlock for local encrypted vault,security,must,yes,yes,S24; clone design choice standing in for Termius account encryption password
 Horizontal tab bar with Vault and SFTP fixed tabs,shell,must,yes,yes,S01
-Tab status dots (unread / needs input / error),shell,must,yes,partial,S01 S19; P18: seen working in the window (green output, yellow question); red and workspace dot not seen; Mehrdad to confirm
+Tab status dots (unread / needs input / error),shell,must,yes,partial,"S01 S19; P18: seen working in the window (green output,  yellow question); red and workspace dot not seen; Mehrdad to confirm"
 Hosts list with grid/list view and search,hosts,must,yes,yes,S02
 Create and edit host (address port username password),hosts,must,yes,yes,S03
-Nested groups,hosts,must,yes,partial,S04; smoke 2026-11-05: groups never run in the real window
-Per-field inheritance from parent groups,hosts,must,yes,partial,source 3; resolve up the parent chain per field; smoke 2026-11-05: inheritance never run in the real window
+Nested groups,hosts,must,yes,yes,S04; smoke 2026-11-05: groups never run in the real window; hand-checked (audit 2026-11-06)
+Per-field inheritance from parent groups,hosts,must,yes,yes,source 3; resolve up the parent chain per field; smoke 2026-11-05: inheritance never run in the real window; hand-checked (audit 2026-11-06)
 Tags with filter,hosts,must,yes,partial,S02 S03; smoke 2026-11-05: tags never run in the real window
-Drag hosts into groups,hosts,must,yes,partial,F04; smoke 2026-11-05: drag onto groups never run in the real window
-Generate SSH key (Ed25519 ECDSA RSA),keychain,must,yes,partial,S06; smoke 2026-11-05: Generate never run in the real window
-Import private key (paste / drop / file) with passphrase,keychain,must,yes,yes,S06
+Drag hosts into groups,hosts,must,yes,yes,F04; smoke 2026-11-05: drag onto groups never run in the real window; hand-checked (audit 2026-11-06)
+Generate SSH key (Ed25519 ECDSA RSA),keychain,must,yes,yes,S06; smoke 2026-11-05: Generate never run in the real window; hand-checked (audit 2026-11-06)
+Import private key (paste / drop / file) with passphrase,keychain,must,yes,partial,S06; demoted 2026-11-06: only paste/file seen; drop and wrong passphrase not hand-checked
 Save passphrase toggle (else prompt each connect),keychain,must,yes,partial,source 7; smoke 2026-11-05: not run in the real window
 Identities (username + password or key) linked to hosts and groups,keychain,must,yes,partial,S07; smoke 2026-11-05: identities not run in the real window
-Export public key to host authorized_keys,keychain,must,yes,partial,S08 F02; smoke 2026-11-05: Install on a server not run in the real window (key login itself was checked)
+Export public key to host authorized_keys,keychain,must,yes,yes,S08 F02; smoke 2026-11-05: Install on a server not run in the real window (key login itself was checked); hand-checked (audit 2026-11-06)
 SSH connect with password key or identity,terminal,must,yes,yes,S18
 Known hosts trust-on-first-use prompt,terminal,must,yes,yes,S18 S14
 Host key changed blocking warning,terminal,must,yes,yes,F12
@@ -27,36 +27,36 @@ Jump host / host chain,hosts,must,yes,yes,F05; free in Termius since 10.1.0
 Startup snippet per host,hosts,must,yes,partial,source 10; smoke 2026-11-05: startup snippet not run in the real window
 Snippets with packages,snippets,must,yes,partial,S11 S12; smoke 2026-11-05: snippets not run in the real window
 Run snippet in current session from side panel,snippets,must,yes,partial,S20; smoke 2026-11-05: side-panel snippet run not run in the real window
-Local / remote / dynamic port forwarding rules with start-stop,port forwarding,must,yes,yes,S09 S10 F06
+Local / remote / dynamic port forwarding rules with start-stop,port forwarding,must,yes,partial,S09 S10 F06; demoted 2026-11-06: only local tunnels hand-checked; SOCKS and remote not run
 SFTP dual pane (local or host on each side),sftp,must,yes,yes,S21
 SFTP drag-and-drop transfers with progress,sftp,must,yes,partial,S21 S22 F07; smoke 2026-11-05: drag-and-drop could not be driven by automation; check by hand
-SFTP rename delete new folder hidden files typed path,sftp,must,yes,partial,"S21; rename/delete not in Termius docs but expected; smoke 2026-11-05: listing checked in the real window; rename, delete, new folder, hidden files not"
-Settings: appearance terminal font shortcuts,settings,must,yes,yes,S23
-Workspaces: split view up to 16 panes,workspaces,should,yes,partial,S19 F09; smoke 2026-11-05: workspaces not run in the real window
-Workspaces: focus mode toggle,workspaces,should,yes,partial,S19; smoke 2026-11-05: workspaces not run in the real window
-Broadcast input to all panes (Cmd+B),workspaces,should,yes,partial,S19; free in Termius since 9.17.1; smoke 2026-11-05: workspaces not run in the real window
-Save workspace as template and reopen,workspaces,should,yes,partial,S19 source 11; smoke 2026-11-05: workspaces not run in the real window
+SFTP rename delete new folder hidden files typed path,sftp,must,yes,yes,"S21; rename/delete not in Termius docs but expected; smoke 2026-11-05: listing checked in the real window; rename, delete, new folder, hidden files not; hand-checked (audit 2026-11-06)"
+Settings: appearance terminal font shortcuts,settings,must,yes,partial,"S23; demoted 2026-11-06: new settings (font, shell, post-quantum) not hand-checked"
+Workspaces: split view up to 16 panes,workspaces,should,yes,yes,S19 F09; smoke 2026-11-05: workspaces not run in the real window; hand-checked (audit 2026-11-06)
+Workspaces: focus mode toggle,workspaces,should,yes,yes,S19; smoke 2026-11-05: workspaces not run in the real window; hand-checked (audit 2026-11-06)
+Broadcast input to all panes (Cmd+B),workspaces,should,yes,yes,S19; free in Termius since 9.17.1; smoke 2026-11-05: workspaces not run in the real window; hand-checked (audit 2026-11-06)
+Save workspace as template and reopen,workspaces,should,yes,yes,S19 source 11; smoke 2026-11-05: workspaces not run in the real window; hand-checked (audit 2026-11-06)
 Drag a tab onto another to make a workspace,workspaces,should,yes,no,source 11
-Run snippet on multiple hosts (opens workspace),snippets,should,yes,partial,S13 F08; smoke 2026-11-05: not run in the real window
+Run snippet on multiple hosts (opens workspace),snippets,should,yes,yes,S13 F08; smoke 2026-11-05: not run in the real window; hand-checked (audit 2026-11-06)
 SFTP edit remote file locally and prompt to re-upload,sftp,should,yes,partial,F07 source 5; smoke 2026-11-05: needs a real check (context menu could not be driven by automation)
 SFTP transfer conflicts (replace / keep both / skip),sftp,should,yes,partial,S22; smoke 2026-11-05: needs a real check
 SFTP permissions (chmod),sftp,should,unknown,partial,not in Termius docs; expected by users; smoke 2026-11-05: needs a real check
 Environment variables per host/group (SendEnv),hosts,should,yes,partial,source 12; smoke 2026-11-05: not run against a real server
 SOCKS5 / HTTP proxy per host,hosts,should,yes,partial,source 2; smoke 2026-11-05: not run through a real proxy
 SSH agent forwarding,hosts,should,yes,partial,source 2; shells only since P17; not run against a real server
-Import hosts from ~/.ssh/config,import,should,yes,yes,S25 F10; smoke 2026-11-05 in the real window: jump chain, ProxyCommand and Include notes, duplicates unticked; Include is not followed
+Import hosts from ~/.ssh/config,import,should,yes,yes,"S25 F10; smoke 2026-11-05 in the real window: jump chain,  ProxyCommand and Include notes,  duplicates unticked; Include is not followed"
 Import keys and known_hosts from ssh config,import,could,yes,no,not built: only hosts come across
 Import hosts from CSV,import,should,yes,partial,source 2; smoke 2026-11-05: CSV import not run in the real window (SSH config import was)
 Terminal themes per host/group,terminal,should,yes,partial,S20; smoke 2026-11-05: not run in the real window
 Command history side panel,terminal,should,yes,yes,S20; encrypted with the data key since P17; secret-looking lines are not saved
 Local terminal tab,terminal,should,yes,partial,S23 local terminal path; smoke 2026-11-05: not run in the real window
-Session logs (last per host + bookmarks + comment),logs,should,yes,yes,S15 source 6; paid in Termius
+Session logs (last per host + bookmarks + comment),logs,should,yes,partial,"S15 source 6; paid in Termius; demoted 2026-11-06: checked by hand, but replay and bookmark notes not fully"
 SSH certificates (key + cert as one item),keychain,could,yes,partial,source 7; smoke 2026-11-05: not run against a real OpenSSH server
 FIDO2 hardware keys (sk-ed25519),keychain,could,yes,no,source 7; needs OpenSSH 8.4+ server
 Terminal autocomplete (history paths snippets),terminal,could,yes,no,needs shell integration; Termius disables for some routers
 Find in terminal,terminal,could,unknown,partial,not documented; xterm search addon; smoke 2026-11-05: checked only in a browser against a stub
 Customisable keyboard shortcuts,settings,could,yes,partial,S23; smoke 2026-11-05: recorder not run in the real window
-Import from PuTTY and MobaXterm,import,could,yes,partial,source 2; parsers are tested on samples, never run on a real export file
+Import from PuTTY and MobaXterm,import,could,yes,partial,"source 2; parsers are tested on samples,  never run on a real export file"
 Import from SecureCRT,import,could,yes,no,not built
 Mosh,protocols,could,yes,partial,needs mosh client binary; not logged by Termius; smoke 2026-11-05: not run with real mosh
 Telnet,protocols,could,yes,partial,plaintext warning; smoke 2026-11-05: not run against a real Telnet server
@@ -91,4 +91,4 @@ Host editor with drill-in blocks and draft card,hosts,should,yes,partial,P23; wa
 Shared login hint,hosts,could,yes,partial,P23; waits for hand check
 Terminal bell sound setting,terminal,could,yes,partial,P25; waits for hand check
 Import review filter and group selection,hosts,should,yes,partial,P25; waits for hand check
-SFTP open with a chosen app, remembered per file type,sftp,could,yes,partial,P25 follow-up; waits for hand check
+"SFTP open with a chosen app,  remembered per file type",sftp,could,yes,partial,P25 follow-up; waits for hand check

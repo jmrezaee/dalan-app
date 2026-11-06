@@ -2,7 +2,7 @@
 
 Claude Code reads this file at the start of every phase. Typing `go` means: do the first phase below that is not checked. Each phase is sized for one working session.
 
-Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
+Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[h]` built, hand check pending (collected in P28; `go` skips it) · `[x]` done.
 
 ## Phases
 
@@ -69,7 +69,7 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
   - **Then stop and ask Mehrdad to run the checklist in the real window and paste back what failed.** You can't click the Tauri window yourself, and this phase is not done until he has.
   - Fix every failure he reports, in the same phase, and ask him to re-check those steps.
   - In `features.csv`, set every row that was never run for real (Mosh, serial, Telnet, env vars, proxy, agent forwarding, certificates, AI, logs, history, and anything that failed) to `partial`, with a note saying what still needs a real check.
-- [x] **P16 Security fixes (audit "Must fix" 2-4 and "Should fix" 6, 8, 10):**
+- [h] **P16 Security fixes (audit "Must fix" 2-4 and "Should fix" 6, 8, 10):**
   1. **Known hosts:** if any key is saved for the host and none matches, return `Changed`, whatever the key type. Add a test.
   2. **AI address:**
      - Parse it with `url::Url` and allow `http` only for loopback hosts (`localhost`, `127.0.0.0/8`, `::1`).
@@ -86,7 +86,7 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
   6. **Single instance:** add `tauri-plugin-single-instance`, so a second launch focuses the first window.
   - **Built (2026-11-05):** all six items. Changed key now needs the typed host name checked in Rust (`ssh/client.rs`); the UI sends it. "Trust" sends `remember: true`; `false` trusts once. Owner-only modes via `src/perms.rs` (app dir and logs 0700, `vault.db*`, log files and edit copies 0600). Single-instance plugin added (stack addition, desktop only). CSP set (`style-src` keeps `unsafe-inline` for Vue/Reka style attributes; dev CSP allows the Vite websocket). Rust tests added for each.
   - **Checked by Claude in the real window (second run, see `smoke-results-2026-11-05.md`):** unlock, terminals, SFTP and workspaces under the CSP; file modes; second binary launch exits. Still for you: `open -n` second copy (did not exit), a plain double-click while running, a tunnel under the CSP. Then mark `[x]`.
-- [x] **P17 Robustness fixes (audit "Should fix" 7, 9, 11, 12, 13, 15):**
+- [h] **P17 Robustness fixes (audit "Should fix" 7, 9, 11, 12, 13, 15):**
   1. **Command history:**
      - Encrypt it with the vault key, re-encrypting it with everything else on a master password change.
      - Don't save lines with obvious secret flags (`-p<value>`, `--password=`, `PASSWORD=`, `token`).
@@ -113,7 +113,7 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
     - **SFTP and lock:** re-check after connecting, pending questions cancelled on lock.
     - **Commands:** `tags_list`, `tag_delete` (right-click a tag in the sidebar), `recent_connections` (feeds New Tab, written by `mark_connected`), `fs_realpath`, `snippets_move`, orphan-secret sweep at unlock. `fs_realpath` and `snippets_move` have no UI yet.
   - **Still to check:** keyboard-interactive against a real PAM/2FA container; the tag delete menu and New Tab recents in the window.
-- [x] **P18 UI fixes (audit "Must fix" 5, "Should fix" 14 and "Spec gaps"):**
+- [h] **P18 UI fixes (audit "Must fix" 5, "Should fix" 14 and "Spec gaps"):**
   1. **Tab status dots:**
      - Track unread output per session; "waiting" when a prompt is pending; red for error or disconnected.
      - Give workspace tabs a combined dot.
@@ -181,35 +181,95 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
   - Make the first draft release once he has.
 
   - **Done (2026-11-06):** `features.csv` split and corrected (SSH config import yes; keys and known_hosts import, SecureCRT no; PuTTY and MobaXterm partial: parsers tested on samples only). Stale "arrives in P2 / P7" comments removed. `/design` is dropped from production builds (a `pages:extend` hook; checked: the showcase isn't in `.output`). `.git/audit.bundle` deleted. `replica/launch/release-setup.md` lists what Mehrdad must create.
-  - **Not done, needs Mehrdad:** the GitHub repo, the updater key pair and secrets, then the first draft release (nothing was pushed or tagged).- [~] **P21 Connection experience (S18, F01, F11, F12):** built, waiting for Mehrdad's hand check.
+  - **Not done, needs Mehrdad:** the GitHub repo, the updater key pair and secrets, then the first draft release (nothing was pushed or tagged).
+- [h] **P21 Connection experience (S18, F01, F11, F12):** built, waiting for Mehrdad's hand check.
   - **Built (2026-11-06):** step log on the connection card (`SessionEvent::Step`, "Show details" / "Copy details", opens by itself on failure, never holds a secret); "Connect once" on the first-connection question (also fixes inline "Trust and connect" in `PromptPanel` to save the key); one "N connections dropped" card with Reconnect all; optional "Reconnect automatically" setting (2, 4, 8, 16, 30 s, stops on a wrong password or changed key); "Try another way" chips after a failed sign-in, limited to the methods the server accepts (`AuthMethods` event, `session_reconnect_with`).
   - **Tests:** Rust (steps carry no secret, connect once saves nothing, methods listed and a chosen method is the only one tried), Vitest (retry schedule, dropped card, chooser), e2e (step log, Connect once, chooser).
   - **Hand checks:** (1) wrong host/port: the log opens and says where it stopped, Copy details puts plain text on the clipboard. (2) Connect once on test server a, then check `known_hosts` has no new row and it asks again. (3) Open two or more sessions on server a, `docker restart` it: one card, Reconnect all works. (4) Settings > Terminal > Reconnect automatically on, restart the container: tabs come back by themselves. (5) Wrong password on server a: "Try another way" lists only what it accepts.
-- [~] **P22 Context menus and quick actions (S02, S05, S16, S21):** built; waits for Mehrdad's hand check.
+- [h] **P22 Context menus and quick actions (S02, S05, S16, S21):** built; waits for Mehrdad's hand check.
   - **Built (2026-11-06):** one `ItemMenuList` draws the same actions as a right-click menu and as the "…" menu. Host card: Connect, Connect with SFTP, Add to workspace (new or an open one), Edit, Move to group, Copy address, Delete. Tab: Rename, Close, Duplicate tab, Close others. Key card and snippet row menus. SFTP pane "Actions" button (same list as its right-click menu). Hosts toolbar: "Local terminal" in the New host menu. Live dot on host cards with a ready session. New tab: type `user@host[:port]` and press Enter to connect.
   - **Differences from the plan:** quick connect saves the host first (every session needs a host record in the vault), so it also shows under Recent; "Save this host" is therefore not needed. Serial is not in the toolbar (it needs the host editor to open with the protocol preset; goes with P23).
   - **Finished (2026-11-06):** Duplicate for hosts (Rust `host_duplicate`: profile, jump chain, tags, environment, serial settings, and every saved secret re-encrypted as its own row, so deleting one host never takes the other's password; Rust test) and for snippets. Search box and A to Z / Z to A switch on Keychain, Snippets, Port forwarding and Known hosts. Keys have no Duplicate on purpose: two copies of one private key add nothing (use Export or Install instead).
   - **Tests:** Vitest for the quick-connect parser and the filter/sort helper; Rust for host duplicate; e2e for the host and tab menus.
   - **Hand checks:** (1) right-click a host card, and use the "…" button: same items; Connect with SFTP opens the SFTP tab with that host on the right. (2) Add to workspace > New workspace, then add a second host to it from the same menu. (3) Right-click a tab: Duplicate tab, Close others (asks before closing live ones). (4) Right-click a key and a snippet. (5) SFTP "Actions" with a file selected. (6) New tab: type `test@127.0.0.1:2222`, Enter. (7) Right-click works in the real window (WKWebView), not only in the browser tests. (8) Duplicate a host that has a saved password: connect to the copy without being asked for it; delete the original and connect to the copy again. (9) Filter and sort on Keychain, Snippets, Port forwarding and Known hosts.
-- [~] **P24 Terminal side panel and workspaces (S19, S20):** built except two optional items; waits for Mehrdad's hand check.
-  - **Built (2026-11-06):** side panel tabs Snippets, History, Theme, Font, Ask AI. Theme tab lists every terminal theme with a small colour preview and sets the theme of the current server (or goes back to the default). Font tab sets size and family for all terminals. The last tab used is remembered (`terminal.side_tab` in settings). History tab suggests "Save as a snippet?" for a command you ran three or more times that is not already a snippet (dismissable). Workspace panes that receive typing get a dashed frame in the warning token, besides the pill (no animation, so nothing to reduce).
-  - **Not done:** a separate "Search" tab (terminal find already has ⌘F and its own bar, so a second search UI adds little); the "List" workspace layout (Focus already shows the other panes in a list on the right); reusing one tab for repeated snippet runs. Say if you want any of them.
-  - **Tests:** Vitest for the repeated-command rule; e2e for the tabs and remembering the last one.
-  - **Hand checks:** (1) open the panel (⌘.), pick Theme: the open terminal changes at once and stays after reconnect; "Use the default" clears it. (2) Font: size and family change every open terminal. (3) Close the panel on Font, reopen it: it opens on Font; restart the app: still Font. (4) Type the same command (4+ characters) three times on a server with history on: History shows the suggestion; Save snippet creates it; Not now hides it. (5) In a workspace turn Broadcast on: each live pane has a dashed amber frame.
-- [~] **P23 Host editor restructure (S03, S04, S07, F04):** built; waits for Mehrdad's hand check.
+- [h] **P23 Host editor restructure (S03, S04, S07, F04):** built; waits for Mehrdad's hand check.
   - **Built (2026-11-06):** address and port come first, the label is optional and defaults to the address; a "Draft" card shows in the host list while a new host is typed; the advanced blocks (Jump hosts, Proxy, Environment variables, SSH agent, On connect, Terminal theme) are one line each under "More" with a summary ("Through bastion", "SOCKS5 proxy.example:1080", "2 variables") and open on their own page with a back arrow. The jump chain is drawn as a vertical route: You, each hop, the host. New Rust query `hosts_shared_logins` (decrypts and compares inside Rust, returns ids only; Rust test) drives a note in the editor: "Same login as a, b. An identity in the Keychain keeps it in one place."
   - **Kept:** the data model, the save command and all Rust commands are unchanged, apart from the new query. The form is still one state, so the unsaved-changes dot and Cmd+S work from any page.
   - **Differences from the plan:** the shared-login note is a hint, not a one-click "Make an identity" (building an identity needs the secret copied into a new identity; that is its own small piece). Escape closes the whole editor, not just the sub-page (the back arrow goes back).
   - **Tests:** Rust (shared logins), e2e (address first, draft card, sub-page and back).
   - **Hand checks:** (1) New host: type an address only, Save: the host is named after the address. (2) The draft card appears at the top of the list as you type and disappears on save or cancel. (3) Open each block under More and back: summaries update; edit a jump chain with two hops and see the route. (4) Edit an existing host: proxy, environment and agent values load (they load a moment after opening) and save unchanged. (5) Two hosts with the same user and password: each shows the shared-login note. (6) Cmd+S saves from a sub-page; closing with changes still warns. (7) Telnet, Serial and Mosh hosts still show only the options that apply.
-- [~] **P25 Settings, copy and import polish:** built except one item; waits for Mehrdad's hand check.
+- [h] **P24 Terminal side panel and workspaces (S19, S20):** built except two optional items; waits for Mehrdad's hand check.
+  - **Built (2026-11-06):** side panel tabs Snippets, History, Theme, Font, Ask AI. Theme tab lists every terminal theme with a small colour preview and sets the theme of the current server (or goes back to the default). Font tab sets size and family for all terminals. The last tab used is remembered (`terminal.side_tab` in settings). History tab suggests "Save as a snippet?" for a command you ran three or more times that is not already a snippet (dismissable). Workspace panes that receive typing get a dashed frame in the warning token, besides the pill (no animation, so nothing to reduce).
+  - **Not done:** a separate "Search" tab (terminal find already has ⌘F and its own bar, so a second search UI adds little); the "List" workspace layout (Focus already shows the other panes in a list on the right); reusing one tab for repeated snippet runs. Say if you want any of them.
+  - **Tests:** Vitest for the repeated-command rule; e2e for the tabs and remembering the last one.
+  - **Hand checks:** (1) open the panel (⌘.), pick Theme: the open terminal changes at once and stays after reconnect; "Use the default" clears it. (2) Font: size and family change every open terminal. (3) Close the panel on Font, reopen it: it opens on Font; restart the app: still Font. (4) Type the same command (4+ characters) three times on a server with history on: History shows the suggestion; Save snippet creates it; Not now hides it. (5) In a workspace turn Broadcast on: each live pane has a dashed amber frame.
+- [h] **P25 Settings, copy and import polish:** built except one item; waits for Mehrdad's hand check.
   - **Built (2026-11-06):** key generation hints say what each type works with, plus a note that ML-DSA exists only on servers that enable it and 1024-bit RSA is not offered. Settings: a visible "Bell sound" switch (off by default; a short soft beep when a program rings the bell) next to "Reconnect automatically" (P21), "Remember typed commands" was already a switch under Logs. Import review: a filter box, "Select all" acts on the rows shown, and one tick box per source group (folders and groups from SSH config, PuTTY, MobaXterm, CSV). Still no keys and no known_hosts by default.
   - **Added after (2026-11-06):** the SFTP "open with" list, see the P25 follow-up below.
   - **P25 follow-up, SFTP open with:** right-click (or Actions) on a server file now has Edit in default app, Edit in <app> (once one is remembered for that file type) and Open with…. Open with… shows the OS file dialog from Rust (starting in /Applications on macOS), downloads the file, opens it with that app, and remembers the app per extension in a `sftp` settings document. `settings_set` refuses that key, and `edit_open` takes only default / saved / choose, so the webview can never name a program to launch. A cancelled dialog does nothing; a remembered app that was removed falls back to the default app. New command `edit_apps` (extension -> app name) for the menu label. Tests: Rust `open_with_is_remembered_per_extension`; the dialog and launch need a hand check. **Hand check:** SFTP, open a server, right-click a .txt file > Open with…, choose TextEdit or any editor: it opens; right-click again: "Edit in <that app>" appears and opens it directly; a .md file does not show it until you choose one for .md. Save, then Upload in the toast as before. Gap: remembered apps cannot be listed or cleared in Settings yet.
   - **Tests:** e2e for the import filter and Select all (existing import test extended).
   - **Hand checks:** (1) Settings > Terminal: Bell sound on, then run `printf '\a'` in a terminal: a short beep. (2) Keychain > Generate key: each type shows its hint and the ML-DSA note. (3) Import from your real SSH config: type in the filter, Select all only affects the shown rows; with a PuTTY or MobaXterm export, the group tick boxes toggle whole folders.
 
-## Backlog (not scheduled; Mehrdad picks from here after P20)
+### Second audit (from `replica/audit-2026-11-06.md`) and the test build-out (from `replica/testing/test-plan.md`)
+
+Order: P26 and P27 first, then T1 to T7, then P28 (one hand-check session for everything automation can't cover), then P29 (first release).
+
+- [x] **P26 Housekeeping and release blockers (audit 2026-11-06: Blockers 1-3, items 7 and 14):**
+  - **Done (2026-11-06):** local tag `v0.1.0` deleted (the tag and a draft release still exist on GitHub; removing them waits for Mehrdad, see `release-setup.md`). `features.csv`: 4 malformed rows quoted (all rows now 6 columns), 11 hand-checked rows promoted to `yes`, 4 not-fully-checked `yes` rows set to `partial`. `release-setup.md` rewritten (repo, key, secrets and green CI already exist). `field-report-2026-11-06.md` rewritten without any quoted strings. P16 to P18 set to `[h]`; P23 moved before P24. `CLAUDE.md` Where-we-are and Conventions updated. **Audit corrections:** blocker 2 was wrong here (`origin` is the GitHub repo and CI, Release and Pages ran green on `49c3fee`); test plan section 13 says 8 columns but the file has 6. **Waiting for Mehrdad:** one sentence for `CLAUDE.md` on whether hands-on use of the reference app is allowed (proposed: "Allowed for your own copy, to observe behaviour only: no copied text, nothing from your machine imported, and notes go in `replica/` in our own words.").
+  - Delete the local `v0.1.0` tag: it points at `49c3fee`. Re-tag only in P29.
+  - Fix `features.csv`:
+    - Quote the 4 malformed rows (4, 47, 59, 94).
+    - Promote the rows already hand-checked (see the audit) to `yes`.
+    - Demote any `yes` that wasn't fully checked to `partial`, with a note.
+  - Refresh `replica/launch/release-setup.md`: the updater key exists, so list only what Mehrdad still has to create.
+  - Rewrite `replica/field-report-2026-11-06.md` so it describes behaviour and quotes none of the reference app's strings (clean room). Then propose one sentence for `CLAUDE.md` saying whether hands-on observation is allowed, and wait for Mehrdad's answer.
+  - Tidy `replica/progress.md`:
+    - Put the phases in order and add the missing Notes lines for P21 to P25.
+    - Change P16, P17 and P18 from `[x]` to `[h]` where their hand checks are still open.
+  - Update `CLAUDE.md` "Where we are".
+  - Update the "Conventions" section:
+    - The single-page shell is the accepted structure, since terminals must stay mounted.
+    - Components reach Rust through stores, not `useTauri()` directly.
+- [ ] **P27 Fixes from the 2026-11-06 audit (items 4, 5, 8 to 13, Low):** each fix gets a regression test (named in the note).
+  1. **Auto-reconnect:** `exit` or `closed` never schedules a retry or counts as dropped (handle the `exit` event in `stores/sessions.ts`).
+  2. **`hosts_shared_logins`:** stop comparing passwords. Compare username plus key or identity only, or drop the feature. Show the plan first if it changes behaviour Mehrdad has seen.
+  3. **"Try another way" on jump chains:** apply the forced method to the target hop only.
+  4. **Quick connect:** reuse an existing host with the same user, address and port; never create duplicates; match on the port.
+  5. **SFTP edit and "Open with":** refuse executable file types, or open them as plain text (list in `test-plan.md` §9.2).
+  6. **Smoke leftovers:**
+     - the first click on "…" opens the menu
+     - an unticked jump host is kept or reported in import
+     - the 8-character message clears when the password is fixed
+     - the "Saved." toast no longer covers the sheet footer
+     - the file size refreshes after an upload
+  7. **UI for `fs_realpath` and `snippets_move`:** the typed SFTP path resolves `~` and `..`; drag a snippet onto a package.
+  8. **Direct calls:** move the 10 direct `useTauri()` calls in components into their stores.
+  9. **Low items:**
+     - the right message for the refused `sftp` settings key
+     - list and clear remembered "open with" apps, and no `""` extension key
+     - rate-limit the bell
+     - Theme tab: Lucide check icon and tokens, and "Use the default" handles group themes
+     - snippet-hint dismissal survives a remount
+     - `NewTab.vue:130` shortcut label from the user's shortcuts
+     - check whether CSP `style-src 'unsafe-inline'` can go
+- [ ] **T1 Test foundations** (`test-plan.md` §3 to §5, phase T1).
+- [ ] **T2 Test servers** (§11, phase T2).
+- [ ] **T3 Walkthrough: `pnpm walk`** (§8, phase T3).
+- [ ] **T4 Browser coverage, visual, accessibility, rule and security tests** (§6, §7, §9.1 to §9.3, phase T4). This is a big phase: split it by flow and mark it `[~]` between sessions.
+- [ ] **T5 Real app: `pnpm test:app` and `pnpm walk:app`** (§8.5, phase T5).
+- [ ] **T6 Manual list and features.csv rules** (§10, §13, phase T6).
+- [ ] **T7 Performance, migrations, long run** (§9.4, §9.5, phase T7).
+- [ ] **P28 Hand-check session:**
+  - Collect every open hand check from `[h]` phases (P16 to P18, P21 to P25) that T4 and T5 didn't automate into `replica/testing/hand-checks.md`, together with the §10 items.
+  - **Then stop and ask Mehrdad to run it** in the real macOS window and paste back the results.
+  - Fix what fails, and mark the `[h]` phases `[x]` when their checks pass.
+- [ ] **P29 First release (needs Mehrdad):**
+  - He creates the GitHub repo `dalan-app` and adds the secrets from `release-setup.md`.
+  - Then: add the remote and push; get the first green CI including the `browser` and `app` jobs; replace the site screenshot with a real one from `walk:app`; tag `v0.1.0` on HEAD; publish the draft release.
+  - Then follow `replica/launch/launch-plan.md` phase 1 (pilot).
+
+
+## Backlog (not scheduled; Mehrdad picks from here after P29)
 
 - Touch ID / Windows Hello unlock (M4 item 5).
 - FIDO2 security keys (`sk-*`) (M4 item 9; prototype first, russh support is limited).
@@ -268,3 +328,9 @@ Status keys: `[ ]` not started · `[~]` in progress (see notes) · `[x]` done.
 - 2026-11-06 P20 done except the first draft release, which waits for the GitHub repo and the updater key. All of P0 to P20 are built; open hand checks are listed in each phase's note.
 
 - 2026-11-06 Proposed next phases P21 to P25 (connection experience, context menus, host editor, terminal side panel, settings polish) are in `replica/improvement-plan-2026-11-06.md`, built from `replica/field-report-2026-11-06.md`. Not scheduled until Mehrdad approves the order and the decisions in its section 4.
+- 2026-11-06 P21: connection step log with copy, connect once, dropped-sessions card with optional auto reconnect, "Try another way" sign-in chips (`ssh/`, `SessionPane`, `sessions` store). Hand checks listed under P21. Gap: the forced method applies to the first hop (P27).
+- 2026-11-06 P22: right-click and "..." menus (`ItemMenuList`), quick connect, duplicate host and snippet, search and sort on section lists. Hand checks under P22. Gaps: quick connect makes duplicates and ignores the port (P27).
+- 2026-11-06 P23: host editor restructured (address first, draft card, drill-in pages, vertical route). Shared-login hint to be reworked in P27 (password oracle).
+- 2026-11-06 P24: terminal side panel tabs (snippets, history, theme, font, AI), snippet suggestion, broadcast frame. Search tab and list layout not built.
+- 2026-11-06 P25: key hints, bell switch, import filter and group ticks, SFTP "open with" (follow-up). Gaps: executable file types not refused, remembered apps not listable (P27).
+- 2026-11-06 P26: housekeeping and release blockers; see the P26 entry above.

@@ -56,8 +56,8 @@ A personal desktop SSH client for Mehrdad and his team. It is a clean-room rebui
 
 ## Conventions
 
-- **Nuxt:** `srcDir` is `app/`. Pages exist only for vault sections, `sftp` and `settings`. Components are grouped by area (`hosts/`, `keychain/`, `terminal/`, `sftp/`, `workspace/`, `shell/`). shadcn-vue components go in `components/ui/`.
-- **State:** one Pinia store per area. Stores call typed wrappers in `composables/useTauri.ts`, never `invoke` directly from components.
+- **Nuxt:** `srcDir` is `app/`. The app is a single-page shell: vault sections, `sftp` and `settings` switch on a ref in `pages/index.vue`, because terminal tabs must stay mounted. Components are grouped by area (`hosts/`, `keychain/`, `terminal/`, `sftp/`, `workspace/`, `shell/`). shadcn-vue components go in `components/ui/`.
+- **State:** one Pinia store per area. Stores call typed wrappers in `composables/useTauri.ts`. Components reach Rust through stores, not through `useTauri()` or `invoke` directly (10 older components still do; P27 moves them).
 - **Rust:** `commands/` holds thin `#[tauri::command]` functions. The logic lives in modules (`db`, `vault`, `ssh`, `sftp`, `tunnels`, `keys`, `pty`, `import`, `logs`). DB access goes through `spawn_blocking` and one `Mutex<Connection>`.
 - **Mehrdad is a TypeScript/Nuxt developer** who is growing his Rust. In Rust code, add short comments explaining ownership, async and lifetimes where they are not obvious. Prefer clear code over clever code.
 - **Inheritance:** NULL in `connection_profiles` means inherit. Resolve host → group → parent group → app defaults per field, and return which group each value came from (for "from group X" hints in S03).
@@ -96,7 +96,10 @@ cd src-tauri && cargo clippy -- -D warnings && cargo test
 - Launch is a team rollout, not public. See `replica/launch/launch-plan.md` (phases, checklist, onboarding).
 - The download page is `site/index.html`. It is static, pre-built with the tokens. Set `REPO`/`VERSION` in its script.
 - **P0 to P14 are built.** The 2026-11-05 audit (`replica/audit-2026-11-05.md`) found that most of it has never run in the real window, and listed security, robustness and UI fixes.
-- **Next:** P15 to P20 (audit fixes) in `replica/progress.md`. Type `go` to run the next one.
+- **P15 to P25 are built.** The second audit (`replica/audit-2026-11-06.md`) lists what's left.
+- **Testing:** the test strategy is `replica/testing/test-plan.md`: layers, fake backend, coverage matrix, `pnpm walk` and `pnpm walk:app`.
+- **P26 is done.** `origin` is `jmrezaee/dalan-app` on GitHub; CI is green on the old `v0.1.0` commit; the P21 onward commits are not pushed.
+- **Next:** P27, then T1 to T7, then P28 (hand checks) and P29 (first release), in `replica/progress.md`. Type `go` to run the next one.
 - **Manual checks:** a phase that needs Mehrdad to test something by hand is not done until he has reported back.
 - **M1 is done when F01, F11 and F12 work against a real server:**
   - unlock
@@ -112,7 +115,7 @@ cd src-tauri && cargo clippy -- -D warnings && cargo test
 When Mehrdad types `go` (alone, or as "go" plus a note):
 
 1. **Pick the phase.**
-   - Read `replica/progress.md` and take the first phase not marked `[x]`.
+   - Read `replica/progress.md` and take the first phase marked `[ ]` or `[~]`. Skip `[x]` (done) and `[h]` (built, waiting for the hand-check session in P28).
    - Re-read the parts of `replica/architecture.md`, `replica/design/components.md` and the design canvas that the phase touches.
 2. **Plan.** Post a short plan:
    - the screens, flows and commands to build
