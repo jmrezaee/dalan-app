@@ -1,4 +1,4 @@
-import { addHost, button, byText, createVault, heading, servers, terminalText, typeInTerminal, waitForTerminal } from '../support'
+import { addHost, button, createVault, heading, servers, terminalText, typeInTerminal, waitForTerminal, openHost } from '../support'
 
 // The first real-app test (F10, F01): a fresh vault, a host on the Docker server a, the host-key question, a real
 // shell, and a command whose output comes from the server.
@@ -8,7 +8,7 @@ describe('smoke: the real app against server a', () => {
     await createVault()
     await addHost({ address: a.net_host, port: a.net_port, user: a.user!, password: a.password, label: 'server a' })
 
-    await (await byText('server a')).doubleClick()
+    await openHost('server a')
     await heading('First time connecting to server a').waitForDisplayed()
     await button('Trust and connect').click()
 

@@ -20,7 +20,7 @@ export const config: Options.Testrunner & { capabilities: unknown[] } = {
   logLevel: 'warn',
   reporters: ['spec'],
   framework: 'mocha',
-  mochaOpts: { ui: 'bdd', timeout: 180_000 },
+  mochaOpts: { ui: 'bdd', timeout: 120_000 },
   waitforTimeout: 15_000,
 
   // tauri-driver speaks WebDriver and starts the app (WebKitWebDriver does the talking to the webview).

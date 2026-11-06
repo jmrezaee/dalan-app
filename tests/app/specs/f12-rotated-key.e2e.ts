@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process'
-import { addHost, button, byText, createVault, heading, servers, waitForTerminal } from '../support'
+import { addHost, button, createVault, heading, servers, waitForTerminal, openHost } from '../support'
 
 // F12: after a server's host key changes, Dalan blocks the connection (a real sshd, a real rekey).
 describe('F12: a rotated host key', () => {
@@ -7,7 +7,7 @@ describe('F12: a rotated host key', () => {
     const r = servers().rot!
     await createVault()
     await addHost({ address: r.net_host, port: r.net_port, user: r.user!, password: r.password, label: 'rot' })
-    await (await byText('rot')).doubleClick()
+    await openHost('rot')
     await heading('First time connecting to rot').waitForDisplayed()
     await button('Trust and connect').click()
     await waitForTerminal('$')
@@ -16,7 +16,7 @@ describe('F12: a rotated host key', () => {
 
     execSync('scripts/test-servers.sh rotate rot', { cwd: '/work', stdio: 'ignore' })
 
-    await (await byText('rot')).doubleClick()
+    await openHost('rot')
     await heading("This server's identity changed").waitForDisplayed({ timeout: 30_000 })
     expect(await (await button('Close')).isFocused()).toBe(true)
   })

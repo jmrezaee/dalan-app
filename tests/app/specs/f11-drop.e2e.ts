@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process'
-import { addHost, button, byText, byLabel, createVault, heading, servers, waitForTerminal } from '../support'
+import { addHost, button, byLabel, createVault, heading, servers, waitForTerminal, openHost } from '../support'
 
 // F11: the connection drops when the server restarts; Reconnect brings the same tab back.
 describe('F11: a server restart', () => {
@@ -7,7 +7,7 @@ describe('F11: a server restart', () => {
     const r = servers().rot!
     await createVault()
     await addHost({ address: r.net_host, port: r.net_port, user: r.user!, password: r.password, label: 'rot' })
-    await (await byText('rot')).doubleClick()
+    await openHost('rot')
     await heading('First time connecting to rot').waitForDisplayed()
     await button('Trust and connect').click()
     await waitForTerminal('$')

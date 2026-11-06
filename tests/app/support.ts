@@ -63,15 +63,26 @@ export async function createVault() {
 }
 
 /** Adds a host with the editor (address, user, password), saved but not connected. */
-export async function addHost(h: { address: string, port?: number, user: string, password?: string, label?: string }) {
+export async function addHost(h: { address: string, port?: number, user: string, password?: string, label?: string, jump?: string, keyLabel?: string }) {
   await (await $('//button[contains(normalize-space(.),"Add host") or contains(normalize-space(.),"New host")]')).click()
   await type($('#host-address'), h.address)
   if (h.port) await type($('#host-port'), String(h.port))
   if (h.label) await type($('#host-label'), h.label)
   await type($('#host-user'), h.user)
   if (h.password) await type($('#host-password'), h.password)
+  if (h.keyLabel) await pick($('#host-key'), h.keyLabel)
+  if (h.jump) {
+    // The route is set on its own page: Jump hosts, Custom, add the hop, back.
+    await $('//button[starts-with(normalize-space(.),"Jump hosts")]').click()
+    await $('//*[(self::button or @role="radio") and normalize-space(.)="Custom"]').click()
+    await pick($('//*[@role="combobox"][contains(normalize-space(.),"Add jump host")]'), h.jump)
+    await $('//button[@aria-label="Back to the host"]').click()
+  }
   await button('Save').click()
   await byText(h.label ?? h.address).waitForDisplayed()
+  // The sheet slides away; a click that lands while it is still on top is swallowed.
+  await $('#host-address').waitForDisplayed({ reverse: true, timeout: 10_000 }).catch(() => {})
+  await browser.pause(500)
 }
 
 /** Chooses an entry in one of the app's select boxes (a Reka select: open it, click the option). */
@@ -98,4 +109,11 @@ export async function openHost(label: string) {
     }
   }
   throw last
+}
+
+/** Clicks through the page itself. A WebDriver click on a draggable row can start a drag and never become a click. */
+export async function jsClick(el: ChainablePromiseElement | WebdriverIO.Element) {
+  const e = await el
+  await e.waitForExist()
+  await browser.execute((node: HTMLElement) => node.click(), e as unknown as HTMLElement)
 }

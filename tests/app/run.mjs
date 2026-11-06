@@ -20,6 +20,8 @@ must(run('docker', ['build', '-t', 'dalan-app-test', 'tests/app']), 'Building th
 const spec = args.includes('--spec') ? args[args.indexOf('--spec') + 1] : null
 const walk = args.includes('--walk')
 const specs = walk ? './walk.e2e.ts' : spec ? `./specs/${spec}.e2e.ts` : './specs/**/*.e2e.ts'
+// Old pictures and videos from an earlier run would be mistaken for this run's.
+rmSync(join(root, 'test-results', 'app'), { recursive: true, force: true })
 mkdirSync(join(root, 'test-results', 'app'), { recursive: true })
 if (walk) { rmSync(join(root, 'walk-results'), { recursive: true, force: true }); rmSync(join(root, 'walk-report'), { recursive: true, force: true }) }
 
