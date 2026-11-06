@@ -52,6 +52,7 @@ A personal desktop SSH client for Mehrdad and his team. It is a clean-room rebui
    - Outside `replica/`, never write the original's name or domain anywhere: code, comments, commits, the README or the UI.
    - `python3 replica/sweep.py . --config replica/brand.json` must pass (exit 0). Run it in CI.
    - Public docs are fine for behaviour only.
+   - Hands-on use of your own copy of the original is allowed to observe behaviour only: no copied text, nothing from Mehrdad's machine imported, and notes go in `replica/` in our own words.
    - Use our own name and brand (see `/replica-brand` later).
 
 ## Conventions
