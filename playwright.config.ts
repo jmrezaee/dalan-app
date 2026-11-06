@@ -28,5 +28,6 @@ export default defineConfig({
   expect: { timeout: 10_000, toHaveScreenshot: { maxDiffPixelRatio: 0.01, animations: 'disabled', caret: 'hide' } },
   projects: [
     { name: 'e2e', testDir: 'tests/e2e', use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } } },
+    { name: 'fake', testDir: 'tests/fake', use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } } },
   ],
 })

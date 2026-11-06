@@ -101,7 +101,7 @@ cd src-tauri && cargo clippy -- -D warnings && cargo test
 - **Testing:** the test strategy is `replica/testing/test-plan.md`: layers, fake backend, coverage matrix, `pnpm walk` and `pnpm walk:app`.
 - **P26 is done.** `origin` is `jmrezaee/dalan-app` on GitHub; CI is green on the old `v0.1.0` commit; the P21 onward commits are not pushed.
 - **P27 is built** (`[h]`, waiting for the hand-check session).
-- **Next:** T1 to T7, then P28 (hand checks) and P29 (first release), in `replica/progress.md`. Type `go` to run the next one.
+- **T1 is done.** **Next:** T2 to T7, then P28 (hand checks) and P29 (first release), in `replica/progress.md`. Type `go` to run the next one.
 - **Manual checks:** a phase that needs Mehrdad to test something by hand is not done until he has reported back.
 - **M1 is done when F01, F11 and F12 work against a real server:**
   - unlock

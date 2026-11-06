@@ -1,16 +1,11 @@
 import { expect, type Locator, type Page } from '@playwright/test'
-import { installFakeBackend, type FakeHost } from './fakeBackend'
-
-export const HOSTS: FakeHost[] = [
-  { id: 'h1', label: 'web-1', address: '10.0.0.1' },
-  { id: 'h2', label: 'db-1', address: '10.0.0.2', port: 2222 },
-]
+import { installFakeBackend, type Fake, type FakeOptions } from '../fake'
 
 /** Installs the fake backend on the runner's page and opens the app on the unlock screen (or the vault, if `unlocked`). */
-export async function openApp(page: Page, opts: { unlocked?: boolean, hosts?: FakeHost[] } = {}): Promise<Page> {
-  await installFakeBackend(page, opts.hosts ?? HOSTS, opts.unlocked ?? false)
+export async function openApp(page: Page, opts: { unlocked?: boolean, scenario?: FakeOptions['scenario'], clock?: boolean } = {}): Promise<Fake> {
+  const fake = await installFakeBackend(page, { scenario: opts.scenario ?? 'basic', unlocked: opts.unlocked ?? false, clock: opts.clock })
   await page.goto('/')
-  return page
+  return fake
 }
 
 export async function unlock(page: Page, password = 'correct-horse') {
