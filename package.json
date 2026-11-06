@@ -63,7 +63,9 @@
     "test": "vitest run",
     "screenshot:design": "node scripts/screenshot-design.mjs",
     "test:e2e": "playwright test --project=e2e --project=fake",
-    "check:hooks": "node scripts/check-no-test-hooks.mjs"
+    "check:hooks": "node scripts/check-no-test-hooks.mjs",
+    "test:servers": "scripts/test-servers.sh",
+    "test:servers:rust": "scripts/test-servers.sh up && cd src-tauri && cargo test -- --ignored"
   },
   "pnpm": {
     "overrides": {

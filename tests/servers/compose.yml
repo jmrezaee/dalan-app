@@ -1,0 +1,126 @@
+# Throwaway servers for Dalan's real-server tests (replica/testing/test-plan.md section 11).
+# Start them with scripts/test-servers.sh, which also makes the keys and writes .test-servers/servers.json.
+# Never point any of this at a real machine. Every password here is a test value.
+name: dalan-test
+
+networks:
+  default:
+    name: dalan-test-net
+
+x-linuxserver: &linuxserver
+  image: lscr.io/linuxserver/openssh-server
+  environment: &linuxserver-env
+    PUID: "1000"
+    PGID: "1000"
+
+services:
+  # a: password sign-in, the bastion, and the tunnel server (the script turns forwarding on).
+  a:
+    <<: *linuxserver
+    container_name: dalan-test-ssh
+    networks: { default: { aliases: [bastion] } }
+    ports: ["2222:2222"]
+    environment:
+      <<: *linuxserver-env
+      PASSWORD_ACCESS: "true"
+      USER_NAME: test
+      USER_PASSWORD: test
+
+  # b: key only. Both test keys from .test-servers/ are accepted; the CA key makes certificate sign-in testable.
+  b:
+    <<: *linuxserver
+    container_name: dalan-test-key
+    networks: { default: { aliases: [keyhost] } }
+    ports: ["2223:2222"]
+    volumes: ["../../.test-servers:/keys:ro"]
+    environment:
+      <<: *linuxserver-env
+      PASSWORD_ACCESS: "false"
+      USER_NAME: keyuser
+      PUBLIC_KEY_FILE: /keys/authorized.pub
+
+  # c: only reachable from a, as inner:2222.
+  c:
+    <<: *linuxserver
+    container_name: dalan-test-inner
+    networks: { default: { aliases: [inner] } }
+    environment:
+      <<: *linuxserver-env
+      PASSWORD_ACCESS: "true"
+      USER_NAME: test
+      USER_PASSWORD: test
+
+  # kbd: password, then "Verification code:" (a time-based code; scripts/test-servers.sh otp prints the current one).
+  kbd:
+    build: ./debian-sshd
+    container_name: dalan-test-kbd
+    networks: { default: { aliases: [kbd] } }
+    ports: ["2224:22"]
+    environment: { VARIANT: kbd }
+    volumes: ["../../.test-servers/otp-secret:/otp/secret:ro"]
+
+  # slow: a, behind an 800 ms delay, for the slow connect and the step log.
+  slow:
+    build: ./slow
+    container_name: dalan-test-slow
+    networks: { default: { aliases: [slow] } }
+    ports: ["2225:2225"]
+    cap_add: [NET_ADMIN]
+    depends_on: [a]
+
+  # oldkex: offers only an old key exchange, so the handshake fails with "couldn't agree".
+  oldkex:
+    build: ./debian-sshd
+    container_name: dalan-test-oldkex
+    networks: { default: { aliases: [oldkex] } }
+    ports: ["2226:22"]
+    environment: { VARIANT: oldkex }
+
+  # rot: a plain password server whose host key the tests replace (F12), so no other test depends on it.
+  rot:
+    build: ./debian-sshd
+    container_name: dalan-test-rot
+    networks: { default: { aliases: [rot] } }
+    ports: ["2228:22"]
+    environment: { VARIANT: mosh }
+
+  # web: something to reach through a tunnel.
+  web:
+    image: nginx:alpine
+    container_name: dalan-test-web
+    networks: { default: { aliases: [web] } }
+    ports: ["8088:80"]
+
+  # squid: an HTTP CONNECT proxy that may reach SSH ports.
+  squid:
+    image: ubuntu/squid
+    container_name: dalan-test-squid
+    networks: { default: { aliases: [squid] } }
+    ports: ["3128:3128"]
+    volumes: ["./squid.conf:/etc/squid/squid.conf:ro"]
+    command: ["squid", "-f", "/etc/squid/squid.conf", "-N", "-d", "1"]
+
+  # socks: a SOCKS5 proxy with no sign-in.
+  socks:
+    image: serjs/go-socks5-proxy
+    container_name: dalan-test-socks
+    networks: { default: { aliases: [socks] } }
+    ports: ["1080:1080"]
+    environment: { REQUIRE_AUTH: "false" }
+
+  # telnet: a plain shell with no sign-in, to see the plaintext warning and the Telnet session.
+  telnet:
+    image: busybox:stable
+    container_name: dalan-test-telnet
+    networks: { default: { aliases: [telnet] } }
+    ports: ["2323:23"]
+    command: ["telnetd", "-F", "-l", "/bin/sh"]
+
+  # mosh: needs the mosh client on this computer too; started only with `scripts/test-servers.sh up --extra`.
+  mosh:
+    build: ./debian-sshd
+    container_name: dalan-test-mosh
+    profiles: [extra]
+    networks: { default: { aliases: [mosh] } }
+    ports: ["2227:22", "60001-60010:60001-60010/udp"]
+    environment: { VARIANT: mosh }

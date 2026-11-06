@@ -216,6 +216,9 @@ pub fn run() {
 }
 
 #[cfg(test)]
+pub(crate) mod testservers;
+
+#[cfg(test)]
 mod tests {
     /// `cargo test` regenerates the bindings, so CI can diff them without launching the app.
     #[test]

@@ -292,14 +292,15 @@ async fn rules_are_validated_and_local_ports_cannot_collide() {
 /// Against real OpenSSH (Docker server with `AllowTcpForwarding yes`): a local forward to the
 /// container's own SSH port returns an SSH banner, and a SOCKS5 CONNECT to it does too.
 #[tokio::test]
-#[ignore = "needs the Docker OpenSSH server on 127.0.0.1:2222 with TCP forwarding allowed"]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
 async fn docker_local_and_socks_forwards_reach_the_container() {
     let h = harness(None).await;
     let hid = h.host_id.clone();
     h.state
         .store()
         .with_db_session(move |c, s| {
-            let mut i = crate::ssh::tests::host_input("docker", 2222, None);
+            let mut i =
+                crate::ssh::tests::host_input("docker", crate::testservers::port("a"), None);
             i.id = Some(hid);
             i.password = Some("test".into());
             crate::hosts::save(c, s, &i)

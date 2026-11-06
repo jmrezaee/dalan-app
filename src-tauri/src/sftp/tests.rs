@@ -304,7 +304,7 @@ fn copy_fs(jobs: Vec<(Fs, String, Fs, String)>) -> Run {
 
 /// Real OpenSSH over SFTP: list, upload, download (byte-for-byte), conflict, chmod, rename, delete.
 #[tokio::test]
-#[ignore = "needs the Docker OpenSSH server on 127.0.0.1:2222"]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
 async fn docker_sftp_lists_uploads_downloads_and_deletes() {
     use crate::ssh::tests::{harness, host_input};
     use crate::ssh::{PromptAnswer, Prompts, SessionEvent, SessionIo};
@@ -314,7 +314,7 @@ async fn docker_sftp_lists_uploads_downloads_and_deletes() {
     h.state
         .store()
         .with_db_session(move |c, s| {
-            let mut i = host_input("docker", 2222, None);
+            let mut i = host_input("docker", crate::testservers::port("a"), None);
             i.id = Some(hid);
             i.password = Some("test".into());
             crate::hosts::save(c, s, &i)

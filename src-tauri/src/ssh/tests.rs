@@ -641,7 +641,7 @@ async fn unreachable_host_reports_host_unreachable() {
 /// Against the Docker server from CLAUDE.md ("Testing against real servers"). Run with:
 /// `cargo test docker -- --ignored` after starting the container on port 2222.
 #[tokio::test]
-#[ignore = "needs the Docker OpenSSH server on 127.0.0.1:2222"]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
 async fn docker_openssh_server_runs_a_real_shell() {
     let h = harness(None).await;
     let hid = h.host_id.clone();
@@ -655,7 +655,7 @@ async fn docker_openssh_server_runs_a_real_shell() {
                     id: Some(hid),
                     label: "docker".into(),
                     address: "127.0.0.1".into(),
-                    port: Some(2222),
+                    port: Some(crate::testservers::port("a")),
                     username: Some("test".into()),
                     password: Some("test".into()),
                     clear_password: false,
@@ -1186,7 +1186,7 @@ async fn export_refuses_paths_that_could_escape_the_shell_command() {
 
 /// F02 against real OpenSSH: password sign-in, install a fresh key, then sign in with the key alone.
 #[tokio::test]
-#[ignore = "needs the Docker OpenSSH server on 127.0.0.1:2222"]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
 async fn docker_f02_install_key_then_connect_key_only() {
     let h = harness(None).await;
     let hid = h.host_id.clone();
@@ -1201,7 +1201,7 @@ async fn docker_f02_install_key_then_connect_key_only() {
                     id: Some(hid),
                     label: "docker".into(),
                     address: "127.0.0.1".into(),
-                    port: Some(2222),
+                    port: Some(crate::testservers::port("a")),
                     username: Some("test".into()),
                     password: Some("test".into()),
                     clear_password: false,
@@ -1275,7 +1275,7 @@ async fn docker_f02_install_key_then_connect_key_only() {
                     id: Some(hid),
                     label: "docker".into(),
                     address: "127.0.0.1".into(),
-                    port: Some(2222),
+                    port: Some(crate::testservers::port("a")),
                     username: Some("test".into()),
                     password: None,
                     clear_password: true,
@@ -1536,11 +1536,11 @@ async fn jump_chain_rules_and_a_hop_cannot_be_deleted() {
 
 /// F05 against real OpenSSH: the container as its own bastion (it forwards to its own port 2222).
 #[tokio::test]
-#[ignore = "needs the Docker OpenSSH server on 127.0.0.1:2222 with TCP forwarding allowed"]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
 async fn docker_jump_through_the_container_to_itself() {
     let h = harness(None).await;
     let mk = |label: &str, jump: Vec<String>| {
-        let mut i = host_input(label, 2222, None);
+        let mut i = host_input(label, crate::testservers::port("a"), None);
         i.password = Some("test".into());
         if !jump.is_empty() {
             i.jump_mode = "custom".into();
@@ -1871,4 +1871,211 @@ async fn try_another_way_applies_to_the_target_not_the_bastion() {
         }
         _ => unreachable!(),
     }
+}
+
+// ------------------------------------------------------------------ L3: the Docker test servers (T2)
+// Run with `scripts/test-servers.sh up`, then `cargo test -- --ignored`. The servers are described in
+// `.test-servers/servers.json` (see `crate::testservers`).
+
+/// Points the harness's host at a Docker test server. `password: None` leaves no saved password.
+async fn point_host_at(h: &Harness, s: &crate::testservers::Server, password: Option<&str>) {
+    let mut i = host_input(
+        &s.name,
+        s.port.expect("this server has no port on this computer"),
+        None,
+    );
+    i.id = Some(h.host_id.clone());
+    i.username = s.user.clone();
+    i.password = password.map(String::from);
+    h.state
+        .store()
+        .with_db_session(move |c, s| hosts::save(c, s, &i))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_a_two_step_server_asks_for_the_password_then_the_code() {
+    let h = harness(None).await;
+    point_host_at(&h, &crate::testservers::server("kbd"), None).await;
+    let mut s = start(&h);
+    let (id, kind) = s.expect_prompt().await;
+    assert!(matches!(kind, PromptKind::HostKeyNew { .. }));
+    s.answer(&id, true, None, true);
+    // Two questions from the server's own PAM stack: the password, then the one-time code.
+    for _ in 0..2 {
+        let (id, kind) = s.expect_prompt().await;
+        let PromptKind::KeyboardInteractive { prompt, .. } = kind else {
+            panic!("expected one of the server's questions")
+        };
+        if prompt.to_lowercase().contains("password") {
+            s.answer(&id, true, Some("test"), false);
+        } else {
+            assert!(prompt.contains("Verification code"), "{prompt}");
+            s.answer(&id, true, Some(&crate::testservers::otp()), false);
+        }
+    }
+    s.until(is_state(SessionState::Ready)).await;
+    s.cmds
+        .send(Cmd::Write(b"echo two-step-ok\n".to_vec()))
+        .unwrap();
+    assert!(s.read_until("two-step-ok").await.contains("two-step-ok"));
+    s.cmds.send(Cmd::Close).unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_an_old_key_exchange_is_reported_as_kex_failed() {
+    let h = harness(None).await;
+    point_host_at(&h, &crate::testservers::server("oldkex"), Some("test")).await;
+    let mut s = start(&h);
+    match s.until(|e| matches!(e, SessionEvent::Error { .. })).await {
+        SessionEvent::Error { code, message } => {
+            assert_eq!(code, ErrorCode::KexFailed, "{message}");
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_a_rotated_host_key_blocks_as_changed() {
+    let h = harness(None).await;
+    // `rot` exists for this test: replacing its host key must not disturb the tests that use `a`.
+    point_host_at(&h, &crate::testservers::server("rot"), Some("test")).await;
+    let mut s = start(&h);
+    let (id, kind) = s.expect_prompt().await;
+    assert!(matches!(kind, PromptKind::HostKeyNew { .. }));
+    s.answer(&id, true, None, true); // trust and remember
+    s.until(is_state(SessionState::Ready)).await;
+    s.cmds.send(Cmd::Close).unwrap();
+
+    crate::testservers::script(&["rotate", "rot"]);
+
+    let mut s = start(&h);
+    let (id, kind) = s.expect_prompt().await;
+    assert!(
+        matches!(kind, PromptKind::HostKeyChanged { .. }),
+        "{kind:?}"
+    );
+    s.answer(&id, false, None, false); // cancel is the safe default
+    s.until(|e| {
+        matches!(
+            e,
+            SessionEvent::Error { .. }
+                | SessionEvent::State {
+                    state: SessionState::Closed
+                }
+        )
+    })
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_a_slow_server_takes_its_time_and_still_signs_in() {
+    let h = harness(None).await;
+    point_host_at(&h, &crate::testservers::server("slow"), Some("test")).await;
+    let started = std::time::Instant::now();
+    let mut s = start(&h);
+    let (id, _) = s.expect_prompt().await;
+    s.answer(&id, true, None, false);
+    s.until(is_state(SessionState::Ready)).await;
+    assert!(
+        started.elapsed() > Duration::from_secs(3),
+        "the 800 ms delay was not felt: {:?}",
+        started.elapsed()
+    );
+    s.cmds.send(Cmd::Close).unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_the_http_and_socks_proxies_carry_a_connection_to_the_bastion() {
+    use tokio::io::AsyncReadExt;
+    let a = crate::testservers::server("a");
+    for (socks, name) in [(false, "squid"), (true, "socks")] {
+        let proxy = crate::proxy::Proxy {
+            socks,
+            host: "127.0.0.1".into(),
+            port: crate::testservers::port(name),
+        };
+        // The proxy resolves the Docker name, so this only works through it.
+        let mut stream = crate::proxy::connect(&proxy, &a.net_host, a.net_port)
+            .await
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        let mut banner = [0u8; 8];
+        stream.read_exact(&mut banner).await.unwrap();
+        assert_eq!(&banner, b"SSH-2.0-", "{name}");
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_the_telnet_parser_talks_to_a_real_telnet_server() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut stream =
+        tokio::net::TcpStream::connect(("127.0.0.1", crate::testservers::port("telnet")))
+            .await
+            .unwrap();
+    let mut parser = crate::telnet::Parser::new(80, 24);
+    stream
+        .write_all(&crate::telnet::encode_input(b"echo telnet-ok-$((6*7))\n"))
+        .await
+        .unwrap();
+    let mut shown = Vec::new();
+    let mut buf = [0u8; 1024];
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !String::from_utf8_lossy(&shown).contains("telnet-ok-42") {
+            let n = stream.read(&mut buf).await.unwrap();
+            assert!(n > 0, "the server closed the connection");
+            let (display, reply) = parser.feed(&buf[..n]);
+            shown.extend(display);
+            if !reply.is_empty() {
+                stream.write_all(&reply).await.unwrap();
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for the shell's answer");
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_key_only_server_accepts_the_test_key() {
+    let b = crate::testservers::server("b");
+    let h = harness(None).await;
+    let pem = std::fs::read_to_string(crate::testservers::root().join(b.key.as_deref().unwrap()))
+        .unwrap();
+    let key = h
+        .state
+        .store()
+        .with_db_session(move |c, s| {
+            let new = crate::keys::parse_import(&crate::keys::ImportInput {
+                label: "test key".into(),
+                pem: Some(pem),
+                path: None,
+                passphrase: None,
+                save_passphrase: false,
+            })?;
+            crate::keys::store(c, s, &new)
+        })
+        .await
+        .unwrap();
+    let mut i = host_input("keyuser", b.port.unwrap(), None);
+    i.id = Some(h.host_id.clone());
+    i.username = b.user.clone();
+    i.password = None;
+    i.key_id = Some(key.id);
+    h.state
+        .store()
+        .with_db_session(move |c, s| hosts::save(c, s, &i))
+        .await
+        .unwrap();
+    let mut s = start(&h);
+    let (id, _) = s.expect_prompt().await;
+    s.answer(&id, true, None, false);
+    s.until(is_state(SessionState::Ready)).await;
+    s.cmds.send(Cmd::Close).unwrap();
 }

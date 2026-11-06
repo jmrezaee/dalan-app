@@ -1,0 +1,4 @@
+auth required pam_unix.so
+auth required pam_google_authenticator.so
+account required pam_unix.so
+session required pam_permit.so

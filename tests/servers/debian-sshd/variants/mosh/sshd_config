@@ -1,0 +1,4 @@
+Port 22
+PasswordAuthentication yes
+PermitRootLogin no
+AcceptEnv LANG LC_*

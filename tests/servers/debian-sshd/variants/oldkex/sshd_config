@@ -1,0 +1,4 @@
+Port 22
+PasswordAuthentication yes
+KexAlgorithms diffie-hellman-group14-sha1
+PermitRootLogin no
