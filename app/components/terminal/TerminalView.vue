@@ -63,6 +63,22 @@ function refit() {
   fit?.fit()
 }
 
+/** A 120 ms soft tone. The audio context is made on first use, as browsers require a user gesture before sound. */
+let audio: AudioContext | null = null
+function beep() {
+  try {
+    audio ??= new AudioContext()
+    const osc = audio.createOscillator()
+    const gain = audio.createGain()
+    osc.frequency.value = 880
+    gain.gain.value = 0.05
+    osc.connect(gain).connect(audio.destination)
+    osc.start()
+    osc.stop(audio.currentTime + 0.12)
+  }
+  catch { /* no audio: the bell stays silent */ }
+}
+
 onMounted(() => {
   term = new Terminal({
     fontFamily: fontFor(),
@@ -95,6 +111,7 @@ onMounted(() => {
 
   term.onData(d => sessions.input(props.session, encoder.encode(d)))
   term.onBinary(d => sessions.input(props.session, Uint8Array.from(d, c => c.charCodeAt(0))))
+  term.onBell(() => { if (settings.terminal.bell) beep() })
   term.onResize(({ cols, rows }) => sessions.resize(props.session, cols, rows))
 
   // Report how many bytes xterm has actually drawn, so Rust can pause the server when we fall behind.

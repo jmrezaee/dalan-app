@@ -31,6 +31,7 @@ watch(open, (o) => {
   picked.value = new Set()
   groupId.value = null
   previewed.value = false
+  filter.value = ''
   error.value = ''
 })
 watch(kind, () => { previewed.value = false; error.value = '' })
@@ -62,14 +63,33 @@ async function choose() {
   }
 }
 
-const allOn = computed(() => rows.value.length > 0 && picked.value.size === rows.value.length)
+// A filter box and, when the file has folders or groups, one tick box per group.
+const filter = ref('')
+const shown = computed(() => {
+  const q = filter.value.trim().toLowerCase()
+  return rows.value.flatMap((r, i) => (!q || `${r.label} ${r.address} ${r.username ?? ''} ${r.group ?? ''}`.toLowerCase().includes(q) ? [i] : []))
+})
+const shownRows = computed(() => shown.value.map(i => ({ i, r: rows.value[i]! })))
+const sourceGroups = computed(() => [...new Set(rows.value.map(r => r.group).filter((g): g is string => !!g))])
+const groupIndexes = (g: string) => rows.value.flatMap((r, i) => (r.group === g ? [i] : []))
+const groupOn = (g: string) => groupIndexes(g).every(i => picked.value.has(i))
+function toggleGroup(g: string) {
+  const on = groupOn(g)
+  const s = new Set(picked.value)
+  for (const i of groupIndexes(g)) { if (on) s.delete(i); else s.add(i) }
+  picked.value = s
+}
+const allOn = computed(() => shown.value.length > 0 && shown.value.every(i => picked.value.has(i)))
 function toggle(i: number) {
   const s = new Set(picked.value)
   if (!s.delete(i)) s.add(i)
   picked.value = s
 }
 function toggleAll() {
-  picked.value = allOn.value ? new Set() : new Set(rows.value.map((_, i) => i))
+  // Acts on the rows the filter shows.
+  const s = new Set(picked.value)
+  for (const i of shown.value) { if (allOn.value) s.delete(i); else s.add(i) }
+  picked.value = s
 }
 
 async function submit() {
@@ -142,12 +162,17 @@ async function submit() {
           <li v-for="w in fileWarnings" :key="w" class="flex gap-2"><TriangleAlert class="mt-0.5 size-3.5 shrink-0 text-warning" />{{ w }}</li>
         </ul>
 
+        <div v-if="rows.length > 1" class="flex flex-wrap items-center gap-3">
+          <SearchInput v-model="filter" placeholder="Filter the list" :result-count="shown.length" />
+          <label v-for="g in sourceGroups" :key="g" class="flex items-center gap-1.5 text-xs text-muted"><Checkbox :model-value="groupOn(g)" :aria-label="`Select the ${g} group`" @update:model-value="toggleGroup(g)" />{{ g }}</label>
+        </div>
         <div v-if="rows.length" class="max-h-[320px] overflow-auto rounded-md border border-border">
           <div class="sticky top-0 flex items-center gap-3 border-b border-border bg-surface px-3 py-2 text-xs text-muted">
             <Checkbox :model-value="allOn" aria-label="Select all" @update:model-value="toggleAll" />
             {{ picked.size }} of {{ rows.length }} selected
           </div>
-          <label v-for="(r, i) in rows" :key="i" class="flex cursor-pointer items-start gap-3 border-b border-border px-3 py-2 last:border-b-0 hover:bg-surface-hover">
+          <p v-if="!shown.length" class="px-3 py-4 text-sm text-muted">No rows match.</p>
+          <label v-for="{ i, r } in shownRows" :key="i" class="flex cursor-pointer items-start gap-3 border-b border-border px-3 py-2 last:border-b-0 hover:bg-surface-hover">
             <Checkbox class="mt-1" :model-value="picked.has(i)" :aria-label="`Import ${r.label}`" @update:model-value="toggle(i)" />
             <span class="min-w-0 flex-1">
               <span class="flex items-center gap-2 text-sm">

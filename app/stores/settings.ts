@@ -22,9 +22,11 @@ export interface TerminalSettings {
   auto_reconnect: boolean
   /** The side panel tab that was open last. */
   side_tab: SideTab
+  /** A short beep when a program rings the terminal bell. */
+  bell: boolean
 }
 
-const TERMINAL_DEFAULTS: TerminalSettings = { font_size: 14, cursor: 'block', cursor_blink: true, scrollback: 10000, copy_on_select: false, font_family: '', default_theme: '', auto_reconnect: false, side_tab: 'snippets' }
+const TERMINAL_DEFAULTS: TerminalSettings = { font_size: 14, cursor: 'block', cursor_blink: true, scrollback: 10000, copy_on_select: false, font_family: '', default_theme: '', auto_reconnect: false, side_tab: 'snippets', bell: false }
 const clamp = (n: unknown, lo: number, hi: number, fallback: number) => (typeof n === 'number' && Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n))) : fallback)
 
 /** S23. Loaded from Rust after unlock, saved back on change. Terminals read `terminal` live. */
@@ -61,6 +63,7 @@ export const useSettingsStore = defineStore('settings', () => {
     terminal.font_family = typeof v.font_family === 'string' ? v.font_family.slice(0, 80) : ''
     terminal.default_theme = typeof v.default_theme === 'string' ? v.default_theme : ''
     terminal.auto_reconnect = v.auto_reconnect === true
+    terminal.bell = v.bell === true
     terminal.side_tab = SIDE_TABS.find(t => t === v.side_tab) ?? 'snippets'
   }
 

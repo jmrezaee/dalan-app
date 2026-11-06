@@ -14,9 +14,9 @@ const error = ref('')
 const busy = ref(false)
 
 const HINTS: Record<string, string> = {
-  ed25519: 'Ed25519 is short, fast and works on any OpenSSH from 2014 on.',
-  ecdsa: 'ECDSA works almost everywhere. Pick the curve below.',
-  rsa4096: 'RSA 4096 is for old servers that don\'t support Ed25519. Generating it takes a few seconds.',
+  ed25519: 'Ed25519 is short, fast and works on any OpenSSH from 2014 on, and on GitHub and GitLab. The best default.',
+  ecdsa: 'ECDSA works almost everywhere, including network gear that predates Ed25519. Pick the curve below; P-256 is the usual one.',
+  rsa4096: 'RSA 4096 is for old servers that don\'t support Ed25519. Generating it takes a few seconds, and signing is slower.',
 }
 
 watch(open, (o) => {
@@ -53,6 +53,7 @@ async function submit() {
           <Segmented v-model="form.type" label="Key type" :options="[{ value: 'ed25519', label: 'Ed25519' }, { value: 'ecdsa', label: 'ECDSA' }, { value: 'rsa4096', label: 'RSA 4096' }]" />
           <Segmented v-if="form.type === 'ecdsa'" v-model="form.ecdsa" label="ECDSA curve" :options="[{ value: 'ecdsa_p256', label: 'P-256' }, { value: 'ecdsa_p384', label: 'P-384' }, { value: 'ecdsa_p521', label: 'P-521' }]" />
           <p class="text-xs text-muted">{{ HINTS[form.type] }}</p>
+          <p class="text-2xs text-muted">Post-quantum signature keys (ML-DSA) exist only on servers that switch them on, and Dalan doesn't create them yet. 1024-bit RSA is not offered: it is too weak.</p>
         </div>
         <div class="flex flex-col gap-1.5">
           <Label for="gen-pass">Passphrase (optional)</Label>

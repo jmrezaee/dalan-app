@@ -89,3 +89,5 @@ Snippet suggestion from repeated commands,terminal,could,yes,partial,P24; waits 
 Broadcast frame on workspace panes,terminal,should,yes,partial,P24; waits for hand check
 Host editor with drill-in blocks and draft card,hosts,should,yes,partial,P23; waits for hand check
 Shared login hint,hosts,could,yes,partial,P23; waits for hand check
+Terminal bell sound setting,terminal,could,yes,partial,P25; waits for hand check
+Import review filter and group selection,hosts,should,yes,partial,P25; waits for hand check
