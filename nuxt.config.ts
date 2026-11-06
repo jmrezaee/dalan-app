@@ -15,7 +15,8 @@ export default defineNuxtConfig({
   devServer: { port: 4000, host: '127.0.0.1' },
   // `DALAN_TEST=1 pnpm build` is the browser-test build: it keeps the test hooks (app/utils/testHooks.ts) and writes
   // to .output-test, so a production build in .output never contains them.
-  nitro: process.env.DALAN_TEST === '1' ? { output: { dir: '.output-test', publicDir: '.output-test/public' } } : {},
+  // DALAN_APP_TEST=1 keeps the normal output folder, for the real-app build that Tauri embeds (tests/app).
+  nitro: process.env.DALAN_TEST === '1' && process.env.DALAN_APP_TEST !== '1' ? { output: { dir: '.output-test', publicDir: '.output-test/public' } } : {},
   vite: {
     define: { __DALAN_TEST__: JSON.stringify(process.env.DALAN_TEST === '1') },
     plugins: [tailwindcss()],
