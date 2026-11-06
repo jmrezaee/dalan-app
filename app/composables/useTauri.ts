@@ -38,6 +38,7 @@ export function useTauri() {
     serialPorts: () => unwrap(commands.serialPorts()),
     hostSetProtocol: (id: string, protocol: string) => unwrap(commands.hostSetProtocol(id, protocol)),
     hostDelete: (id: string) => unwrap(commands.hostDelete(id)),
+    hostDuplicate: (id: string) => unwrap(commands.hostDuplicate(id)),
     groupSave: (input: GroupInput) => unwrap(commands.groupSave(input)),
     groupDelete: (id: string) => unwrap(commands.groupDelete(id)),
     hostsMove: (ids: string[], groupId: string | null) => unwrap(commands.hostsMove(ids, groupId)),

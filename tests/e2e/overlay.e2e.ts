@@ -80,7 +80,7 @@ describe('unlock and the connection overlay (F01, F11, F12)', () => {
   it('S02: right-click on a host card opens the menu; Connect opens a session; the tab menu closes others', async () => {
     const page = await openApp(browser, url, { unlocked: true })
     await page.getByText('web-1').click({ button: 'right' })
-    for (const name of ['Connect', 'Connect with SFTP', 'Add to workspace', 'Edit', 'Move to group', 'Copy address', 'Delete'])
+    for (const name of ['Connect', 'Connect with SFTP', 'Add to workspace', 'Edit', 'Duplicate', 'Move to group', 'Copy address', 'Delete'])
       await seen(page.getByRole('menuitem', { name, exact: true }))
     await page.getByRole('menuitem', { name: 'Connect', exact: true }).click()
     await seen(page.getByRole('heading', { name: 'Connecting to web-1…' }))

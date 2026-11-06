@@ -50,6 +50,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::hosts::host_get,
             commands::hosts::host_save,
             commands::hosts::host_delete,
+            commands::hosts::host_duplicate,
             commands::hosts::host_set_protocol,
             commands::serial::serial_get,
             commands::serial::serial_set,

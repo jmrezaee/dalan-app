@@ -23,6 +23,8 @@ export const commands = {
 	/**  Creates when `input.id` is `None`, otherwise updates. The password goes straight into `secrets`. */
 	hostSave: (input: HostInput_Deserialize) => typedError<HostSummary_Serialize, AppError>(__TAURI_INVOKE("host_save", { input })),
 	hostDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("host_delete", { id })),
+	/**  Copies a host (profile, chain, tags, environment, saved secrets) as "<label> copy". */
+	hostDuplicate: (id: string) => typedError<HostSummary_Serialize, AppError>(__TAURI_INVOKE("host_duplicate", { id })),
 	/**  Switches a host between `ssh` and `telnet`. */
 	hostSetProtocol: (id: string, protocol: string) => typedError<null, AppError>(__TAURI_INVOKE("host_set_protocol", { id, protocol })),
 	serialGet: (hostId: string) => typedError<SerialConfig, AppError>(__TAURI_INVOKE("serial_get", { hostId })),

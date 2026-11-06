@@ -32,6 +32,18 @@ pub async fn host_save(state: State<'_, AppState>, input: HostInput) -> AppResul
         .await
 }
 
+/// Copies a host (profile, chain, tags, environment, saved secrets) as "<label> copy".
+#[tauri::command]
+#[specta::specta]
+pub async fn host_duplicate(
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<hosts::HostSummary> {
+    state
+        .with_db_session(move |c, s| hosts::duplicate(c, s, &id))
+        .await
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn host_delete(state: State<'_, AppState>, id: String) -> AppResult<()> {

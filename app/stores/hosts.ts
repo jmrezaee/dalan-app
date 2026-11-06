@@ -179,6 +179,19 @@ export const useHostsStore = defineStore('hosts', () => {
     toast(`Deleted ${h.label}.`)
   }
 
+  /** Copies a host with its tags and saved password (done in Rust). */
+  async function duplicate(h: HostSummary) {
+    try {
+      await api.hostDuplicate(h.id)
+    }
+    catch (e) {
+      toast.error(message(e))
+      return
+    }
+    await refresh()
+    toast(`Copied ${h.label}.`)
+  }
+
   async function removeGroup(g: GroupSummary) {
     try {
       await api.groupDelete(g.id)
@@ -219,6 +232,6 @@ export const useHostsStore = defineStore('hosts', () => {
   return {
     hosts, groups, loaded, tagInfos, recent, importOpen, themes, themeFor, query, view, currentGroupId, selectedTags, editing, editingGroup,
     allTags, searching, currentGroup, breadcrumb, childGroups, visibleHosts,
-    groupLabel, groupOptions, inheritedFor, toggleTag, deleteTag, refresh, save, saveGroup, remove, removeGroup, move, clear,
+    groupLabel, groupOptions, inheritedFor, toggleTag, deleteTag, refresh, save, saveGroup, remove, removeGroup, duplicate, move, clear,
   }
 })

@@ -371,6 +371,100 @@ pub fn save(conn: &mut Connection, s: &VaultSession, input: &HostInput) -> AppRe
     get(conn, &s.vault_id, &id)
 }
 
+/// Copies a host with everything it owns: its profile, jump chain, tags, environment, serial settings
+/// and every saved secret. Secrets are re-encrypted as new rows inside Rust and never leave it.
+pub fn duplicate(conn: &mut Connection, s: &VaultSession, id: &str) -> AppResult<HostSummary> {
+    let tx = conn.transaction()?;
+    let (profile_id, label): (String, String) = tx
+        .query_row(
+            "SELECT profile_id, label FROM hosts WHERE id = ?1 AND vault_id = ?2",
+            params![id, s.vault_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?
+        .ok_or_else(|| AppError::not_found("That host no longer exists."))?;
+    let (new_host, new_profile, now) = (
+        uuid::Uuid::now_v7().to_string(),
+        uuid::Uuid::now_v7().to_string(),
+        now_ms(),
+    );
+    // Same row, new ids; the secret columns are filled in below with copies.
+    tx.execute(
+        "INSERT INTO connection_profiles (id, vault_id, username, identity_id, password_secret_id, key_id, ssh_port, proxy_type, proxy_host, proxy_port, proxy_username, proxy_secret_id, chain_mode, agent_forwarding, startup_snippet_id, env_mode, terminal_theme, font_size, charset, keepalive_secs, sftp_start_path, created_at, updated_at)
+         SELECT ?1, vault_id, username, identity_id, NULL, key_id, ssh_port, proxy_type, proxy_host, proxy_port, proxy_username, NULL, chain_mode, agent_forwarding, startup_snippet_id, env_mode, terminal_theme, font_size, charset, keepalive_secs, sftp_start_path, ?2, ?2
+         FROM connection_profiles WHERE id = ?3",
+        params![new_profile, now, profile_id],
+    )?;
+    for col in ["password_secret_id", "proxy_secret_id"] {
+        let old: Option<String> = tx.query_row(
+            &format!("SELECT {col} FROM connection_profiles WHERE id = ?1"),
+            [&profile_id],
+            |r| r.get(0),
+        )?;
+        if let Some(copy) = copy_secret(&tx, s, old.as_deref())? {
+            tx.execute(
+                &format!("UPDATE connection_profiles SET {col} = ?1 WHERE id = ?2"),
+                params![copy, new_profile],
+            )?;
+        }
+    }
+    tx.execute(
+        "INSERT INTO profile_jump_hosts (profile_id, position, jump_host_id) SELECT ?1, position, jump_host_id FROM profile_jump_hosts WHERE profile_id = ?2",
+        params![new_profile, profile_id],
+    )?;
+    // Environment variables: plain values are copied as they are, sensitive ones as new secrets.
+    let vars: Vec<(String, Option<String>, Option<String>, i64)> = {
+        let mut st = tx.prepare(
+            "SELECT name, value, value_secret_id, sort FROM profile_env_vars WHERE profile_id = ?1",
+        )?;
+        let rows = st.query_map([&profile_id], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })?;
+        rows.collect::<Result<_, _>>()?
+    };
+    for (name, value, secret, sort) in vars {
+        let copy = copy_secret(&tx, s, secret.as_deref())?;
+        tx.execute(
+            "INSERT INTO profile_env_vars (profile_id, name, value, value_secret_id, sort) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![new_profile, name, value, copy, sort],
+        )?;
+    }
+    tx.execute(
+        "INSERT INTO hosts (id, vault_id, group_id, profile_id, label, address, os_hint, sftp_enabled, protocol, sort, created_at, updated_at)
+         SELECT ?1, vault_id, group_id, ?2, ?3, address, os_hint, sftp_enabled, protocol, sort, ?4, ?4 FROM hosts WHERE id = ?5",
+        params![new_host, new_profile, format!("{label} copy"), now, id],
+    )?;
+    tx.execute(
+        "INSERT INTO serial_settings (host_id, baud, data_bits, stop_bits, parity, flow) SELECT ?1, baud, data_bits, stop_bits, parity, flow FROM serial_settings WHERE host_id = ?2",
+        params![new_host, id],
+    )?;
+    tx.execute(
+        "INSERT INTO host_tags (host_id, tag_id) SELECT ?1, tag_id FROM host_tags WHERE host_id = ?2",
+        params![new_host, id],
+    )?;
+    tx.commit()?;
+    get(conn, &s.vault_id, &new_host)
+}
+
+/// Re-encrypts a secret as a new row, so two owners never share one. `None` stays `None`.
+fn copy_secret(
+    tx: &rusqlite::Transaction,
+    s: &VaultSession,
+    id: Option<&str>,
+) -> AppResult<Option<String>> {
+    let Some(id) = id else { return Ok(None) };
+    let kind: String =
+        tx.query_row("SELECT kind FROM secrets WHERE id = ?1", [id], |r| r.get(0))?;
+    let kind = match kind.as_str() {
+        "passphrase" => secrets::SecretKind::Passphrase,
+        "private_key" => secrets::SecretKind::PrivateKey,
+        "env_value" => secrets::SecretKind::EnvValue,
+        _ => secrets::SecretKind::Password,
+    };
+    let plain = secrets::get(tx, s, id)?; // zeroized when dropped
+    Ok(Some(secrets::put(tx, s, kind, &plain)?))
+}
+
 /// Deletes the host, its profile and its password secret. (`in_use` for jump hops arrives with P8.)
 pub fn delete(conn: &mut Connection, s: &VaultSession, id: &str) -> AppResult<()> {
     // A host used as a jump host can't go until it is removed from those chains (RESTRICT in the schema).
@@ -784,6 +878,33 @@ mod tests {
             .unwrap();
         assert!(!String::from_utf8_lossy(&ct).contains("hunter2"));
         assert_eq!(tree(&c, &s.vault_id).unwrap().hosts.len(), 1);
+    }
+
+    #[test]
+    fn duplicate_copies_the_host_tags_and_password_as_its_own_secret() {
+        let (mut c, s) = fresh();
+        let mut a = input("web-1");
+        a.tags = vec!["prod".into()];
+        let a = save(&mut c, &s, &a).unwrap();
+        let copy = duplicate(&mut c, &s, &a.id).unwrap();
+        assert_ne!(copy.id, a.id);
+        assert_eq!(copy.label, "web-1 copy");
+        assert_eq!(copy.address, a.address);
+        assert_eq!(copy.tags, vec!["prod".to_string()]);
+        assert!(copy.has_password);
+        // Two owners, two secrets: deleting one host must not take the other's password.
+        assert_eq!(secret_count(&c), 2);
+        let (a_pw, copy_pw) = (
+            connect_info(&c, &s, &a.id).unwrap().password,
+            connect_info(&c, &s, &copy.id).unwrap().password,
+        );
+        assert_eq!(a_pw.as_deref().map(|p| p.as_str()), Some("hunter2hunter2"));
+        assert_eq!(
+            copy_pw.as_deref().map(|p| p.as_str()),
+            Some("hunter2hunter2")
+        );
+        delete(&mut c, &s, &a.id).unwrap();
+        assert!(connect_info(&c, &s, &copy.id).unwrap().password.is_some());
     }
 
     #[test]

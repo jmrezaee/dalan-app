@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // S02: groups first, then the hosts in the group you are in. Search and tag filters look at every host.
-import { ChevronRight, Copy, Download, FolderOpen, FolderPlus, FolderTree, LayoutGrid, List, Pencil, Plug, Plus, Server, SquareTerminal, Trash2 } from '@lucide/vue'
+import { ChevronRight, Copy, CopyPlus, Download, FolderOpen, FolderPlus, FolderTree, LayoutGrid, List, Pencil, Plug, Plus, Server, SquareTerminal, Trash2 } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import type { MenuItem } from '@/components/common/ItemMenuList.vue'
 import type { GroupSummary, HostSummary } from '~/types/bindings'
@@ -42,6 +42,7 @@ function menuFor(h: HostSummary): MenuItem[] {
       ],
     },
     { label: 'Edit', icon: Pencil, separator: true, onSelect: () => { hosts.editing = h } },
+    { label: 'Duplicate', icon: CopyPlus, onSelect: () => hosts.duplicate(h) },
     {
       label: 'Move to group',
       icon: FolderTree,

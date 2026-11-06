@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import { filterSort } from '~/utils/listView'
 import type { MenuItem } from '@/components/common/ItemMenuList.vue'
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
 // S11: snippets grouped by package.
-import { Code2, FolderPlus, Pencil, Play, Plus, Trash2 } from '@lucide/vue'
+import { Code2, CopyPlus, FolderPlus, Pencil, Play, Plus, Trash2 } from '@lucide/vue'
 import type { PackageSummary, SnippetSummary } from '~/types/bindings'
 import { buttonVariants } from '@/components/ui/button'
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
@@ -26,11 +27,14 @@ function openSheet(s: SnippetSummary | null) {
   sheetOpen.value = true
 }
 
+const listQuery = ref('')
+const listDesc = ref(false)
+const shown = computed(() => filterSort(snippets.snippets, listQuery.value, listDesc.value, s => s.label, s => `${s.label} ${s.script}`))
 const groups = computed(() => {
   const out: { id: string | null, label: string, pkg: PackageSummary | null, items: SnippetSummary[] }[] = snippets.packages.map(p => ({
-    id: p.id, label: p.label, pkg: p, items: snippets.snippets.filter(s => s.package_id === p.id),
+    id: p.id, label: p.label, pkg: p, items: shown.value.filter(s => s.package_id === p.id),
   }))
-  const loose = snippets.snippets.filter(s => !s.package_id)
+  const loose = shown.value.filter(s => !s.package_id)
   if (loose.length) out.push({ id: null, label: snippets.packages.length ? 'No package' : 'Snippets', pkg: null, items: loose })
   return out
 })
@@ -77,6 +81,7 @@ function snippetMenu(s: (typeof snippets.snippets)[number]): MenuItem[] {
   return [
     { label: 'Run…', icon: Play, onSelect: () => askRun(s) },
     { label: 'Edit', icon: Pencil, onSelect: () => openSheet(s) },
+    { label: 'Duplicate', icon: CopyPlus, onSelect: () => snippets.duplicate(s) },
     { label: 'Delete', icon: Trash2, danger: true, separator: true, onSelect: () => askDelete(s) },
   ]
 }
@@ -84,6 +89,7 @@ function snippetMenu(s: (typeof snippets.snippets)[number]): MenuItem[] {
 
 <template>
   <PageToolbar title="Snippets">
+    <ListControls v-if="snippets.loaded && (snippets.snippets.length || snippets.packages.length)" v-model:query="listQuery" v-model:desc="listDesc" placeholder="Search snippets" />
     <SplitButton v-if="snippets.loaded && (snippets.snippets.length || snippets.packages.length)" label="New snippet" @click="openSheet(null)">
       <template #icon><Plus /></template>
       <DropdownMenuItem @select="openPackage(null)"><FolderPlus />New package</DropdownMenuItem>

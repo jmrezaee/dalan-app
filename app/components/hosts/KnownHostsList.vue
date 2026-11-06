@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { filterSort } from '~/utils/listView'
 // S14. Fingerprints Dalan has trusted. Forgetting one means the next connection asks again.
 import { ShieldCheck, Trash2 } from '@lucide/vue'
 import { toast } from 'vue-sonner'
@@ -9,6 +10,9 @@ import { buttonVariants } from '@/components/ui/button'
 const api = useTauri()
 const rows = ref<KnownHost[]>([])
 const loaded = ref(false)
+const listQuery = ref('')
+const listDesc = ref(false)
+const shown = computed(() => filterSort(rows.value, listQuery.value, listDesc.value, r => r.host_pattern, r => `${r.host_pattern} ${r.fingerprint}`))
 const target = ref<KnownHost | null>(null)
 const confirmOpen = ref(false)
 
@@ -47,8 +51,9 @@ const date = (ms: number | null) => (ms === null ? '' : new Date(ms).toLocaleDat
 <template>
   <div class="flex-1 overflow-auto p-6">
     <EmptyState v-if="loaded && !rows.length" :icon="ShieldCheck" title="No trusted servers yet" text="Fingerprints appear here after your first connection." />
-    <ul v-else class="flex flex-col gap-1.5" aria-label="Trusted servers">
-      <li v-for="r in rows" :key="r.id" class="group flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2">
+    <div v-if="rows.length" class="mb-4 flex items-center gap-2"><ListControls v-model:query="listQuery" v-model:desc="listDesc" placeholder="Search trusted servers" :count="shown.length" /></div>
+    <ul v-if="rows.length" class="flex flex-col gap-1.5" aria-label="Trusted servers">
+      <li v-for="r in shown" :key="r.id" class="group flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2">
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2"><span class="truncate font-mono text-sm">{{ r.host_pattern }}</span><Badge variant="outline">{{ r.key_type }}</Badge></div>
           <div class="truncate font-mono text-xs text-muted">{{ r.fingerprint }}</div>

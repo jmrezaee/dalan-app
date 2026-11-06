@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { filterSort } from '~/utils/listView'
 // S09: the rules, their live state, and a switch each.
 import { Plus, Waypoints } from '@lucide/vue'
 import type { ForwardSummary } from '~/types/bindings'
@@ -6,6 +7,10 @@ import { buttonVariants } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 const forwards = useForwardsStore()
+
+const listQuery = ref('')
+const listDesc = ref(false)
+const shownRules = computed(() => filterSort(forwards.rules, listQuery.value, listDesc.value, r => r.label || r.host_label, r => `${r.label} ${r.host_label} ${r.bind_port} ${r.dest_address ?? ''}`))
 
 const sheetOpen = ref(false)
 const editing = ref<ForwardSummary | null>(null)
@@ -40,6 +45,7 @@ const promptRule = computed(() => forwards.rules.find(r => r.id === forwards.pro
 
 <template>
   <PageToolbar title="Port forwarding">
+    <ListControls v-if="forwards.loaded && forwards.rules.length" v-model:query="listQuery" v-model:desc="listDesc" placeholder="Search rules" :count="shownRules.length" />
     <Button v-if="forwards.loaded && forwards.rules.length" @click="openSheet(null)"><Plus />New rule</Button>
   </PageToolbar>
 
@@ -49,7 +55,7 @@ const promptRule = computed(() => forwards.rules.find(r => r.id === forwards.pro
     </EmptyState>
     <div v-else class="flex max-w-[760px] flex-col gap-2">
       <RuleCard
-        v-for="r in forwards.rules"
+        v-for="r in shownRules"
         :key="r.id"
         :kind="letter(r)"
         :label="r.label"
