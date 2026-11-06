@@ -16,6 +16,12 @@ const basic = (): Seed => ({
   files: { local: [dir('home', [dir('me', [file('notes.txt', 412), file('.profile', 807)])])] },
 })
 
-export const scenarios = { fresh, empty, basic, team } as const
+/** The team's hosts with no groups yet: for the walkthrough's "organise" chapter. */
+const flat = (): Seed => {
+  const t = team()
+  return { ...t, groups: [], hosts: (t.hosts ?? []).map(h => ({ ...h, group_id: null })), identities: t.identities?.filter(i => !i.password) ?? [] }
+}
+
+export const scenarios = { fresh, empty, basic, team, flat } as const
 export type ScenarioName = keyof typeof scenarios
 export { NOW }

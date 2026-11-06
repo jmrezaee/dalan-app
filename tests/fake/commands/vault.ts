@@ -7,10 +7,10 @@ export const MASTER = 'correct-horse'
 
 export const vault: Pick<Handlers, Keys> = {
   appInfo: () => ({ version: '0.1.0', data_dir: '/home/me/.local/share/app.dalan.desktop', platform: 'linux' }),
-  vaultStatus: (_a, { m }) => ({
-    exists: m.vault.exists, unlocked: m.vault.unlocked, auto_lock_minutes: m.vault.autoLockMinutes,
-    cooldown_secs: m.vault.wrongTries >= 5 ? 30 : null,
-  }),
+  vaultStatus: (_a, { m }) => {
+    const left = Math.ceil((m.vault.cooldownUntil - Date.now()) / 1000)
+    return { exists: m.vault.exists, unlocked: m.vault.unlocked, auto_lock_minutes: m.vault.autoLockMinutes, cooldown_secs: left > 0 ? left : null }
+  },
   vaultCreate: (a, { m }) => {
     if (String(a.masterPassword ?? '').length < 8) fail('validation', 'Use at least 8 characters.')
     m.vault.exists = true
@@ -18,9 +18,14 @@ export const vault: Pick<Handlers, Keys> = {
     return null
   },
   vaultUnlock: (a, { m }) => {
-    if (m.vault.wrongTries >= 5) fail('too_many_attempts', 'Too many wrong tries. Wait 30 seconds.')
+    // Five wrong tries start a 30 second cooldown, counted on the page clock.
+    if (Date.now() < m.vault.cooldownUntil) fail('too_many_attempts', 'Too many wrong tries. Wait 30 seconds.')
     if (a.masterPassword !== MASTER) {
       m.vault.wrongTries++
+      if (m.vault.wrongTries >= 5) {
+        m.vault.cooldownUntil = Date.now() + 30_000
+        m.vault.wrongTries = 0
+      }
       fail('wrong_password', 'That password didn\'t work.')
     }
     m.vault.wrongTries = 0

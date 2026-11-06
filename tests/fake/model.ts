@@ -74,7 +74,7 @@ export const emptyProfile = (): Profile => ({
 
 export interface Model {
   now: number
-  vault: { exists: boolean, unlocked: boolean, autoLockMinutes: number, wrongTries: number }
+  vault: { exists: boolean, unlocked: boolean, autoLockMinutes: number, wrongTries: number, cooldownUntil: number }
   groups: GroupRec[]
   hosts: HostRec[]
   keys: KeySummary_Serialize[]
@@ -115,7 +115,7 @@ export function createModel(seed: Seed): Model {
   const now = seed.now ?? Date.UTC(2026, 10, 6, 15, 0, 0)
   return {
     now,
-    vault: { exists: seed.vault?.exists ?? true, unlocked: seed.vault?.unlocked ?? false, autoLockMinutes: seed.vault?.autoLockMinutes ?? 15, wrongTries: 0 },
+    vault: { exists: seed.vault?.exists ?? true, unlocked: seed.vault?.unlocked ?? false, autoLockMinutes: seed.vault?.autoLockMinutes ?? 15, wrongTries: 0, cooldownUntil: 0 },
     groups: (seed.groups ?? []).map((g): GroupRec => ({ ...emptyProfile(), parent_id: null, ...g })),
     hosts: (seed.hosts ?? []).map((h): HostRec => ({ ...emptyProfile(), group_id: null, tags: [], protocol: 'ssh', os_hint: null, last_connected_at: null, serial: { baud: 9600, data_bits: 8, stop_bits: 1, parity: 'none', flow: 'none' }, ...h })),
     keys: seed.keys ?? [],

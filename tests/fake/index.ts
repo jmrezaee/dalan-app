@@ -61,6 +61,8 @@ export class Fake {
       /** Raw terminal text; ANSI escapes work. */
       output: (text: string) => this.run<void>('output', id, text),
       runScript: (name: 'ubuntu-login' | 'nginx-status' | 'apt-update' | 'sudo-prompt' | 'vim' | 'flood' | 'error-output') => this.run<void>('runScript', id, name),
+      /** Shows a question and returns at once, for steps that only look at it. */
+      ask: (kind: unknown, promptId = 'p1') => this.run<void>('event', id, { type: 'prompt', prompt_id: promptId, kind }),
       /** Shows a question and resolves with the UI's answer. */
       prompt: (kind: unknown, promptId = 'p1') => this.run<{ accept: boolean, text: string | null, remember: boolean }>('prompt', id, promptId, kind),
       /** Connect with the host-key question when the key is new or changed. Resolves when the session is ready or refused. */

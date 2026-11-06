@@ -12,7 +12,7 @@ export const team = (): Seed => ({
   groups: [
     { id: 'g-prod', label: 'Production', username: 'deploy', identity_id: 'i-deploy', jump_mode: 'custom', jump_host_ids: ['h-bastion'] },
     { id: 'g-prod-eu', label: 'Europe', parent_id: 'g-prod', port: 2200 },
-    { id: 'g-staging', label: 'Staging', username: 'stage', theme: 'dracula' },
+    { id: 'g-staging', label: 'Staging', username: 'stage', theme: 'midnight' },
     { id: 'g-lab', label: 'Home lab' },
   ],
   hosts: [
@@ -65,11 +65,12 @@ export const team = (): Seed => ({
   ],
   templates: [{ id: 't-web', name: 'Web servers', mode: 'split', layout: 'grid', panes: JSON.stringify([{ host_id: 'h-web1' }, { host_id: 'h-web2' }]) }],
   history: [
-    { id: 'c1', command: 'systemctl status nginx', ran_at: NOW - 2 * H, host_id: 'h-web1' },
-    { id: 'c2', command: 'systemctl status nginx', ran_at: NOW - 3 * H, host_id: 'h-web1' },
-    { id: 'c3', command: 'systemctl status nginx', ran_at: NOW - 4 * H, host_id: 'h-web1' },
+    { id: 'c1', command: 'tail -f /var/log/nginx/error.log', ran_at: NOW - 2 * H, host_id: 'h-web1' },
+    { id: 'c2', command: 'tail -f /var/log/nginx/error.log', ran_at: NOW - 3 * H, host_id: 'h-web1' },
+    { id: 'c3', command: 'tail -f /var/log/nginx/error.log', ran_at: NOW - 4 * H, host_id: 'h-web1' },
     { id: 'c4', command: 'df -h', ran_at: NOW - 5 * H, host_id: 'h-web1' },
   ],
+
   settings: { logs: JSON.stringify({ enabled: true }), history: JSON.stringify({ enabled: true }) },
   files: {
     local: [dir('home', [dir('me', [file('notes.txt', 412), file('.profile', 807), file('report.pdf', 2_400_000), dir('projects')])])],

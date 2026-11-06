@@ -37,7 +37,7 @@ export function install(opts: Options) {
     for (const id of listeners.get(name) ?? []) callbacks.get(id)?.({ event: name, id, payload })
   }
   const ctx: Ctx = {
-    m, channel, send, sendBytes,
+    m, channel, send, sendBytes, emit: emitEvent,
     tag: s => m.calls.push(s),
     id: prefix => `${prefix}-${counter++}`,
   }
@@ -72,7 +72,10 @@ export function install(opts: Options) {
       }
       // A locked vault refuses everything but the few commands that work while locked.
       if (!m.vault.unlocked && !/^(vault_|app_info)/.test(cmd) && !cmd.startsWith('settings_get')) throw { code: 'locked', message: 'Unlock the vault first.' }
-      return await h(args, ctx)
+      // Like the real IPC, nothing is shared between the app and the fake: arguments and answers are copies.
+      const copy = Object.fromEntries(Object.entries(args).map(([k, v]) => [k, typeof (v as { toJSON?: unknown } | null)?.toJSON === 'function' ? v : v === undefined ? v : JSON.parse(JSON.stringify(v))]))
+      const answer = await h(copy, ctx)
+      return answer === undefined ? undefined : JSON.parse(JSON.stringify(answer))
     },
   }
 
@@ -143,7 +146,8 @@ export function install(opts: Options) {
           fake.event(id, { type: 'state', state: 'closed' })
           return known ? 'changed' : 'refused'
         }
-        if (answer.remember) {
+        // Replacing a key the user confirmed by typing its name always saves; a new key saves only when asked to.
+        if (answer.remember || known) {
           m.knownHosts = m.knownHosts.filter(k => k.host_pattern !== pattern)
           m.knownHosts.push({ id: ctx.id('known'), host_pattern: pattern, key_type: presented.key_type, fingerprint: presented.fingerprint, created_at: m.now, last_seen_at: m.now })
         }

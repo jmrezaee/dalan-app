@@ -47,7 +47,6 @@ export const data: Pick<Handlers, Keys> = {
   forwardSave: (a, { m, id }) => {
     const i = a.input
     if (!i.bind_port || i.bind_port < 1 || i.bind_port > 65535) fail('validation', 'The port must be between 1 and 65535.')
-    if (m.forwards.some(f => f.id !== i.id && f.bind_port === i.bind_port && f.state === 'active')) fail('port_in_use', `Port ${i.bind_port} is already in use. Try ${i.bind_port + 10000}.`)
     const next = {
       host_id: i.host_id, label: i.label, kind: i.kind, bind_address: i.bind_address, bind_port: i.bind_port,
       dest_address: i.dest_address ?? null, dest_port: i.dest_port ?? null, autostart: !!i.autostart,
@@ -64,12 +63,19 @@ export const data: Pick<Handlers, Keys> = {
     m.forwards = m.forwards.filter(f => f.id !== a.id)
     return null
   },
-  forwardStart: (a, { m, tag }) => {
+  forwardStart: (a, { m, tag, emit }) => {
     const f = m.forwards.find(x => x.id === a.id)
     if (!f) fail('not_found', 'That rule is gone.')
+    tag(`forward-start:${f.id}`)
+    // Like Rust: binding the port fails when something else already listens there, and the rule shows an error.
+    if (m.forwards.some(x => x.id !== f.id && x.bind_port === f.bind_port && x.state === 'active')) {
+      Object.assign(f, { state: 'error', error: `Port ${f.bind_port} is already in use. Try ${f.bind_port + 10000}.` })
+      emit('tunnel-changed', { id: f.id, state: 'error', connections: 0, error: f.error })
+      return null
+    }
     f.state = 'starting'
     f.error = null
-    tag(`forward-start:${f.id}`)
+    emit('tunnel-changed', { id: f.id, state: 'starting', connections: 0, error: null })
     return null
   },
   forwardStop: (a, { m }) => {

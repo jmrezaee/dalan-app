@@ -24,6 +24,8 @@ export interface Ctx {
   send: (channel: number, message: unknown) => void
   /** Sends raw terminal bytes on a data channel. */
   sendBytes: (channel: number, bytes: Uint8Array) => void
+  /** Sends a Tauri event to the app (`tunnel-changed`, `vault-locked`, ...). */
+  emit: (name: string, payload: unknown) => void
   /** Records a short call tag for tests, for example `reconnect:fake-1`. */
   tag: (s: string) => void
   /** A fresh id with a prefix, stable per run (no random ids in assertions). */
