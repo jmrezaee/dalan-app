@@ -35,7 +35,7 @@ chapter(5, { scenario: 'team' }, async (page, fake) => {
 
   await step(page, { id: '05-04', flow: 'F01', screen: 'S18', caption: 'Find in the terminal' }, async () => {
     await click(page, page.locator('.xterm').first())
-    await press(page, 'ControlOrMeta+f')
+    await press(page, process.platform === 'darwin' ? 'Meta+f' : 'Control+Shift+f') // off a Mac, plain Ctrl+F belongs to the shell
     await fill(page, page.getByLabel('Find in terminal'), 'git')
     await press(page, 'Enter')
     await expect(page.getByLabel('Find in terminal')).toBeVisible()

@@ -37,6 +37,7 @@ chapter(10, { scenario: 'team' }, async (page, fake) => {
   })
 
   await step(page, { id: '10-04', flow: 'F11', screen: 'S23', caption: 'Turn on automatic reconnect, drop again, and the tabs come back by themselves' }, async () => {
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur()) // off a Mac, Ctrl keys typed in a terminal go to the shell
     await page.keyboard.press('ControlOrMeta+,')
     await click(page, page.getByRole('button', { name: 'Terminal', exact: true }).or(page.getByRole('tab', { name: 'Terminal', exact: true })).first())
     await click(page, page.getByRole('switch', { name: 'Reconnect automatically' }))
