@@ -100,7 +100,7 @@ async function clearHistory() {
           type="button"
           role="tab"
           :aria-selected="tab === t.v"
-          :class="cn('h-7 rounded-md px-2.5 text-sm', tab === t.v ? 'bg-surface-hover font-medium' : 'text-muted hover:bg-surface-hover')"
+          :class="cn('h-7 whitespace-nowrap rounded-md px-2 text-sm', tab === t.v ? 'bg-surface-hover font-medium' : 'text-muted hover:bg-surface-hover')"
           @click="tab = t.v; query = ''"
         >
           {{ t.l }}

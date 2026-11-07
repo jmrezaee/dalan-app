@@ -35,7 +35,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
       return e instanceof CommandError && e.code === 'validation' ? e.message : 'Something went wrong. Try again.'
     }
     await refresh()
-    toast('Saved.')
+    toast(`Saved workspace ${name}.`)
     return ''
   }
 

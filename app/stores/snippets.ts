@@ -38,7 +38,7 @@ export const useSnippetsStore = defineStore('snippets', () => {
     return ''
   }
 
-  const save = (input: SnippetInput) => run(() => api.snippetSave(input))
+  const save = (input: SnippetInput) => run(() => api.snippetSave(input), `Saved ${input.label}.`)
   const duplicate = (s: SnippetSummary) => run(() => api.snippetSave({ id: null, label: `${s.label} copy`, script: s.script, package_id: s.package_id, target_host_ids: s.target_host_ids }), `Copied ${s.label}.`)
   /** Drag a snippet onto a package (`null` = out of any package). */
   async function move(s: SnippetSummary, packageId: string | null) {
@@ -46,7 +46,7 @@ export const useSnippetsStore = defineStore('snippets', () => {
     const err = await run(() => api.snippetsMove([s.id], packageId), `Moved ${s.label}.`)
     if (err) toast.error(err)
   }
-  const savePackage = (id: string | null, label: string) => run(() => api.packageSave(id, label))
+  const savePackage = (id: string | null, label: string) => run(() => api.packageSave(id, label), `Saved package ${label}.`)
   async function remove(s: SnippetSummary) {
     const err = await run(() => api.snippetDelete(s.id), `Deleted ${s.label}.`)
     if (err) toast.error(err)

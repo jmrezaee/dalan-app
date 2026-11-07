@@ -40,6 +40,6 @@ chapter(14, { scenario: 'team' }, async (page, fake) => {
     await expect(page.getByText('tail -f /var/log/nginx/error.log').first()).toBeVisible()
     await expect(page.getByText(/Save it as a snippet\?/)).toBeVisible()
     await click(page, page.getByRole('button', { name: 'Save snippet' }))
-    await expect(page.getByText('Saved.')).toBeVisible()
+    await expect(page.getByText(/^Saved .+\./)).toBeVisible()
   })
 })

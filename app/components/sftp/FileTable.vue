@@ -56,7 +56,10 @@ function select(e: FsEntry, ev: MouseEvent | KeyboardEvent) {
 // The row's handler runs first and lets the event bubble up to the pane's ContextMenu (which opens the menu and
 // cancels the browser's own). Here we only handle clicks on empty space, so the row's choice isn't overwritten.
 function onBlankContext(ev: MouseEvent) {
-  if (!(ev.target as HTMLElement).closest('tr[role=row]')) emit('context', null, ev)
+  if ((ev.target as HTMLElement).closest('tr[role=row]')) return
+  // Empty space is not about the selected row: the menu then offers only New folder and Refresh.
+  emit('update:selected', [])
+  emit('context', null, ev)
 }
 
 function start(ev: DragEvent, e: FsEntry) {

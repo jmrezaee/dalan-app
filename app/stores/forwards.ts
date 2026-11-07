@@ -45,7 +45,7 @@ export const useForwardsStore = defineStore('forwards', () => {
       return message(e)
     }
     await refresh()
-    toast('Saved.')
+    toast(`Saved ${input.label || 'the rule'}.`)
     return ''
   }
 

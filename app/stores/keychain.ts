@@ -57,7 +57,7 @@ export const useKeychainStore = defineStore('keychain', () => {
   const importKey = (input: ImportInput) => run(() => api.keyImport(input), 'Key saved.')
   const updateKey = (input: KeyUpdate) => run(() => api.keyUpdate(input))
   const setCertificate = (id: string, certificate: string | null, path: string | null) => run(() => api.keySetCertificate(id, certificate, path), certificate || path ? 'Certificate attached.' : 'Certificate removed.')
-  const saveIdentity = (input: IdentityInput) => run(() => api.identitySave(input))
+  const saveIdentity = (input: IdentityInput) => run(() => api.identitySave(input), `Saved ${input.label}.`)
 
   async function removeKey(k: KeySummary) {
     const r = await run(() => api.keyDelete(k.id), `Deleted ${k.label}.`)

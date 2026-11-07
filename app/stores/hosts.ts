@@ -149,7 +149,7 @@ export const useHostsStore = defineStore('hosts', () => {
       return message(e)
     }
     await refresh()
-    toast('Saved.')
+    toast(`Saved ${input.label || input.address}.`)
     return ''
   }
 
@@ -165,7 +165,7 @@ export const useHostsStore = defineStore('hosts', () => {
       return message(e)
     }
     await refresh()
-    toast('Saved.')
+    toast(`Saved group ${input.label}.`)
     return ''
   }
 
