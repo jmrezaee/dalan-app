@@ -21,3 +21,6 @@ playwright-report
 tests/walk/baselines
 walk-report
 walk-results
+
+# Package store created by the Docker test runs
+.pnpm-store/
