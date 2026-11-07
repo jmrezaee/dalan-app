@@ -291,7 +291,7 @@ Order: P26 and P27 first, then T1 to T7, then P28 (one hand-check session for ev
   - Collect every open hand check from `[h]` phases (P16 to P18, P21 to P25) that T4 and T5 didn't automate into `replica/testing/hand-checks.md`, together with the §10 items.
   - **Then stop and ask Mehrdad to run it** in the real macOS window and paste back the results.
   - Fix what fails, and mark the `[h]` phases `[x]` when their checks pass.
-- [ ] **P29 First release (needs Mehrdad):**
+- [~] **P29 First release (needs Mehrdad):** `v0.1.0` published 2026-11-07 on `f9fe8f55` (green CI, real-app job passed). Left: real site screenshot, Apple signing, launch-plan phase 1 (pilot).
   - He creates the GitHub repo `dalan-app` and adds the secrets from `release-setup.md`.
   - Then: add the remote and push; get the first green CI including the `browser` and `app` jobs; replace the site screenshot with a real one from `walk:app`; tag `v0.1.0` on HEAD; publish the draft release.
   - Then follow `replica/launch/launch-plan.md` phase 1 (pilot).
