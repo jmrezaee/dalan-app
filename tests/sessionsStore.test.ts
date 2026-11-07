@@ -205,6 +205,25 @@ describe('sessions store', () => {
     }
   })
 
+  it('a server that goes away (exit without a status) is a real drop and reconnects by itself', async () => {
+    vi.useFakeTimers()
+    try {
+      settingsMock.terminal.auto_reconnect = true
+      const s = useSessionsStore()
+      s.open(host(1))
+      await vi.advanceTimersByTimeAsync(5)
+      ready(opened[0]!)
+      opened[0]!.onEvent({ type: 'exit', status: null } as SessionEvent)
+      opened[0]!.onEvent({ type: 'state', state: 'disconnected' })
+      expect(s.dropped).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(2_100)
+      expect(reconnects).toEqual(['s1'])
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('exit never reconnects by itself and is not counted as a dropped connection', async () => {
     vi.useFakeTimers()
     try {

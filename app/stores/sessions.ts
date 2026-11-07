@@ -163,7 +163,10 @@ export const useSessionsStore = defineStore('sessions', () => {
         if (sess.steps.length > 80) sess.steps.shift()
         break
       case 'exit':
-        // Rust sends `exit` and then `disconnected`; the user ended this one, so leave it alone.
+        // Rust sends `exit` and then `disconnected`. With an exit status the shell ended by itself (`exit`, Ctrl+D):
+        // leave it alone. Without one the server went away (a restart, a dropped network): that is a real drop, and
+        // automatic reconnect must still work. (Found by hand on macOS: a restarted server never came back.)
+        if (e.status === null || e.status === undefined) break
         sess.exited = true
         clearRetry(sess.key)
         break
