@@ -3,7 +3,7 @@
 //   pnpm walk:app                 the walkthrough on the real app, recorded as video (see walk.e2e.ts)
 //   pnpm test:app --spec smoke    one spec file
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, rmSync } from 'node:fs'
+import { mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
 const args = process.argv.slice(2)
@@ -23,7 +23,14 @@ const specs = walk ? './walk.e2e.ts' : spec ? `./specs/${spec}.e2e.ts` : './spec
 // Old pictures and videos from an earlier run would be mistaken for this run's.
 rmSync(join(root, 'test-results', 'app'), { recursive: true, force: true })
 mkdirSync(join(root, 'test-results', 'app'), { recursive: true })
-if (walk) { rmSync(join(root, 'walk-results'), { recursive: true, force: true }); rmSync(join(root, 'walk-report'), { recursive: true, force: true }) }
+if (walk) {
+  // Empty the results folder but keep the folder itself: Docker's file sharing can lose a directory that was deleted
+  // and re-created, and the container then could not write into it ("no such file or directory").
+  const results = join(root, 'walk-results')
+  mkdirSync(results, { recursive: true })
+  for (const f of readdirSync(results)) rmSync(join(results, f), { force: true })
+  rmSync(join(root, 'walk-report'), { recursive: true, force: true })
+}
 
 // The runner joins the servers' network, so `bastion:2222`, `inner:2222` and the rest resolve. Build outputs and
 // dependencies live in volumes: the first run compiles Rust for a few minutes, the next ones take seconds.

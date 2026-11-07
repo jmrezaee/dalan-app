@@ -6,7 +6,10 @@ import { startChapter, step } from './walkStep'
 // section 8.5). The chapters that need fake-only controls (the page clock, a scripted server) are left out, and
 // the ones that need a real server use `docker restart` and `scripts/test-servers.sh rotate`.
 // Videos and screenshots go to test-results/app and walk-results; the gallery is the same as `pnpm walk`.
-describe('the walkthrough on the real app', () => {
+describe('the walkthrough on the real app', function () {
+  // Creating the vault (Argon2 in a debug build, inside a container) has taken from a few seconds to several minutes here.
+  this.timeout(900_000)
+
   const a = servers().a!
   const rot = servers().rot!
 

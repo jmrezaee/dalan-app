@@ -36,11 +36,11 @@ name_of() {
   case "$1" in
     a) echo dalan-test-ssh ;; b) echo dalan-test-key ;; c) echo dalan-test-inner ;; kbd) echo dalan-test-kbd ;;
     slow) echo dalan-test-slow ;; oldkex) echo dalan-test-oldkex ;; web) echo dalan-test-web ;; squid) echo dalan-test-squid ;;
-    socks) echo dalan-test-socks ;; telnet) echo dalan-test-telnet ;; mosh) echo dalan-test-mosh ;; rot) echo dalan-test-rot ;; *) return 1 ;;
+    socks) echo dalan-test-socks ;; telnet) echo dalan-test-telnet ;; mosh) echo dalan-test-mosh ;; rot) echo dalan-test-rot ;; twin) echo dalan-test-twin ;; *) return 1 ;;
   esac
 }
-ALL="a b c kbd slow oldkex rot web squid socks telnet"
-SSH_SERVERS="a b c kbd oldkex rot mosh"
+ALL="a b c kbd slow oldkex rot twin web squid socks telnet"
+SSH_SERVERS="a b c kbd oldkex rot twin mosh"
 
 need() { command -v "$1" >/dev/null || { echo "Missing: $1" >&2; exit 1; }; }
 need docker
@@ -113,6 +113,7 @@ servers = {
     "slow": s("slow", 2225, container="dalan-test-slow", user="test", password="test", delay_ms=800, net_host="slow", net_port=2225),
     "oldkex": s("oldkex", 2226, container="dalan-test-oldkex", user="test", password="test", net_host="oldkex", net_port=22, fingerprint=fp.get("oldkex")),
     "rot": s("rot", 2228, container="dalan-test-rot", user="test", password="test", net_host="rot", net_port=22, fingerprint=fp.get("rot")),
+    "twin": s("twin", 2229, container="dalan-test-twin", user="test", password="test", net_host="twin", net_port=22, fingerprint=fp.get("twin")),
     "web": s("web", 8088, container="dalan-test-web", net_host="web", net_port=80),
     "squid": s("squid", 3128, container="dalan-test-squid", net_host="squid", net_port=3128),
     "socks": s("socks", 1080, container="dalan-test-socks", net_host="socks", net_port=1080),
@@ -147,7 +148,7 @@ up() {
     docker network rm dalan-test-net >/dev/null 2>&1 || true
   fi
   ${COMPOSE[@]+"${COMPOSE[@]}"} ${extra[@]+"${extra[@]}"} up -d --build >/dev/null
-  for k in a b c kbd oldkex rot; do wait_sshd "$(name_of $k)"; done
+  for k in a b c kbd oldkex rot twin; do wait_sshd "$(name_of $k)"; done
   [ "${1:-}" = "--extra" ] && wait_sshd "$(name_of mosh)"
   configure_a
   write_servers_json

@@ -84,6 +84,14 @@ services:
     ports: ["2228:22"]
     environment: { VARIANT: mosh }
 
+  # twin: a second plain Debian server, so a workspace test can run on two servers that behave the same way.
+  twin:
+    build: ./debian-sshd
+    container_name: dalan-test-twin
+    networks: { default: { aliases: [twin] } }
+    ports: ["2229:22"]
+    environment: { VARIANT: mosh }
+
   # web: something to reach through a tunnel.
   web:
     image: nginx:alpine
