@@ -19,11 +19,24 @@ const connect = (h: HostSummary) => run(() => sessions.open(h))
 const gotoTab = (key: string) => run(() => { sessions.activeKey = key })
 const act = (name: Parameters<typeof emit>[1]) => run(() => emit('action', name))
 const openTabs = computed(() => sessions.sessions.filter(s => s.kind === 'session'))
+
+// A vault can hold thousands of hosts, and mounting one list item per host made every keystroke take ~300 ms with 2,000
+// (test-plan 9.4). So only the best few matches are mounted: we filter by the typed text here, and the list widget
+// then filters those again the same way. Hosts keep the order they have in the store.
+const HOST_LIMIT = 50
+const typed = ref('')
+watch(open, (o) => { if (o) typed.value = '' })
+const hostValue = (h: HostSummary) => `host ${h.label} ${h.address} ${h.tags.join(' ')}`
+const matchingHosts = computed(() => {
+  const q = typed.value.trim().toLowerCase()
+  return q ? hosts.hosts.filter(h => hostValue(h).toLowerCase().includes(q)) : hosts.hosts
+})
+const shownHosts = computed(() => matchingHosts.value.slice(0, HOST_LIMIT))
 </script>
 
 <template>
   <CommandDialog v-model:open="open" title="Command palette" description="Jump to a host, a tab or an action.">
-    <CommandInput placeholder="Search hosts, tabs and actions" />
+    <CommandInput placeholder="Search hosts, tabs and actions" @input="typed = ($event.target as HTMLInputElement).value" />
     <CommandList aria-label="Results">
       <CommandEmpty>No matches. Press {{ shortcutLabel('new-host') }} to add a host.</CommandEmpty>
 
@@ -34,9 +47,10 @@ const openTabs = computed(() => sessions.sessions.filter(s => s.kind === 'sessio
       </CommandGroup>
 
       <CommandGroup v-if="hosts.hosts.length" heading="Hosts">
-        <CommandItem v-for="h in hosts.hosts" :key="h.id" :value="`host ${h.label} ${h.address} ${h.tags.join(' ')}`" @select="connect(h)">
+        <CommandItem v-for="h in shownHosts" :key="h.id" :value="hostValue(h)" @select="connect(h)">
           <Server />{{ h.label }}<span class="ml-2 font-mono text-xs text-muted">{{ h.effective_username ? `${h.effective_username}@` : '' }}{{ h.address }}</span>
         </CommandItem>
+        <p v-if="matchingHosts.length > HOST_LIMIT" class="px-2 py-1.5 text-xs text-muted">Showing {{ HOST_LIMIT }} of {{ matchingHosts.length }} hosts. Keep typing to narrow it down.</p>
       </CommandGroup>
 
       <CommandGroup v-if="templates.templates.length" heading="Workspaces">

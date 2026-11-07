@@ -76,6 +76,7 @@
     "test": "vitest run",
     "screenshot:design": "node scripts/screenshot-design.mjs",
     "test:e2e": "playwright test --project=e2e --project=e2e-light --project=fake --project=a11y",
+    "test:perf": "playwright test --project=perf --workers=1",
     "coverage": "node scripts/coverage.mjs",
     "check:features": "node scripts/features-check.mjs",
     "check:hooks": "node scripts/check-no-test-hooks.mjs",
@@ -85,6 +86,7 @@
     "test:visual:update": "scripts/in-playwright-docker.sh pnpm exec playwright test --project=visual --update-snapshots",
     "test:app": "node tests/app/run.mjs",
     "walk:app": "node tests/app/run.mjs --walk",
+    "test:app:long": "node tests/app/run.mjs --long",
     "test:servers": "scripts/test-servers.sh",
     "test:servers:rust": "scripts/test-servers.sh up && cd src-tauri && cargo test -- --ignored"
   },

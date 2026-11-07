@@ -106,6 +106,13 @@ async function dropped(target: string) {
 function newHost() {
   hosts.editing = 'new'
 }
+
+// Mounting a card per host is slow with thousands of hosts (test-plan 9.4), so a long list shows the first batch and
+// offers the rest on request. A new search, tag filter or group starts again at the first batch.
+const BATCH = 200
+const shownCount = ref(BATCH)
+watch(() => [hosts.query, hosts.selectedTags, hosts.currentGroupId], () => { shownCount.value = BATCH })
+const shownHosts = computed(() => hosts.visibleHosts.slice(0, shownCount.value))
 const empty = computed(() => hosts.loaded && !hosts.hosts.length && !hosts.groups.length)
 const nothingHere = computed(() => hosts.loaded && !empty.value && !hosts.childGroups.length && !hosts.visibleHosts.length)
 </script>
@@ -198,7 +205,7 @@ const nothingHere = computed(() => hosts.loaded && !empty.value && !hosts.childG
             :list="hosts.view === 'list'"
           />
           <HostCard
-            v-for="h in hosts.visibleHosts"
+            v-for="h in shownHosts"
             :key="h.id"
             :test-id="tid(`host-card-${h.id}`)"
             :label="h.label"
@@ -220,6 +227,9 @@ const nothingHere = computed(() => hosts.loaded && !empty.value && !hosts.childG
             @dragend="dragging = dropOn = null"
           />
         </div>
+        <Button v-if="hosts.visibleHosts.length > shownCount" variant="secondary" class="self-center" @click="shownCount += BATCH">
+          Show {{ Math.min(BATCH, hosts.visibleHosts.length - shownCount) }} more ({{ hosts.visibleHosts.length - shownCount }} not shown)
+        </Button>
       </section>
 
       <p v-if="nothingHere" class="py-8 text-center text-muted">

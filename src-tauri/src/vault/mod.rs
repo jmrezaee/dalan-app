@@ -2,6 +2,8 @@
 //! Everything secret in the database is XChaCha20-Poly1305 ciphertext under that key.
 
 pub mod crypto;
+#[cfg(test)]
+mod fixtures;
 pub mod kdf;
 pub mod secrets;
 

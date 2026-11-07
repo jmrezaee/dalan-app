@@ -62,6 +62,8 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - name: Browser tests (specs, fake backend contract, accessibility)
         run: pnpm test:e2e
+      - name: Timing, 2,000 hosts and a 5 MB flood (alone on the machine)
+        run: pnpm test:perf
       - name: Every flow and screen has a test
         run: pnpm coverage --check
       - name: The walkthrough (every chapter, headless)
@@ -159,3 +161,26 @@ jobs:
             test-results/app
             walk-report
           retention-days: 7
+
+  # Nightly only: ten live sessions printing every second for 30 minutes; the app's memory must not grow by 150 MB
+  # (test-plan 9.4). The samples are in longrun-rss.csv.
+  long-run:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Ten sessions for 30 minutes
+        run: pnpm test:app:long
+      - name: Upload the memory samples
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: long-run
+          path: test-results/app

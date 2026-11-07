@@ -15,6 +15,23 @@ const MIGRATION_0003: &str = include_str!("../../migrations/0003_serial.sql");
 const MIGRATION_0004: &str = include_str!("../../migrations/0004_mosh.sql");
 const MIGRATION_0005: &str = include_str!("../../migrations/0005_data_key.sql");
 
+/// Every migration's SQL, oldest first. The fixtures test builds older schemas from prefixes of this list.
+#[cfg(test)]
+pub(crate) fn migration_sources() -> [&'static str; 5] {
+    [
+        MIGRATION_0001,
+        MIGRATION_0002,
+        MIGRATION_0003,
+        MIGRATION_0004,
+        MIGRATION_0005,
+    ]
+}
+
+#[cfg(test)]
+pub(crate) fn migration_count() -> usize {
+    migration_sources().len()
+}
+
 pub(crate) fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
         M::up(MIGRATION_0001),

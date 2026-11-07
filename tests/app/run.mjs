@@ -2,6 +2,7 @@
 //   pnpm test:app                 the real-app specs (tests/app/specs)
 //   pnpm walk:app                 the walkthrough on the real app, recorded as video (see walk.e2e.ts)
 //   pnpm test:app --spec smoke    one spec file
+//   pnpm test:app:long            ten sessions for 30 minutes, memory must not grow by 150 MB (LONG_RUN_MINUTES=2 for a quick try)
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
@@ -19,7 +20,8 @@ must(run('docker', ['build', '-t', 'dalan-app-test', 'tests/app']), 'Building th
 
 const spec = args.includes('--spec') ? args[args.indexOf('--spec') + 1] : null
 const walk = args.includes('--walk')
-const specs = walk ? './walk.e2e.ts' : spec ? `./specs/${spec}.e2e.ts` : './specs/**/*.e2e.ts'
+const long = args.includes('--long')
+const specs = walk ? './walk.e2e.ts' : long ? './longrun.e2e.ts' : spec ? `./specs/${spec}.e2e.ts` : './specs/**/*.e2e.ts'
 // Old pictures and videos from an earlier run would be mistaken for this run's.
 rmSync(join(root, 'test-results', 'app'), { recursive: true, force: true })
 mkdirSync(join(root, 'test-results', 'app'), { recursive: true })
@@ -42,7 +44,7 @@ const r = run('docker', [
   '-v', 'dalan-app-cargo-target:/work/src-tauri/target',
   '-v', 'dalan-app-cargo-registry:/usr/local/cargo/registry',
   '-v', 'dalan-app-pnpm-store:/root/.local/share/pnpm/store',
-  '-e', `WDIO_SPECS=${specs}`, '-e', 'CI=true',
+  '-e', `WDIO_SPECS=${specs}`, '-e', 'CI=true', '-e', `LONG_RUN_MINUTES=${process.env.LONG_RUN_MINUTES ?? 30}`,
   'dalan-app-test', 'tests/app/in-container.sh',
 ])
 if (walk) run('node', ['tests/walk/gallery.mjs'])
