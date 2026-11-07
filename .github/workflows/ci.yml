@@ -30,6 +30,8 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      - name: features.csv has its columns, and every "yes" has a test or a check
+        run: pnpm check:features
       # Builds the SPA first: tauri::generate_context! needs frontendDist to exist.
       - run: pnpm build
       - name: The production build has no test hooks

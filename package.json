@@ -77,6 +77,7 @@
     "screenshot:design": "node scripts/screenshot-design.mjs",
     "test:e2e": "playwright test --project=e2e --project=e2e-light --project=fake --project=a11y",
     "coverage": "node scripts/coverage.mjs",
+    "check:features": "node scripts/features-check.mjs",
     "check:hooks": "node scripts/check-no-test-hooks.mjs",
     "walk": "node tests/walk/run.mjs",
     "walk:ci": "node tests/walk/run.mjs --headless",

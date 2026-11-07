@@ -1,94 +1,94 @@
-feature,area,priority,original,clone,notes
-Master password unlock for local encrypted vault,security,must,yes,yes,S24; clone design choice standing in for Termius account encryption password
-Horizontal tab bar with Vault and SFTP fixed tabs,shell,must,yes,yes,S01
-Tab status dots (unread / needs input / error),shell,must,yes,partial,"S01 S19; P18: seen working in the window (green output,  yellow question); red and workspace dot not seen; Mehrdad to confirm"
-Hosts list with grid/list view and search,hosts,must,yes,yes,S02
-Create and edit host (address port username password),hosts,must,yes,yes,S03
-Nested groups,hosts,must,yes,yes,S04; smoke 2026-11-05: groups never run in the real window; hand-checked (audit 2026-11-06)
-Per-field inheritance from parent groups,hosts,must,yes,yes,source 3; resolve up the parent chain per field; smoke 2026-11-05: inheritance never run in the real window; hand-checked (audit 2026-11-06)
-Tags with filter,hosts,must,yes,partial,S02 S03; smoke 2026-11-05: tags never run in the real window
-Drag hosts into groups,hosts,must,yes,yes,F04; smoke 2026-11-05: drag onto groups never run in the real window; hand-checked (audit 2026-11-06)
-Generate SSH key (Ed25519 ECDSA RSA),keychain,must,yes,yes,S06; smoke 2026-11-05: Generate never run in the real window; hand-checked (audit 2026-11-06)
-Import private key (paste / drop / file) with passphrase,keychain,must,yes,partial,S06; demoted 2026-11-06: only paste/file seen; drop and wrong passphrase not hand-checked
-Save passphrase toggle (else prompt each connect),keychain,must,yes,partial,source 7; smoke 2026-11-05: not run in the real window
-Identities (username + password or key) linked to hosts and groups,keychain,must,yes,partial,S07; smoke 2026-11-05: identities not run in the real window
-Export public key to host authorized_keys,keychain,must,yes,yes,S08 F02; smoke 2026-11-05: Install on a server not run in the real window (key login itself was checked); hand-checked (audit 2026-11-06)
-SSH connect with password key or identity,terminal,must,yes,yes,S18
-Known hosts trust-on-first-use prompt,terminal,must,yes,yes,S18 S14
-Host key changed blocking warning,terminal,must,yes,yes,F12
-Known hosts list with delete,vault,must,yes,yes,S14
-xterm.js terminal with resize copy paste scrollback,terminal,must,yes,yes,S18
-Disconnected overlay with Reconnect,terminal,must,yes,yes,F11
-Clear errors for unreachable / auth failed / KEX failed,terminal,must,yes,partial,"source 13; smoke 2026-11-05: password prompt and closed overlay checked in the real window; unreachable, auth failed and KEX not yet"
-Multiple session tabs (Cmd+T new tab),terminal,must,yes,yes,S16
-New Tab screen with recent connections and search,terminal,must,yes,partial,S16; smoke 2026-11-05: New Tab screen not run in the real window
-Command palette over hosts and tabs (Cmd+K),shell,must,yes,yes,S17 F03
-Jump host / host chain,hosts,must,yes,yes,F05; free in Termius since 10.1.0
-Startup snippet per host,hosts,must,yes,partial,source 10; smoke 2026-11-05: startup snippet not run in the real window
-Snippets with packages,snippets,must,yes,partial,S11 S12; smoke 2026-11-05: snippets not run in the real window
-Run snippet in current session from side panel,snippets,must,yes,partial,S20; smoke 2026-11-05: side-panel snippet run not run in the real window
-Local / remote / dynamic port forwarding rules with start-stop,port forwarding,must,yes,partial,S09 S10 F06; demoted 2026-11-06: only local tunnels hand-checked; SOCKS and remote not run
-SFTP dual pane (local or host on each side),sftp,must,yes,yes,S21
-SFTP drag-and-drop transfers with progress,sftp,must,yes,partial,S21 S22 F07; smoke 2026-11-05: drag-and-drop could not be driven by automation; check by hand
-SFTP rename delete new folder hidden files typed path,sftp,must,yes,yes,"S21; rename/delete not in Termius docs but expected; smoke 2026-11-05: listing checked in the real window; rename, delete, new folder, hidden files not; hand-checked (audit 2026-11-06)"
-Settings: appearance terminal font shortcuts,settings,must,yes,partial,"S23; demoted 2026-11-06: new settings (font, shell, post-quantum) not hand-checked"
-Workspaces: split view up to 16 panes,workspaces,should,yes,yes,S19 F09; smoke 2026-11-05: workspaces not run in the real window; hand-checked (audit 2026-11-06)
-Workspaces: focus mode toggle,workspaces,should,yes,yes,S19; smoke 2026-11-05: workspaces not run in the real window; hand-checked (audit 2026-11-06)
-Broadcast input to all panes (Cmd+B),workspaces,should,yes,yes,S19; free in Termius since 9.17.1; smoke 2026-11-05: workspaces not run in the real window; hand-checked (audit 2026-11-06)
-Save workspace as template and reopen,workspaces,should,yes,yes,S19 source 11; smoke 2026-11-05: workspaces not run in the real window; hand-checked (audit 2026-11-06)
-Drag a tab onto another to make a workspace,workspaces,should,yes,no,source 11
-Run snippet on multiple hosts (opens workspace),snippets,should,yes,yes,S13 F08; smoke 2026-11-05: not run in the real window; hand-checked (audit 2026-11-06)
-SFTP edit remote file locally and prompt to re-upload,sftp,should,yes,partial,F07 source 5; smoke 2026-11-05: needs a real check (context menu could not be driven by automation)
-SFTP transfer conflicts (replace / keep both / skip),sftp,should,yes,partial,S22; smoke 2026-11-05: needs a real check
-SFTP permissions (chmod),sftp,should,unknown,partial,not in Termius docs; expected by users; smoke 2026-11-05: needs a real check
-Environment variables per host/group (SendEnv),hosts,should,yes,partial,source 12; smoke 2026-11-05: not run against a real server
-SOCKS5 / HTTP proxy per host,hosts,should,yes,partial,source 2; smoke 2026-11-05: not run through a real proxy
-SSH agent forwarding,hosts,should,yes,partial,source 2; shells only since P17; not run against a real server
-Import hosts from ~/.ssh/config,import,should,yes,yes,"S25 F10; smoke 2026-11-05 in the real window: jump chain,  ProxyCommand and Include notes,  duplicates unticked; Include is not followed"
-Import keys and known_hosts from ssh config,import,could,yes,no,not built: only hosts come across
-Import hosts from CSV,import,should,yes,partial,source 2; smoke 2026-11-05: CSV import not run in the real window (SSH config import was)
-Terminal themes per host/group,terminal,should,yes,partial,S20; smoke 2026-11-05: not run in the real window
-Command history side panel,terminal,should,yes,yes,S20; encrypted with the data key since P17; secret-looking lines are not saved
-Local terminal tab,terminal,should,yes,partial,S23 local terminal path; smoke 2026-11-05: not run in the real window
-Session logs (last per host + bookmarks + comment),logs,should,yes,partial,"S15 source 6; paid in Termius; demoted 2026-11-06: checked by hand, but replay and bookmark notes not fully"
-SSH certificates (key + cert as one item),keychain,could,yes,partial,source 7; smoke 2026-11-05: not run against a real OpenSSH server
-FIDO2 hardware keys (sk-ed25519),keychain,could,yes,no,source 7; needs OpenSSH 8.4+ server
-Terminal autocomplete (history paths snippets),terminal,could,yes,no,needs shell integration; Termius disables for some routers
-Find in terminal,terminal,could,unknown,partial,not documented; xterm search addon; smoke 2026-11-05: checked only in a browser against a stub
-Customisable keyboard shortcuts,settings,could,yes,partial,S23; smoke 2026-11-05: recorder not run in the real window
-Import from PuTTY and MobaXterm,import,could,yes,partial,"source 2; parsers are tested on samples,  never run on a real export file"
-Import from SecureCRT,import,could,yes,no,not built
-Mosh,protocols,could,yes,partial,needs mosh client binary; not logged by Termius; smoke 2026-11-05: not run with real mosh
-Telnet,protocols,could,yes,partial,plaintext warning; smoke 2026-11-05: not run against a real Telnet server
-Serial connections,protocols,could,yes,partial,baud data bits stop bits parity flow control; smoke 2026-11-05: not run with real serial hardware
-Auto-detect remote OS icon,hosts,could,yes,yes,uses an exec channel; make it toggleable
-App lock with Touch ID / Windows Hello,security,could,yes,no,
-Own self-hosted encrypted sync between devices,sync,could,yes,no,Termius's own sync service is skip; this would be your own
-AI command generation with your own API key,terminal,could,yes,partial,Termius AI itself is skip; smoke 2026-11-05: not run against the real API
-Termius cloud account and E2E cloud vault sync,sync,could,yes,skip,their backend service; not part of what you can rebuild
-Team vaults seats and granular permissions,teams,could,yes,skip,their multi-tenant backend; personal clone
-Real-time terminal multiplayer,teams,could,yes,skip,their relay service
-SAML SSO SOC 2 and admin console,teams,could,yes,skip,enterprise business features
-SSH.id device-bound passkeys,keychain,could,yes,skip,their identity service; use local keys / FIDO2
-Termius AI model and AI snippet writing,terminal,could,yes,skip,their hosted model
-AWS / DigitalOcean / Azure host sync,integrations,could,yes,skip,possible via official APIs later; not core
-Mobile apps (iOS Android),platform,could,yes,skip,desktop only
-Termius brand icon theme names and copy,brand,could,yes,skip,owned assets; make your own with /replica-brand
-Keyboard-interactive sign-in (2FA / PAM),hosts,should,yes,partial,P17; tested against an in-process server only
-Connection step log with copy details,terminal,should,yes,partial,P21; waits for hand check
-Connect once (trust without saving),terminal,should,yes,partial,P21; waits for hand check
-Dropped sessions card and optional auto reconnect,terminal,should,yes,partial,P21; waits for hand check
-Try another sign-in method after a failure,terminal,should,yes,partial,P21; waits for hand check
-Right-click menus on host cards and tabs,shell,should,yes,partial,P22; waits for hand check
-Quick connect from the New tab (user@host:port),terminal,should,yes,partial,P22; saves the host first; waits for hand check
-Key and snippet right-click menus,keychain,should,yes,partial,P22; waits for hand check
-Duplicate host and snippet,hosts,should,yes,partial,P22; waits for hand check
-Search and sort on section lists,shell,should,yes,partial,P22; waits for hand check
-Side panel theme and font tabs with remembered tab,terminal,should,yes,partial,P24; waits for hand check
-Snippet suggestion from repeated commands,terminal,could,yes,partial,P24; waits for hand check
-Broadcast frame on workspace panes,terminal,should,yes,partial,P24; waits for hand check
-Host editor with drill-in blocks and draft card,hosts,should,yes,partial,P23; waits for hand check
-Shared login hint,hosts,could,yes,partial,P23; waits for hand check
-Terminal bell sound setting,terminal,could,yes,partial,P25; waits for hand check
-Import review filter and group selection,hosts,should,yes,partial,P25; waits for hand check
-"SFTP open with a chosen app,  remembered per file type",sftp,could,yes,partial,P25 follow-up; waits for hand check
+feature,area,priority,original,clone,test,checked,notes
+Master password unlock for local encrypted vault,security,must,yes,yes,walk:ch01;walk:ch17;e2e:overlay;app:smoke,,S24; clone design choice standing in for Termius account encryption password
+Horizontal tab bar with Vault and SFTP fixed tabs,shell,must,yes,yes,e2e:overlay;e2e:rules;a11y,,S01
+Tab status dots (unread / needs input / error),shell,must,yes,partial,walk:ch07;unit:sessionDot;a11y,,"S01 S19; P18: seen working in the window (green output,  yellow question); red and workspace dot not seen; Mehrdad to confirm"
+Hosts list with grid/list view and search,hosts,must,yes,yes,walk:ch03;visual,,S02
+Create and edit host (address port username password),hosts,must,yes,yes,walk:ch03;e2e:overlay;app:smoke,,S03
+Nested groups,hosts,must,yes,yes,walk:ch03;e2e:groups,2026-11-06,S04; smoke 2026-11-05: groups never run in the real window; hand-checked (audit 2026-11-06)
+Per-field inheritance from parent groups,hosts,must,yes,yes,e2e:groups;rust:groups.rs,2026-11-06,source 3; resolve up the parent chain per field; smoke 2026-11-05: inheritance never run in the real window; hand-checked (audit 2026-11-06)
+Tags with filter,hosts,must,yes,partial,walk:ch03,,S02 S03; smoke 2026-11-05: tags never run in the real window
+Drag hosts into groups,hosts,must,yes,yes,walk:ch03,2026-11-06,F04; smoke 2026-11-05: drag onto groups never run in the real window; hand-checked (audit 2026-11-06)
+Generate SSH key (Ed25519 ECDSA RSA),keychain,must,yes,yes,walk:ch04;app:f02-key-login,2026-11-06,S06; smoke 2026-11-05: Generate never run in the real window; hand-checked (audit 2026-11-06)
+Import private key (paste / drop / file) with passphrase,keychain,must,yes,partial,walk:ch04,,S06; demoted 2026-11-06: only paste/file seen; drop and wrong passphrase not hand-checked
+Save passphrase toggle (else prompt each connect),keychain,must,yes,partial,,,source 7; smoke 2026-11-05: not run in the real window
+Identities (username + password or key) linked to hosts and groups,keychain,must,yes,partial,walk:ch04,,S07; smoke 2026-11-05: identities not run in the real window
+Export public key to host authorized_keys,keychain,must,yes,yes,app:f02-key-login;walk:ch04,2026-11-06,S08 F02; smoke 2026-11-05: Install on a server not run in the real window (key login itself was checked); hand-checked (audit 2026-11-06)
+SSH connect with password key or identity,terminal,must,yes,yes,app:smoke;app:f02-key-login;rust:ssh,,S18
+Known hosts trust-on-first-use prompt,terminal,must,yes,yes,app:smoke;e2e:overlay;walk:ch05,,S18 S14
+Host key changed blocking warning,terminal,must,yes,yes,app:f12-rotated-key;e2e:overlay;walk:ch11,,F12
+Known hosts list with delete,vault,must,yes,yes,walk:ch11;a11y,,S14
+xterm.js terminal with resize copy paste scrollback,terminal,must,yes,yes,e2e:rules;fake:controls,,S18
+Disconnected overlay with Reconnect,terminal,must,yes,yes,app:f11-drop;e2e:overlay;e2e:reconnect,,F11
+Clear errors for unreachable / auth failed / KEX failed,terminal,must,yes,partial,walk:ch06;l3:l3_an_old_key_exchange_is_reported_as_kex_failed,,"source 13; smoke 2026-11-05: password prompt and closed overlay checked in the real window; unreachable, auth failed and KEX not yet"
+Multiple session tabs (Cmd+T new tab),terminal,must,yes,yes,walk:ch07;e2e:rules,,S16
+New Tab screen with recent connections and search,terminal,must,yes,partial,walk:ch07;a11y,,S16; smoke 2026-11-05: New Tab screen not run in the real window
+Command palette over hosts and tabs (Cmd+K),shell,must,yes,yes,walk:ch07;e2e:keyboard,,S17 F03
+Jump host / host chain,hosts,must,yes,yes,app:f05-jump-host;walk:ch08,,F05; free in Termius since 10.1.0
+Startup snippet per host,hosts,must,yes,partial,,,source 10; smoke 2026-11-05: startup snippet not run in the real window
+Snippets with packages,snippets,must,yes,partial,e2e:snippets;walk:ch09,,S11 S12; smoke 2026-11-05: snippets not run in the real window
+Run snippet in current session from side panel,snippets,must,yes,partial,,,S20; smoke 2026-11-05: side-panel snippet run not run in the real window
+Local / remote / dynamic port forwarding rules with start-stop,port forwarding,must,yes,partial,app:f06-tunnel;walk:ch12;e2e:lists,,S09 S10 F06; demoted 2026-11-06: only local tunnels hand-checked; SOCKS and remote not run
+SFTP dual pane (local or host on each side),sftp,must,yes,yes,walk:ch13;e2e:lists,,S21
+SFTP drag-and-drop transfers with progress,sftp,must,yes,partial,walk:ch13,,S21 S22 F07; smoke 2026-11-05: drag-and-drop could not be driven by automation; check by hand
+SFTP rename delete new folder hidden files typed path,sftp,must,yes,yes,walk:ch13;unit:typedPath,2026-11-06,"S21; rename/delete not in Termius docs but expected; smoke 2026-11-05: listing checked in the real window; rename, delete, new folder, hidden files not; hand-checked (audit 2026-11-06)"
+Settings: appearance terminal font shortcuts,settings,must,yes,partial,walk:ch15;walk:ch16,,"S23; demoted 2026-11-06: new settings (font, shell, post-quantum) not hand-checked"
+Workspaces: split view up to 16 panes,workspaces,should,yes,yes,walk:ch09;unit:sessionsStore,2026-11-06,S19 F09; smoke 2026-11-05: workspaces not run in the real window; hand-checked (audit 2026-11-06)
+Workspaces: focus mode toggle,workspaces,should,yes,yes,walk:ch09,2026-11-06,S19; smoke 2026-11-05: workspaces not run in the real window; hand-checked (audit 2026-11-06)
+Broadcast input to all panes (Cmd+B),workspaces,should,yes,yes,walk:ch09;unit:sessionsStore,2026-11-06,S19; free in Termius since 9.17.1; smoke 2026-11-05: workspaces not run in the real window; hand-checked (audit 2026-11-06)
+Save workspace as template and reopen,workspaces,should,yes,yes,walk:ch09,2026-11-06,S19 source 11; smoke 2026-11-05: workspaces not run in the real window; hand-checked (audit 2026-11-06)
+Drag a tab onto another to make a workspace,workspaces,should,yes,partial,unit:sessionsStore,,"source 11; built in P18, not hand-checked"
+Run snippet on multiple hosts (opens workspace),snippets,should,yes,yes,walk:ch09;e2e:snippets,2026-11-06,S13 F08; smoke 2026-11-05: not run in the real window; hand-checked (audit 2026-11-06)
+SFTP edit remote file locally and prompt to re-upload,sftp,should,yes,partial,walk:ch13;fake:controls,,F07 source 5; smoke 2026-11-05: needs a real check (context menu could not be driven by automation)
+SFTP transfer conflicts (replace / keep both / skip),sftp,should,yes,partial,walk:ch13,,S22; smoke 2026-11-05: needs a real check
+SFTP permissions (chmod),sftp,should,unknown,partial,walk:ch13,,not in Termius docs; expected by users; smoke 2026-11-05: needs a real check
+Environment variables per host/group (SendEnv),hosts,should,yes,partial,rust:env.rs,,source 12; smoke 2026-11-05: not run against a real server
+SOCKS5 / HTTP proxy per host,hosts,should,yes,partial,l3:l3_the_http_and_socks_proxies_carry_a_connection_to_the_bastion,,source 2; smoke 2026-11-05: not run through a real proxy
+SSH agent forwarding,hosts,should,yes,partial,,,source 2; shells only since P17; not run against a real server
+Import hosts from ~/.ssh/config,import,should,yes,yes,walk:ch02;e2e:import;rust:import,2026-11-05,"S25 F10; smoke 2026-11-05 in the real window: jump chain,  ProxyCommand and Include notes,  duplicates unticked; Include is not followed"
+Import keys and known_hosts from ssh config,import,could,yes,no,,,not built: only hosts come across
+Import hosts from CSV,import,should,yes,partial,rust:import,,source 2; smoke 2026-11-05: CSV import not run in the real window (SSH config import was)
+Terminal themes per host/group,terminal,should,yes,partial,walk:ch05,,S20; smoke 2026-11-05: not run in the real window
+Command history side panel,terminal,should,yes,yes,walk:ch14;unit:historyHint;rust:history.rs,,S20; encrypted with the data key since P17; secret-looking lines are not saved
+Local terminal tab,terminal,should,yes,partial,,,S23 local terminal path; smoke 2026-11-05: not run in the real window
+Session logs (last per host + bookmarks + comment),logs,should,yes,partial,walk:ch14,,"S15 source 6; paid in Termius; demoted 2026-11-06: checked by hand, but replay and bookmark notes not fully"
+SSH certificates (key + cert as one item),keychain,could,yes,partial,,,source 7; smoke 2026-11-05: not run against a real OpenSSH server
+FIDO2 hardware keys (sk-ed25519),keychain,could,yes,no,,,source 7; needs OpenSSH 8.4+ server
+Terminal autocomplete (history paths snippets),terminal,could,yes,no,,,needs shell integration; Termius disables for some routers
+Find in terminal,terminal,could,unknown,partial,walk:ch05,,not documented; xterm search addon; smoke 2026-11-05: checked only in a browser against a stub
+Customisable keyboard shortcuts,settings,could,yes,partial,walk:ch15;unit:shortcuts,,S23; smoke 2026-11-05: recorder not run in the real window
+Import from PuTTY and MobaXterm,import,could,yes,partial,rust:import,,"source 2; parsers are tested on samples,  never run on a real export file"
+Import from SecureCRT,import,could,yes,no,,,not built
+Mosh,protocols,could,yes,partial,,,needs mosh client binary; not logged by Termius; smoke 2026-11-05: not run with real mosh
+Telnet,protocols,could,yes,partial,l3:l3_the_telnet_parser_talks_to_a_real_telnet_server,,plaintext warning; smoke 2026-11-05: not run against a real Telnet server
+Serial connections,protocols,could,yes,partial,,,baud data bits stop bits parity flow control; smoke 2026-11-05: not run with real serial hardware
+Auto-detect remote OS icon,hosts,could,yes,yes,rust:osdetect.rs,,uses an exec channel; make it toggleable
+App lock with Touch ID / Windows Hello,security,could,yes,no,,,
+Own self-hosted encrypted sync between devices,sync,could,yes,no,,,Termius's own sync service is skip; this would be your own
+AI command generation with your own API key,terminal,could,yes,partial,walk:ch15;rust:ai.rs,,Termius AI itself is skip; smoke 2026-11-05: not run against the real API
+Termius cloud account and E2E cloud vault sync,sync,could,yes,skip,,,their backend service; not part of what you can rebuild
+Team vaults seats and granular permissions,teams,could,yes,skip,,,their multi-tenant backend; personal clone
+Real-time terminal multiplayer,teams,could,yes,skip,,,their relay service
+SAML SSO SOC 2 and admin console,teams,could,yes,skip,,,enterprise business features
+SSH.id device-bound passkeys,keychain,could,yes,skip,,,their identity service; use local keys / FIDO2
+Termius AI model and AI snippet writing,terminal,could,yes,skip,,,their hosted model
+AWS / DigitalOcean / Azure host sync,integrations,could,yes,skip,,,possible via official APIs later; not core
+Mobile apps (iOS Android),platform,could,yes,skip,,,desktop only
+Termius brand icon theme names and copy,brand,could,yes,skip,,,owned assets; make your own with /replica-brand
+Keyboard-interactive sign-in (2FA / PAM),hosts,should,yes,yes,l3:l3_a_two_step_server_asks_for_the_password_then_the_code;walk:ch06,,P17; tested against an in-process server only; promoted 2026-11-07: covered by automated tests
+Connection step log with copy details,terminal,should,yes,yes,walk:ch05;walk:ch06;e2e:overlay,,P21; waits for hand check; promoted 2026-11-07: covered by automated tests
+Connect once (trust without saving),terminal,should,yes,yes,e2e:overlay;rust:ssh,,P21; waits for hand check; promoted 2026-11-07: covered by automated tests
+Dropped sessions card and optional auto reconnect,terminal,should,yes,yes,e2e:reconnect;walk:ch10;unit:sessionsStore,,P21; waits for hand check; promoted 2026-11-07: covered by automated tests
+Try another sign-in method after a failure,terminal,should,yes,yes,walk:ch06;e2e:overlay;rust:ssh,,P21; waits for hand check; promoted 2026-11-07: covered by automated tests
+Right-click menus on host cards and tabs,shell,should,yes,yes,e2e:overlay;walk:ch07,,P22; waits for hand check; promoted 2026-11-07: covered by automated tests
+Quick connect from the New tab (user@host:port),terminal,should,yes,yes,walk:ch07;unit:quickConnect,,P22; saves the host first; waits for hand check; promoted 2026-11-07: covered by automated tests
+Key and snippet right-click menus,keychain,should,yes,partial,,,P22; waits for hand check
+Duplicate host and snippet,hosts,should,yes,partial,,,P22; waits for hand check
+Search and sort on section lists,shell,should,yes,partial,,,P22; waits for hand check
+Side panel theme and font tabs with remembered tab,terminal,should,yes,yes,e2e:overlay;walk:ch05,,P24; waits for hand check; promoted 2026-11-07: covered by automated tests
+Snippet suggestion from repeated commands,terminal,could,yes,partial,,,P24; waits for hand check
+Broadcast frame on workspace panes,terminal,should,yes,partial,,,P24; waits for hand check
+Host editor with drill-in blocks and draft card,hosts,should,yes,yes,e2e:overlay;a11y,,P23; waits for hand check; promoted 2026-11-07: covered by automated tests
+Shared login hint,hosts,could,yes,partial,,,P23; waits for hand check
+Terminal bell sound setting,terminal,could,yes,partial,walk:ch15;e2e:rules,,P25; waits for hand check
+Import review filter and group selection,hosts,should,yes,yes,walk:ch02;e2e:import,,P25; waits for hand check; promoted 2026-11-07: covered by automated tests
+"SFTP open with a chosen app,  remembered per file type",sftp,could,yes,partial,,,P25 follow-up; waits for hand check
