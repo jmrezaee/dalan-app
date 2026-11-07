@@ -68,9 +68,32 @@ These are things the tests found or could not settle. Each has a place in `progr
 - [ ] **D7 Creating the vault is quick.** Delete the app's data folder (`~/Library/Application Support/app.dalan.desktop`, keep a copy), start the app, create a vault. **Expected:** a few seconds at most. **Seen:** in the Linux debug build it took from seconds to minutes before the crypto crates were built optimised.
   `Date / result / initials:`
 
-## E. Open checks from earlier phases
+## E. Open checks from the `[h]` phases (merged in P28)
 
-P16 to P18 and P21 to P27 each left a numbered "Hand checks" list in `progress.md`. P28 merges the ones not covered above into this file and asks you to run them. Until then they are the authority.
+Each phase below was built and tested by machines but never looked at by you in the real window. Items already in A to D (right-click menus, drag and drop, bell, Open with…, import from a file, the first-pane race, the SFTP Copy) are not repeated. Use the test servers: `a` (password), `kbd` (code question), `b` (key), `c` through `a` (jump host).
+
+- [ ] **E1 Tab dots (P18).** Run `sleep 5; echo done` in a tab, switch away before it prints. **Expected:** the tab dot turns green when output arrives while you are away, yellow while a question (password or key) is open, red when the connection drops; a workspace tab shows one combined dot.
+  `Date / result / initials:`
+- [ ] **E2 Tab bar keys and mouse (P18).** ⌃Tab and ⌃⇧Tab cycle tabs; middle-click closes a tab; double-click (or F2 on a focused tab) renames; ⌘⇧D in a workspace copies the focused server one row down. **Expected:** each works; a live shell asks before closing.
+  `Date / result / initials:`
+- [ ] **E3 Settings take effect (P18, P25).** Change the font size and family, the local shell path, and post-quantum key exchange on/off; rebind one shortcut in Settings. **Expected:** open terminals change at once; shortcut labels in menus show the new key; the light theme swatches look right.
+  `Date / result / initials:`
+- [ ] **E4 A tunnel under the CSP, and tag and recents menus (P16, P17).** Start a local tunnel in the real window and fetch a page through it; delete a tag from its menu; open New tab and look at the recents. **Expected:** all three work with no error in the window.
+  `Date / result / initials:`
+- [ ] **E5 Two-step sign-in against the `kbd` server (P17).** Connect to the `kbd` server (see `scripts/test-servers.sh` for its code). **Expected:** password, then the question; the right code signs in, a wrong one does not.
+  `Date / result / initials:`
+- [ ] **E6 Connection log and drops (P21).** (1) Connect to a wrong host/port: the log says where it stopped and Copy details puts plain text on the clipboard. (2) Open two sessions on server `a`, `docker restart dalan-test-a`: one card, "Reconnect all" works. (3) Settings > Terminal > Reconnect automatically on, restart again: tabs come back by themselves. (4) Wrong password: "Try another way" lists only what the server accepts.
+  `Date / result / initials:`
+- [ ] **E7 Menus and quick actions (P22).** (1) Host card "…" and right-click show the same items; Connect with SFTP opens the SFTP tab with that host. (2) Add to workspace > New workspace, then add a second host. (3) Right-click a tab: Duplicate tab, Close others (asks before closing live ones). (4) Duplicate a host that has a saved password and connect to the copy without being asked; delete the original and connect to the copy again. (5) Filter and sort on Keychain, Snippets, Port forwarding and Known hosts.
+  `Date / result / initials:`
+- [ ] **E8 The host editor (P23).** (1) Edit an existing host: proxy, environment and agent values load and save unchanged. (2) Two hosts with the same user and password each show the shared-login note. (3) ⌘S saves from a sub-page; closing with changes still warns. (4) Telnet, Serial and Mosh hosts show only the options that apply.
+  `Date / result / initials:`
+- [ ] **E9 Terminal side panel (P24).** (1) ⌘. then Theme: the open terminal changes at once and stays after reconnect; "Use the default" clears it. (2) Font size and family change every open terminal. (3) Close the panel on Font, reopen: it opens on Font; restart the app: still Font. (4) Type the same command (4+ characters) three times on a server with history on: History suggests it, Save snippet creates it. (5) In a workspace turn Broadcast on: every live pane has a dashed amber frame.
+  `Date / result / initials:`
+- [ ] **E10 Keys and shells (P25, P27).** (1) Keychain > Generate key: each type shows its hint and the ML-DSA note. (2) Type `exit` in a shell with auto-reconnect on: the tab stays ended. (3) Through a bastion, fail sign-in and use Try another way: the choice applies to the target. (4) SFTP path bar: type `~/..`. **Expected:** no surprises in any of them.
+  `Date / result / initials:`
+- [ ] **E11 SFTP in the window (P18).** F2 renames a row, ⌘C and ⌘V copy and paste files between panes, a folder with 500+ files scrolls smoothly. **Expected:** each works.
+  `Date / result / initials:`
 
 ## F. Release (P29)
 
