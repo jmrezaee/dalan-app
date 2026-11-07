@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Minimal permissions for the main window. No fs, http or shell for the webview. The open-file dialog only returns a path; Rust reads the file.",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open"]
+  "permissions": ["core:default", "core:window:allow-start-dragging", "dialog:allow-open"]
 }
