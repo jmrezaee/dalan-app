@@ -13,15 +13,15 @@ Found by hand on 2026-11-07 and fixed: dragging the tab bar threw `window.start_
 The browser tests run in Chromium and the real-app tests in WebKitGTK on Linux. These behave differently on macOS.
 
 - [ ] **A1 Right-click menus.** Right-click a host card, a key, a snippet, a tab, an SFTP row and empty SFTP space. **Expected:** each opens its menu at the pointer; Esc closes it; the "…" button on cards opens the same list.
-  `Date / result / initials:`
+  `Date / result / initials:` 2026-11-07, partly (Claude, fresh bundle): right-click on a host card opens its menu at the pointer (Connect, Connect with SFTP, Add to workspace, Edit, Duplicate, Move to group, Copy address, Delete), Esc closes it; right-click on a tab opens Rename, Close, Duplicate tab, Close others. Not done: key, snippet, SFTP row, empty SFTP space, the "…" button.
 - [ ] **A2 Drag and drop.** Drag a host onto a group; drag a tab onto another tab (a workspace opens); drag a tab to reorder; drag a snippet onto a package; drag files between the two SFTP panes; drag a file from Finder onto a pane. **Expected:** each works with a drop highlight and no stuck drag.
-  `Date / result / initials:`
+  `Date / result / initials:` 2026-11-07, partly (Claude): dragging a tab to reorder works with real mouse events (a fast scripted drag did not; slow press-move-release did), and dragging the window by the tab bar moves it with no error (the permission fix works). Not done: host onto group, tab onto tab (workspace), snippet onto package, files between SFTP panes, Finder onto a pane.
 - [ ] **A3 Typing in other scripts.** In a terminal and in a text field, type Persian text with the Persian keyboard, and use an IME (for example Japanese). **Expected:** characters appear correctly, no doubled or lost keys, right-to-left text in a field aligns correctly.
   `Date / result / initials:`
 - [ ] **A4 Shortcuts are not swallowed.** ⌘T, ⌘W, ⌘K, ⌘,, ⌘., ⌘F, ⌘B, ⌘D, ⌘⇧D, ⌘S inside a terminal and outside; Ctrl+Tab. **Expected:** Dalan handles each, and the terminal still gets Ctrl+C, Ctrl+D and Ctrl+Z.
-  `Date / result / initials:`
+  `Date / result / initials:` 2026-11-07, partly (Claude): inside a terminal ⌘K opens the palette, ⌘T opens a new tab, Ctrl+C reaches the shell (`sleep 100` interrupted). ⌘, opens Settings from the Vault tab; pressed from a New tab (and possibly a terminal tab) it showed nothing, check by hand whether it should jump to the Vault tab. Not done: ⌘W, ⌘. , ⌘F, ⌘B, ⌘D, ⌘⇧D, ⌘S, Ctrl+Tab, Ctrl+D, Ctrl+Z.
 - [ ] **A5 Clipboard.** Settings > Terminal > Copy on select on; select text in a terminal; paste into another app. Then ⌘C and ⌘V in a terminal. **Expected:** the macOS clipboard has the text both ways.
-  `Date / result / initials:`
+  `Date / result / initials:` 2026-11-07, partly (Claude): double-click selects a word, ⌘C puts exactly that text on the macOS clipboard, ⌘V pastes it into the terminal. Not done: Copy on select, pasting into another app.
 - [ ] **A6 Bell.** Settings > Terminal > Bell sound on, then `printf '\a'`. **Expected:** one short soft beep; ten in a row do not stack into noise.
   `Date / result / initials:`
 - [ ] **A7 Window feel.** Resize the window small and large; full screen; two displays if you have them. Type fast and run `seq 1 200000`. **Expected:** no layout breakage, typing stays responsive, no stuck scroll.
@@ -38,7 +38,7 @@ The browser tests run in Chromium and the real-app tests in WebKitGTK on Linux. 
 - [ ] **B4 Local network prompt.** First connect to a server on your LAN. **Expected:** macOS may ask for Local Network access; after allowing it, the connection works.
   `Date / result / initials:`
 - [ ] **B5 Quit and relaunch.** ⌘Q with sessions open. **Expected:** Dalan asks before ending live sessions; after relaunch the vault asks for the master password and tabs are gone, hosts are kept.
-  `Date / result / initials:`
+  `Date / result / initials:` 2026-11-07 FAILS (Claude): Dalan > Quit Dalan with a live Telnet session ended the app at once with no question. The code has no close-requested handler, so this was never built; the expected line above is a requirement to decide on. Relaunch and vault lock not checked.
 
 ## C. Hardware and outside services
 
@@ -59,7 +59,7 @@ These are things the tests found or could not settle. Each has a place in `progr
   `Date / result / initials:`
 - [ ] **D2 Selecting an SFTP row, then Copy.** Click a file in one pane, press "Copy to the other pane". **Expected:** the row highlights, the button enables, the file is copied. **Seen in the real-app test:** a WebDriver click did not select the row.
   `Date / result / initials:`
-- [ ] **D3 Palette: Enter after typing.** ⌘K, type part of a host name, press Enter without pressing the arrow keys. **Expected:** the first result opens. **Seen in the walkthrough:** nothing happened until the down arrow was pressed.
+- [ ] **D3 Palette: Enter after typing.** (2026-11-07, Claude: typing `127` then Enter opened the first match, a tab, in the real window; the earlier note may be fixed or specific to the fake backend.) ⌘K, type part of a host name, press Enter without pressing the arrow keys. **Expected:** the first result opens. **Seen in the walkthrough:** nothing happened until the down arrow was pressed.
   `Date / result / initials:`
 - [ ] **D4 Side panel tab names.** Open a terminal's side panel. **Expected:** "Ask AI" fits on one line. **Seen:** it wrapped onto two lines at 300 px.
   `Date / result / initials:`
