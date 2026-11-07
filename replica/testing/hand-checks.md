@@ -8,6 +8,8 @@ Servers for the items that need one: `scripts/test-servers.sh up` (see `scripts/
 
 ## A. The macOS window (WKWebView)
 
+Found by hand on 2026-11-07 and fixed: dragging the tab bar threw `window.start_dragging not allowed` (missing `core:window:allow-start-dragging`; now granted, and `tests/capabilities.test.ts` guards it). Re-check by dragging the window by the tab bar.
+
 The browser tests run in Chromium and the real-app tests in WebKitGTK on Linux. These behave differently on macOS.
 
 - [ ] **A1 Right-click menus.** Right-click a host card, a key, a snippet, a tab, an SFTP row and empty SFTP space. **Expected:** each opens its menu at the pointer; Esc closes it; the "…" button on cards opens the same list.
@@ -23,12 +25,12 @@ The browser tests run in Chromium and the real-app tests in WebKitGTK on Linux. 
 - [ ] **A6 Bell.** Settings > Terminal > Bell sound on, then `printf '\a'`. **Expected:** one short soft beep; ten in a row do not stack into noise.
   `Date / result / initials:`
 - [ ] **A7 Window feel.** Resize the window small and large; full screen; two displays if you have them. Type fast and run `seq 1 200000`. **Expected:** no layout breakage, typing stays responsive, no stuck scroll.
-  `Date / result / initials:`
+  `Date / result / initials:` 2026-11-07, partly (Claude): `seq 1 200000` printed all lines to the end in the real window, typing worked straight after, no stuck scroll. Not done: resizing, full screen, two displays.
 
 ## B. macOS integration
 
 - [ ] **B1 One Dalan at a time.** With Dalan open, run `open -n -a Dalan` (or launch the build a second time). **Expected:** no second window; the first one comes to the front.
-  `Date / result / initials:`
+  `Date / result / initials:` 2026-11-07, ok on a fresh bundle built from current code: `open -n` left one process, no new crash report (driven by Claude). The /Applications copy is from Nov 5, before single-instance existed, and crashed on a second launch (Apple event exception); replace it with a current build.
 - [ ] **B2 Open with….** SFTP > a server file > Open with…. **Expected:** the native chooser starts in /Applications; the chosen app opens the downloaded copy; the next time the menu offers "Edit in <that app>"; Settings > Terminal lists it and Forget removes it; a `.sh` or `.command` file is refused with the default app.
   `Date / result / initials:`
 - [ ] **B3 The system SSH agent.** With `SSH_AUTH_SOCK` set (ssh-agent or 1Password), add a host with agent forwarding on and connect to a test server. **Expected:** `ssh-add -l` on the server lists your keys; with forwarding off it says there is no agent.
