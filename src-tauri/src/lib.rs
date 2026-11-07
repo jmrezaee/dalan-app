@@ -163,6 +163,7 @@ pub(crate) fn release_unacked(unacked: &std::sync::atomic::AtomicUsize, n: usize
 }
 
 /// Anchored to this crate, not to the working directory: a debug app started from Finder has `/` as its cwd.
+#[cfg(any(debug_assertions, test))]
 const BINDINGS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../app/types/bindings.ts");
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
