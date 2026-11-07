@@ -36,7 +36,7 @@ jobs:
       - run: pnpm build
       - name: The production build has no test hooks
         run: pnpm check:hooks
-      - name: Clean room: the built app carries nothing of the original
+      - name: Clean room, the built app carries nothing of the original
         run: python3 replica/sweep.py .output/public --config replica/brand.json
       - name: Rust
         working-directory: src-tauri
@@ -68,7 +68,7 @@ jobs:
         run: pnpm coverage --check
       - name: The walkthrough (every chapter, headless)
         run: pnpm walk:ci
-      - name: Clean room: the walkthrough captions and results
+      - name: Clean room, the walkthrough captions and results
         run: python3 replica/sweep.py walk-results --config replica/brand.json
       - name: Upload the reports
         if: always()
