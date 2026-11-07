@@ -38,7 +38,7 @@ The browser tests run in Chromium and the real-app tests in WebKitGTK on Linux. 
 - [ ] **B4 Local network prompt.** First connect to a server on your LAN. **Expected:** macOS may ask for Local Network access; after allowing it, the connection works.
   `Date / result / initials:`
 - [ ] **B5 Quit and relaunch.** ⌘Q with sessions open. **Expected:** Dalan asks before ending live sessions; after relaunch the vault asks for the master password and tabs are gone, hosts are kept.
-  `Date / result / initials:` 2026-11-07 FAILS (Claude): Dalan > Quit Dalan with a live Telnet session ended the app at once with no question. The code has no close-requested handler, so this was never built; the expected line above is a requirement to decide on. Relaunch and vault lock not checked.
+  `Date / result / initials:` 2026-11-07 (Claude, real window): first try FAILED (quit with a live session ended the app silently; the macOS Quit menu item skips Tauri's exit events). Fixed by replacing that menu item and asking in Rust + the UI (`quit.rs`, `QuitDialog.vue`). Re-checked: with a live Telnet shell, Dalan > Quit Dalan and the red close button both show "Quit Dalan?"; Keep working returns to the shell; with no session open Quit exits at once. Still yours: ⌘Q from the keyboard, Quit anyway, and relaunch (vault asks for the master password, tabs gone, hosts kept).
 
 ## C. Hardware and outside services
 

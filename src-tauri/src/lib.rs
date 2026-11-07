@@ -213,6 +213,8 @@ pub fn run() {
                     .plugin(tauri_plugin_updater::Builder::new().build())?;
             }
             vault::spawn_auto_lock(app.handle().clone());
+            #[cfg(target_os = "macos")]
+            ask_before_quit_from_the_menu(app)?;
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -220,15 +222,10 @@ pub fn run() {
         .run(|app, event| {
             use tauri::{RunEvent, WindowEvent};
             use tauri_specta::Event;
-            // Closing the window and ⌘Q (the menu's Quit) both end here. `code: None` means the user asked; the
-            // `app.exit(0)` from `quit_app` carries a code and passes straight through.
-            let ask = |app: &tauri::AppHandle| -> Option<u32> {
-                let st = app.try_state::<AppState>()?;
-                match st.quit.decide(st.sessions.live_count()) {
-                    quit::Decision::Allow => None,
-                    quit::Decision::Ask(n) => Some(n),
-                }
-            };
+            // The red close button ends here. (⌘Q does not: the macOS menu's own Quit goes around this, see
+            // `ask_before_quit_from_the_menu`.) `code: None` means the user asked; the `app.exit(0)` from
+            // `quit_app` carries a code and passes straight through.
+            let ask = |app: &tauri::AppHandle| quit_question(app);
             match event {
                 RunEvent::WindowEvent {
                     event: WindowEvent::CloseRequested { api, .. },
@@ -250,6 +247,55 @@ pub fn run() {
                 _ => {}
             }
         });
+}
+
+/// `Some(n)` when quitting now would end `n` live sessions and the UI must be asked first.
+fn quit_question(app: &tauri::AppHandle) -> Option<u32> {
+    let st = app.try_state::<AppState>()?;
+    match st.quit.decide(st.sessions.live_count()) {
+        quit::Decision::Allow => None,
+        quit::Decision::Ask(n) => Some(n),
+    }
+}
+
+/// The menu bar's Quit (⌘Q) calls the system's `terminate:`, which skips Tauri's exit events, so it is replaced by an
+/// ordinary menu item that asks first and then exits through Tauri.
+#[cfg(target_os = "macos")]
+fn ask_before_quit_from_the_menu(app: &mut tauri::App) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItemBuilder, MenuItemKind};
+    use tauri_specta::Event;
+    let menu = Menu::default(app.handle())?;
+    for item in menu.items()? {
+        let MenuItemKind::Submenu(sub) = item else {
+            continue;
+        };
+        for entry in sub.items()? {
+            let MenuItemKind::Predefined(p) = &entry else {
+                continue;
+            };
+            if p.text()?.starts_with("Quit") {
+                let title = p.text()?;
+                sub.remove(&entry)?;
+                sub.append(
+                    &MenuItemBuilder::with_id("quit-dalan", title)
+                        .accelerator("CmdOrCtrl+Q")
+                        .build(app)?,
+                )?;
+            }
+        }
+    }
+    app.set_menu(menu)?;
+    app.on_menu_event(|app, event| {
+        if event.id() == "quit-dalan" {
+            match quit_question(app) {
+                Some(n) => {
+                    let _ = events::QuitRequested { live_sessions: n }.emit(app);
+                }
+                None => app.exit(0),
+            }
+        }
+    });
+    Ok(())
 }
 
 #[cfg(test)]
