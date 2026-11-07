@@ -13,30 +13,30 @@ Found by hand on 2026-11-07 and fixed: dragging the tab bar threw `window.start_
 The browser tests run in Chromium and the real-app tests in WebKitGTK on Linux. These behave differently on macOS.
 
 - [ ] **A1 Right-click menus.** Right-click a host card, a key, a snippet, a tab, an SFTP row and empty SFTP space. **Expected:** each opens its menu at the pointer; Esc closes it; the "…" button on cards opens the same list.
-  `Date / result / initials:` 2026-11-07, partly (Claude, fresh bundle): right-click on a host card opens its menu at the pointer (Connect, Connect with SFTP, Add to workspace, Edit, Duplicate, Move to group, Copy address, Delete), Esc closes it; right-click on a tab opens Rename, Close, Duplicate tab, Close others. Not done: key, snippet, SFTP row, empty SFTP space, the "…" button.
+  `Date / result / initials:` 2026-11-07 (Claude, real window, bundle from commit f1912b4a): ok for a host card, a key (Copy public key, Install on a server, Edit, Attach certificate, Delete), a snippet (Run, Edit, Duplicate, Delete), a tab (Rename, Close, Duplicate tab, Close others) and an SFTP row (Copy to left pane, Edit in default app, Edit in TextEdit, Open with…, Rename, Permissions, Delete, New folder, Refresh); Esc closes. Finding: right-clicking empty SFTP space with a row still selected shows that row's menu, not just New folder / Refresh. Not checked: the "…" button.
 - [ ] **A2 Drag and drop.** Drag a host onto a group; drag a tab onto another tab (a workspace opens); drag a tab to reorder; drag a snippet onto a package; drag files between the two SFTP panes; drag a file from Finder onto a pane. **Expected:** each works with a drop highlight and no stuck drag.
-  `Date / result / initials:` 2026-11-07, partly (Claude): dragging a tab to reorder works with real mouse events (a fast scripted drag did not; slow press-move-release did), and dragging the window by the tab bar moves it with no error (the permission fix works). Not done: host onto group, tab onto tab (workspace), snippet onto package, files between SFTP panes, Finder onto a pane.
+  `Date / result / initials:` 2026-11-07 (Claude, real window, bundle from commit f1912b4a): ok for dragging a host onto a group ("Moved to lab."), reordering a tab, and dragging the window by the tab bar (no permission error). Slow press-move-release works; a fast scripted drag does not start a drag. Not checked: tab onto tab (workspace), snippet onto package, files between SFTP panes, Finder onto a pane.
 - [ ] **A3 Typing in other scripts.** In a terminal and in a text field, type Persian text with the Persian keyboard, and use an IME (for example Japanese). **Expected:** characters appear correctly, no doubled or lost keys, right-to-left text in a field aligns correctly.
-  `Date / result / initials:`
+  `Date / result / initials:` 2026-11-07 NOT DONE: Claude can only send Latin keystrokes. Yours.
 - [ ] **A4 Shortcuts are not swallowed.** ⌘T, ⌘W, ⌘K, ⌘,, ⌘., ⌘F, ⌘B, ⌘D, ⌘⇧D, ⌘S inside a terminal and outside; Ctrl+Tab. **Expected:** Dalan handles each, and the terminal still gets Ctrl+C, Ctrl+D and Ctrl+Z.
-  `Date / result / initials:` 2026-11-07, partly (Claude): inside a terminal ⌘K opens the palette, ⌘T opens a new tab, Ctrl+C reaches the shell (`sleep 100` interrupted). ⌘, opens Settings from the Vault tab; pressed from a New tab (and possibly a terminal tab) it showed nothing, check by hand whether it should jump to the Vault tab. Not done: ⌘W, ⌘. , ⌘F, ⌘B, ⌘D, ⌘⇧D, ⌘S, Ctrl+Tab, Ctrl+D, Ctrl+Z.
+  `Date / result / initials:` 2026-11-07 (Claude, real window, bundle from commit f1912b4a): ok for ⌘T, ⌘K, ⌘W (asks before closing a live tab), ⌘F (find bar), ⌘. (side panel), ⌘B (broadcast, both panes get the line), ⌘⇧D (new pane below), ⌘, from the Vault tab; the terminal still gets Ctrl+C, Ctrl+Z (job stopped) and Ctrl+D (shell logout). Not checked: ⌘D, ⌘S, Ctrl+Tab, and ⌘, from a terminal tab (did nothing visible from a New tab).
 - [ ] **A5 Clipboard.** Settings > Terminal > Copy on select on; select text in a terminal; paste into another app. Then ⌘C and ⌘V in a terminal. **Expected:** the macOS clipboard has the text both ways.
-  `Date / result / initials:` 2026-11-07, partly (Claude): double-click selects a word, ⌘C puts exactly that text on the macOS clipboard, ⌘V pastes it into the terminal. Not done: Copy on select, pasting into another app.
+  `Date / result / initials:` 2026-11-07 (Claude, real window, bundle from commit f1912b4a): ok: ⌘C copies a selection, ⌘V pastes into the terminal, and with Settings > Terminal > Copy on select on, selecting a line puts it on the macOS clipboard. Not checked: pasting into another app.
 - [ ] **A6 Bell.** Settings > Terminal > Bell sound on, then `printf '\a'`. **Expected:** one short soft beep; ten in a row do not stack into noise.
-  `Date / result / initials:`
+  `Date / result / initials:` 2026-11-07 NOT DONE: Claude cannot hear. Yours.
 - [ ] **A7 Window feel.** Resize the window small and large; full screen; two displays if you have them. Type fast and run `seq 1 200000`. **Expected:** no layout breakage, typing stays responsive, no stuck scroll.
-  `Date / result / initials:` 2026-11-07, partly (Claude): `seq 1 200000` printed all lines to the end in the real window, typing worked straight after, no stuck scroll. Not done: resizing, full screen, two displays.
+  `Date / result / initials:` 2026-11-07 (Claude, real window, bundle from commit f1912b4a): `seq 1 200000` ran to the end, typing worked straight after, no stuck scroll. Not done: resizing, full screen, two displays.
 
 ## B. macOS integration
 
 - [ ] **B1 One Dalan at a time.** With Dalan open, run `open -n -a Dalan` (or launch the build a second time). **Expected:** no second window; the first one comes to the front.
   `Date / result / initials:` 2026-11-07, ok on a fresh bundle built from current code: `open -n` left one process, no new crash report (driven by Claude). The /Applications copy is from Nov 5, before single-instance existed, and crashed on a second launch (Apple event exception); replace it with a current build.
 - [ ] **B2 Open with….** SFTP > a server file > Open with…. **Expected:** the native chooser starts in /Applications; the chosen app opens the downloaded copy; the next time the menu offers "Edit in <that app>"; Settings > Terminal lists it and Forget removes it; a `.sh` or `.command` file is refused with the default app.
-  `Date / result / initials:`
+  `Date / result / initials:` 2026-11-07 (Claude, real window, bundle from commit f1912b4a): ok: the native chooser started in /Applications, TextEdit opened the downloaded copy with the right text, the next right-click offered "Edit in TextEdit", Settings > Terminal listed `.txt: TextEdit` and Forget removed it. Not checked: a `.sh` file refused with the default app.
 - [ ] **B3 The system SSH agent.** With `SSH_AUTH_SOCK` set (ssh-agent or 1Password), add a host with agent forwarding on and connect to a test server. **Expected:** `ssh-add -l` on the server lists your keys; with forwarding off it says there is no agent.
-  `Date / result / initials:`
+  `Date / result / initials:` 2026-11-07 (Claude, real window, bundle from commit f1912b4a): ok: with an ssh-agent holding the test key and Forward agent on, `ssh-add -l` on the server listed the key and SSH_AUTH_SOCK was set. Not checked: forwarding off.
 - [ ] **B4 Local network prompt.** First connect to a server on your LAN. **Expected:** macOS may ask for Local Network access; after allowing it, the connection works.
-  `Date / result / initials:`
+  `Date / result / initials:` 2026-11-07 NOT DONE: needs a LAN host and a first run; no prompt appeared for localhost. Yours.
 - [ ] **B5 Quit and relaunch.** ⌘Q with sessions open. **Expected:** Dalan asks before ending live sessions; after relaunch the vault asks for the master password and tabs are gone, hosts are kept.
   `Date / result / initials:` 2026-11-07 (Claude, real window): first try FAILED (quit with a live session ended the app silently; the macOS Quit menu item skips Tauri's exit events). Fixed by replacing that menu item and asking in Rust + the UI (`quit.rs`, `QuitDialog.vue`). Re-checked: with a live Telnet shell, Dalan > Quit Dalan and the red close button both show "Quit Dalan?"; Keep working returns to the shell; with no session open Quit exits at once. Still yours: ⌘Q from the keyboard, Quit anyway, and relaunch (vault asks for the master password, tabs gone, hosts kept).
 
@@ -56,19 +56,19 @@ The browser tests run in Chromium and the real-app tests in WebKitGTK on Linux. 
 These are things the tests found or could not settle. Each has a place in `progress.md`.
 
 - [ ] **D1 A new workspace's first pane stays empty.** Snippets > a snippet with two default servers > Run on both. **Expected:** both panes show a banner and the snippet's output. **Seen in the real-app test:** the first pane stayed empty about 2 times in 3 while the second pane showed the snippet typed twice. Try it ten times.
-  `Date / result / initials:`
+  `Date / result / initials:` 2026-11-07 (Claude, real window, bundle from commit f1912b4a): did not reproduce: three runs of "Run on 2 servers" (an SSH and a Telnet host) showed the snippet output in both panes every time. The Docker failure is probably Linux WebKitGTK timing; keep the real-app spec skipped until it is retried there.
 - [ ] **D2 Selecting an SFTP row, then Copy.** Click a file in one pane, press "Copy to the other pane". **Expected:** the row highlights, the button enables, the file is copied. **Seen in the real-app test:** a WebDriver click did not select the row.
-  `Date / result / initials:`
-- [ ] **D3 Palette: Enter after typing.** (2026-11-07, Claude: typing `127` then Enter opened the first match, a tab, in the real window; the earlier note may be fixed or specific to the fake backend.) ⌘K, type part of a host name, press Enter without pressing the arrow keys. **Expected:** the first result opens. **Seen in the walkthrough:** nothing happened until the down arrow was pressed.
+  `Date / result / initials:` 2026-11-07 (Claude, real window, bundle from commit f1912b4a): ok: clicking a file selected it ("1 selected") and the Copy button downloaded it to the local pane. The Docker failure is WebDriver-only.
+- [ ] **D3 Palette: Enter after typing.** (2026-11-07, Claude: typing `127` then Enter opened the first match in the real window; looks fine on macOS.) ⌘K, type part of a host name, press Enter without pressing the arrow keys. **Expected:** the first result opens. **Seen in the walkthrough:** nothing happened until the down arrow was pressed.
   `Date / result / initials:`
 - [ ] **D4 Side panel tab names.** Open a terminal's side panel. **Expected:** "Ask AI" fits on one line. **Seen:** it wrapped onto two lines at 300 px.
-  `Date / result / initials:`
+  `Date / result / initials:` 2026-11-07 (Claude, real window, bundle from commit f1912b4a): still wraps: "Ask AI" breaks onto two lines in the side panel.
 - [ ] **D5 Quick connect toast.** New tab > type `me@10.0.0.9:2222` > Enter. **Expected:** a connection opens; a "Saved." toast is acceptable but should say what was saved. **Seen:** a bare "Saved." toast.
-  `Date / result / initials:`
+  `Date / result / initials:` 2026-11-07 (Claude, real window, bundle from commit f1912b4a): the bare "Saved." toast also shows after saving a host, a group and a snippet; not wrong, but it never says what was saved.
 - [ ] **D6 Import from a file.** Hosts > Import > Choose file… with your own SSH config (and, if you have them, a PuTTY or MobaXterm export). **Expected:** the preview lists your hosts; Include and ProxyCommand notes appear; the filter and Select all act on the shown rows; the group tick boxes toggle whole folders. (WebDriver cannot drive the native file dialog, so this is not in the real-app tests.)
-  `Date / result / initials:`
+  `Date / result / initials:` 2026-11-07 (Claude, real window, bundle from commit f1912b4a): the native file dialog works (it was used for the key import: path shown, key saved). The SSH config import itself was not run.
 - [ ] **D7 Creating the vault is quick.** Delete the app's data folder (`~/Library/Application Support/app.dalan.desktop`, keep a copy), start the app, create a vault. **Expected:** a few seconds at most. **Seen:** in the Linux debug build it took from seconds to minutes before the crypto crates were built optimised.
-  `Date / result / initials:`
+  `Date / result / initials:` 2026-11-07 (Claude, real window, bundle from commit f1912b4a): the first vault was created in seconds in the release build (the user created it); not measured in a debug build.
 
 ## E. Open checks from the `[h]` phases (merged in P28)
 
