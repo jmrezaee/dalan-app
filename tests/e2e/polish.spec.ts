@@ -9,6 +9,7 @@ test('the side panel tabs each stay on one line ("Ask AI" used to wrap)', async 
   await page.getByText('web-1').dblclick()
   const [id] = await sessionIds(page)
   await fake.session(id!).state('ready')
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur()) // off a Mac, Ctrl keys typed in a terminal go to the shell
   await page.keyboard.press('ControlOrMeta+.')
   const tabs = page.getByRole('tablist', { name: 'Side panel' }).getByRole('tab')
   await expect(tabs).toHaveCount(5)

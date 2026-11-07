@@ -2098,7 +2098,11 @@ async fn l3_terminal_output_that_is_not_utf8_arrives_byte_identical() {
     tokio::time::timeout(Duration::from_secs(10), async {
         while let Some(chunk) = s.data.recv().await {
             all.extend(chunk);
-            if all.windows(2).any(|w| w == b"ZZ") {
+            // Wait for the real bytes, not just "ZZ": the shell first echoes the typed command, which contains "ZZ" too.
+            if all
+                .windows(7)
+                .any(|w| w == [b'A', b'A', 0xFF, 0xFE, 0x80, b'Z', b'Z'])
+            {
                 break;
             }
         }

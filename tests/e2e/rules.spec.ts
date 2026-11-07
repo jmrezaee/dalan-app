@@ -57,6 +57,7 @@ test('rule 4: a live terminal stays mounted through tab switches and Settings', 
   for (let i = 0; i < 10; i++) {
     await page.getByRole('tab', { name: i % 2 ? /roaming laptop/ : 'SFTP' }).click()
   }
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur()) // off a Mac, Ctrl keys typed in a terminal go to the shell
   await page.keyboard.press('ControlOrMeta+,')
   await seen(page.getByRole('button', { name: 'Appearance', exact: true }).or(page.getByRole('tab', { name: 'Appearance', exact: true })))
   await page.getByRole('tab', { name: /roaming laptop/ }).click()
