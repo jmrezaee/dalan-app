@@ -25,3 +25,17 @@ pub fn app_info(app: AppHandle) -> AppResult<AppInfo> {
         platform: std::env::consts::OS.to_string(),
     })
 }
+
+/// The UI's answer "Quit anyway": ends the app (and with it every live session).
+#[tauri::command]
+#[specta::specta]
+pub fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
+/// The UI's answer "Keep working": the next quit asks again.
+#[tauri::command]
+#[specta::specta]
+pub fn quit_cancel(state: tauri::State<'_, crate::state::AppState>) {
+    state.quit.cancel();
+}

@@ -448,6 +448,18 @@ impl SessionManager {
         }
     }
 
+    /// Terminals that are running now (not key exports): what quitting would end.
+    pub fn live_count(&self) -> usize {
+        self.sessions.lock().map_or(0, |m| {
+            m.values()
+                .filter(|e| {
+                    !matches!(e.job, Job::Export { .. })
+                        && e.running.load(std::sync::atomic::Ordering::SeqCst)
+                })
+                .count()
+        })
+    }
+
     /// Hosts with a live session (to block deleting them).
     pub fn has_live_session_for(&self, host_id: &str) -> bool {
         self.sessions.lock().is_ok_and(|m| {

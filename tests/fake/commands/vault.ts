@@ -1,11 +1,13 @@
 import { fail, type Handlers } from '../types'
 
-type Keys = 'appInfo' | 'vaultStatus' | 'vaultCreate' | 'vaultUnlock' | 'vaultLock' | 'vaultChangePassword' | 'vaultTouch' | 'settingsGetAll' | 'settingsSet' | 'updateCheck' | 'updateInstall' | 'diagnosticsText' | 'aiGet' | 'aiSave' | 'aiSuggest' | 'historyList' | 'historyClear'
+type Keys = 'appInfo' | 'quitApp' | 'quitCancel' | 'vaultStatus' | 'vaultCreate' | 'vaultUnlock' | 'vaultLock' | 'vaultChangePassword' | 'vaultTouch' | 'settingsGetAll' | 'settingsSet' | 'updateCheck' | 'updateInstall' | 'diagnosticsText' | 'aiGet' | 'aiSave' | 'aiSuggest' | 'historyList' | 'historyClear'
 
 /** The password every scenario's vault opens with. A test secret, not a real one. */
 export const MASTER = 'correct-horse'
 
 export const vault: Pick<Handlers, Keys> = {
+  quitApp: () => undefined,
+  quitCancel: () => undefined,
   appInfo: () => ({ version: '0.1.0', data_dir: '/home/me/.local/share/app.dalan.desktop', platform: 'linux' }),
   vaultStatus: (_a, { m }) => {
     const left = Math.ceil((m.vault.cooldownUntil - Date.now()) / 1000)

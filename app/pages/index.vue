@@ -13,6 +13,7 @@ const keychain = useKeychainStore()
 const snippetsStore = useSnippetsStore()
 const logsStore = useLogsStore()
 const forwardsStore = useForwardsStore()
+const quitStore = useQuitStore()
 const sftpStore = useSftpStore()
 const workspaces = useWorkspacesStore()
 const workspaceView = ref<{ askSave: () => void }[] | null>(null)
@@ -27,6 +28,7 @@ onMounted(() => {
   forwardsStore.refresh()
   workspaces.refresh()
   forwardsStore.watch()
+  quitStore.watch()
   settings.load()
 })
 onBeforeUnmount(() => {
@@ -251,6 +253,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
     </div>
 
     <CommandPalette v-model:open="paletteOpen" @action="onPaletteAction" />
+    <QuitDialog />
     <DroppedSessionsCard />
 
     <AlertDialog v-model:open="closeOpen">

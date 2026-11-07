@@ -85,6 +85,8 @@ pub struct AppState {
     pub tunnels: crate::tunnels::TunnelManager,
     /// Open SFTP sessions and running transfers (P10). Ended when the vault locks.
     pub sftp: crate::sftp::SftpManager,
+    /// Decides whether closing the window or quitting must ask first.
+    pub quit: crate::quit::QuitGuard,
 }
 
 impl AppState {
@@ -99,6 +101,7 @@ impl AppState {
             history: crate::history::HistoryManager::default(),
             tunnels: crate::tunnels::TunnelManager::default(),
             sftp: crate::sftp::SftpManager::default(),
+            quit: crate::quit::QuitGuard::default(),
         }
     }
 

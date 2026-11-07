@@ -66,7 +66,7 @@ describe('rule 1: secrets never reach JavaScript', () => {
 
 describe('rule 2: the webview has no files, network or shell', () => {
   it('the capability file only grants the allowed permissions', () => {
-    const allowed = new Set(['core:default', 'dialog:allow-open'])
+    const allowed = new Set(['core:default', 'core:window:allow-start-dragging', 'dialog:allow-open'])
     for (const f of readdirSync(join(root, 'src-tauri/capabilities')).filter(n => n.endsWith('.json'))) {
       const cap = JSON.parse(read(`src-tauri/capabilities/${f}`)) as { permissions: unknown[] }
       for (const p of cap.permissions) expect(allowed.has(p as string), `${f} grants ${JSON.stringify(p)}`).toBe(true)

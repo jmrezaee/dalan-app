@@ -32,3 +32,9 @@ pub struct TunnelChanged {
     pub connections: u32,
     pub error: Option<String>,
 }
+
+/// The window was closed or ⌘Q pressed while sessions are live: the UI asks before quitting.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct QuitRequested {
+    pub live_sessions: u32,
+}

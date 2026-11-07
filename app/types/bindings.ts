@@ -7,6 +7,10 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 export const commands = {
 	/**  S23 About: version, data dir, platform. */
 	appInfo: () => typedError<AppInfo, AppError>(__TAURI_INVOKE("app_info")),
+	/**  The UI's answer "Quit anyway": ends the app (and with it every live session). */
+	quitApp: () => __TAURI_INVOKE<void>("quit_app"),
+	/**  The UI's answer "Keep working": the next quit asks again. */
+	quitCancel: () => __TAURI_INVOKE<void>("quit_cancel"),
 	/**  First run? Locked? Allowed while locked. */
 	vaultStatus: () => typedError<VaultStatus_Serialize, AppError>(__TAURI_INVOKE("vault_status")),
 	/**  F10: derive the key, write the vault row, and leave the vault unlocked. */
@@ -176,6 +180,7 @@ export const commands = {
 /** Events */
 export const events = {
 	autoLockWarning: makeEvent<AutoLockWarning, AutoLockWarning>("auto-lock-warning"),
+	quitRequested: makeEvent<QuitRequested, QuitRequested>("quit-requested"),
 	tunnelChanged: makeEvent<TunnelChanged_Serialize, TunnelChanged_Deserialize>("tunnel-changed"),
 	vaultLocked: makeEvent<VaultLocked, VaultLocked>("vault-locked"),
 };
@@ -1021,6 +1026,11 @@ export type ProxyConfig_Serialize = {
 	/**  What the groups above give: a one-line summary like `socks5 proxy.corp:1080`, and the group. */
 	inherited: string | null,
 	inherited_from: string | null,
+};
+
+/**  The window was closed or ⌘Q pressed while sessions are live: the UI asks before quitting. */
+export type QuitRequested = {
+	live_sessions: number,
 };
 
 /**

@@ -18,6 +18,7 @@ pub mod osdetect;
 mod perms;
 pub mod proxy;
 pub mod pty;
+pub mod quit;
 pub mod serial;
 pub mod settings;
 pub mod sftp;
@@ -40,6 +41,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![
             commands::app::app_info,
+            commands::app::quit_app,
+            commands::app::quit_cancel,
             commands::vault::vault_status,
             commands::vault::vault_create,
             commands::vault::vault_unlock,
@@ -143,7 +146,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
         .events(collect_events![
             events::VaultLocked,
             events::AutoLockWarning,
-            events::TunnelChanged
+            events::TunnelChanged,
+            events::QuitRequested
         ])
 }
 
@@ -211,8 +215,41 @@ pub fn run() {
             vault::spawn_auto_lock(app.handle().clone());
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Dalan");
+        .build(tauri::generate_context!())
+        .expect("error while building Dalan")
+        .run(|app, event| {
+            use tauri::{RunEvent, WindowEvent};
+            use tauri_specta::Event;
+            // Closing the window and ⌘Q (the menu's Quit) both end here. `code: None` means the user asked; the
+            // `app.exit(0)` from `quit_app` carries a code and passes straight through.
+            let ask = |app: &tauri::AppHandle| -> Option<u32> {
+                let st = app.try_state::<AppState>()?;
+                match st.quit.decide(st.sessions.live_count()) {
+                    quit::Decision::Allow => None,
+                    quit::Decision::Ask(n) => Some(n),
+                }
+            };
+            match event {
+                RunEvent::WindowEvent {
+                    event: WindowEvent::CloseRequested { api, .. },
+                    ..
+                } => {
+                    if let Some(n) = ask(app) {
+                        api.prevent_close();
+                        let _ = events::QuitRequested { live_sessions: n }.emit(app);
+                    }
+                }
+                RunEvent::ExitRequested {
+                    api, code: None, ..
+                } => {
+                    if let Some(n) = ask(app) {
+                        api.prevent_exit();
+                        let _ = events::QuitRequested { live_sessions: n }.emit(app);
+                    }
+                }
+                _ => {}
+            }
+        });
 }
 
 #[cfg(test)]

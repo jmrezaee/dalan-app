@@ -24,6 +24,8 @@ export async function unwrap<T>(call: Promise<Result<T>>): Promise<T> {
 export function useTauri() {
   return {
     appInfo: () => unwrap(commands.appInfo()),
+    quitApp: () => commands.quitApp(),
+    quitCancel: () => commands.quitCancel(),
     vaultStatus: () => unwrap(commands.vaultStatus()),
     vaultCreate: (masterPassword: string) => unwrap(commands.vaultCreate(masterPassword)),
     vaultUnlock: (masterPassword: string) => unwrap(commands.vaultUnlock(masterPassword)),

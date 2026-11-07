@@ -185,6 +185,8 @@ export function install(opts: Options) {
       Object.assign(f, { state, error: message, connections: state === 'active' ? 1 : 0 })
       emitEvent('tunnel-changed', { id, state, connections: f.connections, error: message })
     },
+    /** The window was closed or ⌘Q pressed with live sessions: Rust sends this and holds the quit back. */
+    quitRequested: (liveSessions: number) => emitEvent('quit-requested', { live_sessions: liveSessions }),
     /** Transfers: drive one by hand after `manualTransfers()`. */
     manualTransfers: (on = true) => { m.manualTransfers = on },
     transferIds: () => [...m.transfers.keys()],

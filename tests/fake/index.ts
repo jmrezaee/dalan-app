@@ -75,6 +75,7 @@ export class Fake {
     }
   }
 
+  quitRequested = (liveSessions: number) => this.run<void>('quitRequested', liveSessions)
   tunnel = (id: string) => ({ state: (state: 'stopped' | 'starting' | 'active' | 'reconnecting' | 'error', message?: string) => this.run<void>('tunnel', id, state, message ?? null) })
 
   manualTransfers = (on = true) => this.run<void>('manualTransfers', on)
