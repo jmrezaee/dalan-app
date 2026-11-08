@@ -44,7 +44,7 @@ jobs:
             args: --target universal-apple-darwin
           - platform: windows
             os: windows-latest
-            args: ''
+            args: --bundles nsis # NSIS .exe only: the .msi needs WiX, downloaded from GitHub, which often answers 5xx
           - platform: linux
             os: ubuntu-22.04
             args: ''
