@@ -297,6 +297,8 @@ Order: P26 and P27 first, then T1 to T7, then P28 (one hand-check session for ev
   - Then follow `replica/launch/launch-plan.md` phase 1 (pilot).
 
 
+- [x] **P30 Several SFTP tabs (S01, S21, S22):** the first SFTP tab stays fixed; more open from the palette ("New SFTP tab") or a host's menu ("Connect with SFTP in a new tab"), up to 8, and close with their own X (running transfers are cancelled first). Each tab is its own `useSftpStore(tabKey)` instance, so panes, transfers and questions never mix; the Rust side already keyed everything by connection id and did not change. ⌘1 Vault, ⌘2.. the SFTP tabs, then sessions. Lock closes all of them. Tests: `e2e:sftp-tabs`, `unit:sessionsStore`. Left: a look in the real window (hand-checks.md, section G).
+
 ## Backlog (not scheduled; Mehrdad picks from here after P29)
 
 - Touch ID / Windows Hello unlock (M4 item 5).

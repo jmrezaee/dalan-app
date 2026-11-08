@@ -6,7 +6,10 @@ import { Label } from '@/components/ui/label'
 import { buttonVariants } from '@/components/ui/button'
 import { formatMode } from '~/utils/format'
 
-const sftp = useSftpStore()
+// Each SFTP tab has its own store; the panes and the drawer below find it through provide/inject.
+const props = withDefaults(defineProps<{ tabKey?: string }>(), { tabKey: MAIN_SFTP_TAB })
+provide(SFTP_TAB, props.tabKey)
+const sftp = useSftpStore(props.tabKey)
 const hosts = useHostsStore()
 
 // The left pane starts on this computer, the first time the tab is used.

@@ -14,7 +14,6 @@ const snippetsStore = useSnippetsStore()
 const logsStore = useLogsStore()
 const forwardsStore = useForwardsStore()
 const quitStore = useQuitStore()
-const sftpStore = useSftpStore()
 const workspaces = useWorkspacesStore()
 const workspaceView = ref<{ askSave: () => void }[] | null>(null)
 const settings = useSettingsStore()
@@ -36,7 +35,7 @@ onBeforeUnmount(() => {
   keychain.clear()
   snippetsStore.clear()
   forwardsStore.clear()
-  sftpStore.clear()
+  clearAllSftp()
   workspaces.clear()
   logsStore.clear()
   sessions.clear()
@@ -111,6 +110,7 @@ function onPaletteAction(name: string) {
   else if (name === 'local') sessions.openLocal()
   else if (name === 'lock') vault.lock()
   else if (name === 'sftp') sessions.activeKey = 'sftp'
+  else if (name === 'new-sftp') sessions.openSftpTab()
   else go(name === 'vault' ? 'hosts' : name as typeof section.value)
 }
 /** ⌘D: another pane on the same server as the focused one. ⌘⇧D puts it directly below (one grid row down). */
@@ -168,7 +168,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
       <AppTab label="Vault" :active="sessions.activeKey === null" @select="sessions.activeKey = null">
         <template #leading><Vault class="size-4" aria-hidden="true" /></template>
       </AppTab>
-      <AppTab label="SFTP" :active="sessions.activeKey === 'sftp'" @select="sessions.activeKey = 'sftp'">
+      <AppTab
+        v-for="k in sessions.sftpKeys"
+        :key="k"
+        :data-testid="tid(`tab-${k}`)"
+        :label="sessions.sftpLabel(k)"
+        :active="sessions.activeKey === k"
+        :closable="k !== 'sftp'"
+        @select="sessions.activeKey = k"
+        @close="sessions.closeSftpTab(k)"
+      >
         <template #leading><ArrowDownUp class="size-4" aria-hidden="true" /></template>
       </AppTab>
       <AppTab
@@ -205,7 +214,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
         <SessionPane v-else :session="s" :active="sessions.activeKey === s.key" @edit-host="editHost" @new-host="newHost" />
       </div>
 
-      <div v-show="sessions.activeKey === 'sftp'" class="absolute inset-0"><SftpView /></div>
+      <!-- Every SFTP tab stays mounted too, so its connections and transfers carry on while you work elsewhere. -->
+      <div v-for="k in sessions.sftpKeys" v-show="sessions.activeKey === k" :key="k" class="absolute inset-0"><SftpView :tab-key="k" /></div>
 
       <div v-show="sessions.activeKey === null" class="flex size-full">
         <div class="flex w-[220px] shrink-0 flex-col border-r border-border bg-surface">

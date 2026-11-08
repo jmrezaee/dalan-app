@@ -105,3 +105,9 @@ Each phase below was built and tested by machines but never looked at by you in 
   `Date / result / initials:`
 - [ ] **F3 The other installers.** DMG, and on Windows the MSI or EXE, and on Linux the AppImage: install and launch each. **Expected:** the app starts and creates a vault.
   `Date / result / initials:`
+
+## G. Several SFTP tabs (P30)
+
+- [ ] **G1.** Right-click a host, "Connect with SFTP in a new tab": a tab "SFTP 2" opens with that host on the right. Then do the same for a second host and for the first SFTP tab ("Connect with SFTP"): each tab keeps its own server when you switch.
+- [ ] **G2.** Start a large copy in SFTP 2, switch to Vault and back: it keeps going. Close SFTP 2 while it runs: the copy stops, and nothing else changes.
+- [ ] **G3.** ⌘3 reaches SFTP 2; ⌃Tab goes Vault, SFTP, SFTP 2, then the sessions. Lock the vault and unlock: only the first SFTP tab is left, empty.

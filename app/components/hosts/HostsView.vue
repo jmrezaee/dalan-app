@@ -10,7 +10,6 @@ import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
 
 const hosts = useHostsStore()
 const sessions = useSessionsStore()
-const sftp = useSftpStore()
 const selected = ref<string | null>(null)
 
 // S02 right-click menu (and the "…" menu): the same list in both places.
@@ -24,15 +23,17 @@ async function copyAddress(h: HostSummary) {
     toast.error('Could not copy the address.')
   }
 }
-function connectWithSftp(h: HostSummary) {
-  sessions.activeKey = 'sftp'
-  void sftp.connect(1, h)
+function connectWithSftp(h: HostSummary, newTab = false) {
+  const key = newTab ? sessions.openSftpTab() : MAIN_SFTP_TAB
+  sessions.activeKey = key
+  void useSftpStore(key).connect(1, h)
 }
 function menuFor(h: HostSummary): MenuItem[] {
   const groups = hosts.groupOptions()
   return [
     { label: 'Connect', icon: Plug, onSelect: () => sessions.open(h) },
     { label: 'Connect with SFTP', icon: FolderOpen, onSelect: () => connectWithSftp(h), disabled: h.protocol === 'serial' },
+    { label: 'Connect with SFTP in a new tab', icon: FolderOpen, onSelect: () => connectWithSftp(h, true), disabled: h.protocol === 'serial' },
     {
       label: 'Add to workspace',
       icon: SquareTerminal,

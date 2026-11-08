@@ -6,7 +6,7 @@ import type { HostSummary } from '~/types/bindings'
 const { label: shortcutLabel, fixed: shortcutFixed } = useShortcutLabel()
 
 const open = defineModel<boolean>('open', { required: true })
-const emit = defineEmits<{ action: [name: 'new-host' | 'new-tab' | 'local' | 'sftp' | 'keychain' | 'forwards' | 'snippets' | 'logs' | 'known-hosts' | 'settings' | 'lock' | 'vault'] }>()
+const emit = defineEmits<{ action: [name: 'new-host' | 'new-tab' | 'local' | 'sftp' | 'new-sftp' | 'keychain' | 'forwards' | 'snippets' | 'logs' | 'known-hosts' | 'settings' | 'lock' | 'vault'] }>()
 const hosts = useHostsStore()
 const sessions = useSessionsStore()
 const templates = useWorkspacesStore()
@@ -64,6 +64,7 @@ const shownHosts = computed(() => matchingHosts.value.slice(0, HOST_LIMIT))
         <CommandItem value="action local terminal shell this computer" @select="act('local')"><SquareTerminal />Open local terminal</CommandItem>
         <CommandItem value="action vault hosts" @select="act('vault')"><Vault />Go to Hosts<CommandShortcut>{{ shortcutFixed('Mod+1') }}</CommandShortcut></CommandItem>
         <CommandItem value="action sftp files transfer" @select="act('sftp')"><ArrowDownUp />Go to SFTP</CommandItem>
+        <CommandItem value="action new sftp tab files transfer" @select="act('new-sftp')"><ArrowDownUp />New SFTP tab</CommandItem>
         <CommandItem value="action keychain keys identities" @select="act('keychain')"><KeyRound />Go to Keychain</CommandItem>
         <CommandItem value="action port forwarding tunnels" @select="act('forwards')"><Waypoints />Go to Port forwarding</CommandItem>
         <CommandItem value="action snippets scripts" @select="act('snippets')"><Code2 />Go to Snippets</CommandItem>

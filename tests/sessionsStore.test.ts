@@ -123,6 +123,37 @@ describe('sessions store', () => {
     expect(s.sessions).toHaveLength(0)
   })
 
+  it('opens more SFTP tabs, numbers them into ⌘1-⌘9 and ⌃Tab, closes them and stops at 8', () => {
+    const s = useSessionsStore()
+    s.open(host(1))
+    const [a] = s.sessions
+    const k = s.openSftpTab()
+    expect(k).toBe('sftp-2')
+    expect(s.sftpKeys).toEqual(['sftp', 'sftp-2'])
+    expect(s.activeKey).toBe('sftp-2')
+    expect([s.sftpLabel('sftp'), s.sftpLabel(k)]).toEqual(['SFTP', 'SFTP 2'])
+    // Vault, SFTP, SFTP 2, then the sessions.
+    s.activateNth(2)
+    expect(s.activeKey).toBe('sftp')
+    s.activateNth(3)
+    expect(s.activeKey).toBe('sftp-2')
+    s.activateNth(4)
+    expect(s.activeKey).toBe(a!.key)
+    s.activeKey = 'sftp-2'
+    s.cycle(1)
+    expect(s.activeKey).toBe(a!.key)
+    s.activeKey = 'sftp-2'
+    s.closeSftpTab('sftp-2')
+    expect(s.sftpKeys).toEqual(['sftp'])
+    expect(s.activeKey).toBe('sftp') // the closed tab was showing: fall back to the one before it
+    s.closeSftpTab('sftp') // the first tab cannot be closed
+    expect(s.sftpKeys).toEqual(['sftp'])
+    for (let i = 0; i < 10; i++) s.openSftpTab()
+    expect(s.sftpKeys).toHaveLength(8)
+    s.clear()
+    expect(s.sftpKeys).toEqual(['sftp'])
+  })
+
   it('cycles through Vault, SFTP and the tabs, renames and reorders', async () => {
     const s = useSessionsStore()
     s.open(host(1))

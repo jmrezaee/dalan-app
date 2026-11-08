@@ -102,6 +102,7 @@ cd src-tauri && cargo clippy -- -D warnings && cargo test
 - **P26 is done.** `origin` is `jmrezaee/dalan-app` on GitHub; CI is green on the old `v0.1.0` commit; the P21 onward commits are not pushed.
 - **P27 is built** (`[h]`, waiting for the hand-check session).
 - **T1 to T7 are done** (fake backend, test servers, `pnpm walk`, browser, accessibility and visual tests; `pnpm test:app` and `pnpm walk:app` run the real app in Docker, leftovers are in `progress.md`; `replica/testing/hand-checks.md` is the manual list and `pnpm check:features` guards `features.csv`; `pnpm test:perf` times 2,000 hosts and a flood; `pnpm test:app:long` is the 30-minute memory run; `tests/fixtures/db` holds a database per migration). **P28 is `[h]`:** the merged hand-check list is ready in `replica/testing/hand-checks.md`; it waits for Mehrdad's results. **Next after that:** P29 (first release), in `replica/progress.md`.
+- **P30 is done:** several SFTP tabs (one store per tab; its hand check is section G in `replica/testing/hand-checks.md`).
 - **Manual checks:** a phase that needs Mehrdad to test something by hand is not done until he has reported back.
 - **M1 is done when F01, F11 and F12 work against a real server:**
   - unlock

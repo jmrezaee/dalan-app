@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { MAIN_SFTP_TAB, useSftpStore } from '~/stores/sftp'
 import { toast } from 'vue-sonner'
 import type { AuthMethod, HostSummary, PromptKind, SessionEvent } from '~/types/bindings'
 import { CommandError, useTauri } from '~/composables/useTauri'
@@ -51,8 +52,36 @@ export const MAX_PANES = 16
 export const useSessionsStore = defineStore('sessions', () => {
   const api = useTauri()
   const sessions = ref<Session[]>([])
-  /** `null` = the Vault view is showing, `'sftp'` = the SFTP tab. */
+  /** `null` = the Vault view is showing, `'sftp'` = the first SFTP tab, `'sftp-2'`… = more SFTP tabs. */
   const activeKey = ref<string | null>(null)
+
+  // ---- more SFTP tabs (P30). The first one is always there; the others open and close on demand.
+  const extraSftp = ref<string[]>([])
+  let sftpCounter = 1
+  /** Every SFTP tab, in the order they are shown. */
+  const sftpKeys = computed(() => [MAIN_SFTP_TAB, ...extraSftp.value])
+  const sftpLabel = (key: string) => (key === MAIN_SFTP_TAB ? 'SFTP' : `SFTP ${key.slice(5)}`)
+  const MAX_SFTP_TABS = 8
+
+  /** A new SFTP tab, switched to. At the limit it switches to the last one instead. */
+  function openSftpTab(): string {
+    if (sftpKeys.value.length >= MAX_SFTP_TABS) return sftpKeys.value.at(-1)!
+    const key = `sftp-${++sftpCounter}`
+    extraSftp.value.push(key)
+    activeKey.value = key
+    return key
+  }
+
+  /** Closes an extra SFTP tab and its connections. Transfers still running are cancelled first. */
+  function closeSftpTab(key: string): void {
+    const i = extraSftp.value.indexOf(key)
+    if (i < 0) return
+    const tab = useSftpStore(key)
+    tab.transfers.filter(t => !t.finished).forEach(t => tab.cancel(t))
+    tab.clear()
+    extraSftp.value.splice(i, 1)
+    if (activeKey.value === key) activeKey.value = extraSftp.value[i - 1] ?? MAIN_SFTP_TAB
+  }
 
   // Output that arrives before its terminal is mounted waits here. Not reactive on purpose.
   const writers = new Map<string, (b: Uint8Array) => void>()
@@ -267,16 +296,18 @@ export const useSessionsStore = defineStore('sessions', () => {
     activeKey.value = sess.key
   }
 
-  /** 1 = the Vault view, 2 = SFTP, 3.. = the open tabs in order (⌘1-⌘9). */
+  /** The tabs in the order they are shown: Vault, the SFTP tabs, then the open sessions. */
+  const tabOrder = () => [null, ...sftpKeys.value, ...sessions.value.map(s => s.key)] as (string | null)[]
+
+  /** 1 = the Vault view, then the SFTP tabs, then the open tabs in order (⌘1-⌘9). */
   function activateNth(n: number) {
-    if (n === 1) activeKey.value = null
-    else if (n === 2) activeKey.value = 'sftp'
-    else if (sessions.value[n - 3]) activeKey.value = sessions.value[n - 3]!.key
+    const key = tabOrder()[n - 1]
+    if (key !== undefined) activeKey.value = key
   }
 
-  /** ⌃Tab / ⌃⇧Tab: the next or previous tab, in the order they are shown (Vault, SFTP, then the open tabs). */
+  /** ⌃Tab / ⌃⇧Tab: the next or previous tab, in the order they are shown. */
   function cycle(delta: 1 | -1) {
-    const order: (string | null)[] = [null, 'sftp', ...sessions.value.map(s => s.key)]
+    const order = tabOrder()
     const at = Math.max(0, order.indexOf(activeKey.value))
     activeKey.value = order[(at + delta + order.length) % order.length] ?? null
   }
@@ -454,10 +485,11 @@ export const useSessionsStore = defineStore('sessions', () => {
   function clear() {
     for (const k of [...retries.keys()]) clearRetry(k)
     sessions.value = []
+    extraSftp.value = []
     activeKey.value = null
     writers.clear()
     pending.clear()
   }
 
-  return { sessions, activeKey, active, activeSession, panelOpen, open, openLocal, openNewTab, openWorkspace, addPane, closePane, focusPane, setMode, toggleMode, toggleBroadcast, input, activateNth, cycle, rename, moveTab, mergeTabs, attach, detach, write, resize, ack, respond, reconnect, reconnectWith, liveHostIds, workspaceTabs, close, clear, dropped, droppedCard, dismissDropped, reconnectAll }
+  return { sessions, activeKey, sftpKeys, sftpLabel, openSftpTab, closeSftpTab, active, activeSession, panelOpen, open, openLocal, openNewTab, openWorkspace, addPane, closePane, focusPane, setMode, toggleMode, toggleBroadcast, input, activateNth, cycle, rename, moveTab, mergeTabs, attach, detach, write, resize, ack, respond, reconnect, reconnectWith, liveHostIds, workspaceTabs, close, clear, dropped, droppedCard, dismissDropped, reconnectAll }
 })

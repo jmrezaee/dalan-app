@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import type { InjectionKey } from 'vue'
 import { toast } from 'vue-sonner'
 import type { Choice, EditApp, FsEntry, HostSummary, PromptKind, SessionEvent, TransferEvent } from '~/types/bindings'
 import { CommandError, useTauri } from '~/composables/useTauri'
@@ -54,8 +55,11 @@ export function parentPath(p: Pane) {
   return i <= 0 ? s : trimmed.slice(0, i)
 }
 
-/** S21 / S22: two file panes (each the local disk or a server) and the transfer queue. */
-export const useSftpStore = defineStore('sftp', () => {
+/** Apps remembered per file type (extension -> name), for the "Edit in …" menu label. One list for every SFTP tab. */
+const openWith = ref<Record<string, string>>({})
+
+/** S21 / S22: two file panes (each the local disk or a server) and the transfer queue. One of these per SFTP tab. */
+const setup = () => {
   const api = useTauri()
   const panes = reactive<[Pane, Pane]>([blankPane(), blankPane()])
   const transfers = ref<TransferRow[]>([])
@@ -153,8 +157,6 @@ export const useSftpStore = defineStore('sftp', () => {
     }
   }
 
-  /** Apps remembered per file type (extension -> name), for the "Edit in …" menu label. */
-  const openWith = ref<Record<string, string>>({})
   async function loadOpenWith() {
     try {
       openWith.value = await api.editApps()
@@ -163,7 +165,7 @@ export const useSftpStore = defineStore('sftp', () => {
       // Plain browser or locked: no remembered apps.
     }
   }
-  loadOpenWith()
+  void loadOpenWith()
   async function forgetOpenWith(ext: string) {
     try {
       await api.editAppForget(ext)
@@ -355,4 +357,22 @@ export const useSftpStore = defineStore('sftp', () => {
   }
 
   return { openWith, forgetOpenWith, panes, transfers, prompt, dragging, clipboard, sorted, load, showLocal, connect, edit, answer, refresh, go, up, open, toggleHidden, mkdir, rename, chmod, remove, copy, resolveConflict, cancel, clearFinished, dropOn, clear }
-})
+}
+
+/** The tab key of the SFTP tab a component sits in. `SftpView` provides it; everything below it just calls `useSftpStore()`. */
+export const SFTP_TAB: InjectionKey<string> = Symbol('sftp-tab')
+export const MAIN_SFTP_TAB = 'sftp'
+
+// One Pinia store per tab: the same code, a different id, so each tab has its own panes, transfers and questions.
+const makeStore = (key: string) => defineStore(`sftp:${key}`, setup)
+const tabStores = new Map<string, ReturnType<typeof makeStore>>()
+export function useSftpStore(tabKey?: string) {
+  const key = tabKey ?? (getCurrentInstance() ? inject(SFTP_TAB, MAIN_SFTP_TAB) : MAIN_SFTP_TAB)
+  if (!tabStores.has(key)) tabStores.set(key, makeStore(key))
+  return tabStores.get(key)!()
+}
+
+/** Lock or quit: close every tab's connections. */
+export function clearAllSftp() {
+  for (const key of tabStores.keys()) useSftpStore(key).clear()
+}
