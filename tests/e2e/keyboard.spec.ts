@@ -84,6 +84,7 @@ test('overlays: the safe button has focus, and Escape on the changed-key block p
 })
 
 test('every button, tab, row and switch you can Tab to shows a focus ring (Hosts, Keychain, Settings)', async ({ page }) => {
+  test.setTimeout(120_000) // 3 screens x 40 Tabs x 220 ms is about 26 s on a fast machine; a shared CI runner needs more than the default 30 s
   await installFakeBackend(page, { scenario: 'team', unlocked: true })
   await page.goto('/')
   await expect(page.getByLabel('Vault', { exact: true })).toBeVisible()

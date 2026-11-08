@@ -23,6 +23,9 @@ describe('long run: ten sessions printing every second', function () {
     const a = servers().a!
     mkdirSync(OUT, { recursive: true })
     await createVault()
+    // Nobody touches the app for 30 minutes, so the default 15-minute auto-lock would lock the vault and close every terminal.
+    await browser.execute(() => (window as unknown as { __TAURI_INTERNALS__: { invoke: (cmd: string, args: object) => Promise<unknown> } })
+      .__TAURI_INTERNALS__.invoke('settings_set', { key: 'security', value: '{"auto_lock_minutes":0}' }))
     for (let i = 1; i <= SESSIONS; i++) await addHost({ address: a.net_host, port: a.net_port, user: a.user!, password: a.password, label: `long ${i}` })
 
     for (let i = 1; i <= SESSIONS; i++) {

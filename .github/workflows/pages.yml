@@ -13,13 +13,25 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  actions: write
 
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
+  # A release runs on its tag, and the github-pages environment only accepts deploys from main. So publishing a
+  # release starts this same workflow again on main.
+  from-release:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run pages.yml --repo "${GITHUB_REPOSITORY}" --ref main
+
   deploy:
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
