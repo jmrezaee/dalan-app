@@ -84,3 +84,17 @@ test('the test build names the elements a role or label cannot (test IDs)', asyn
   await expect(page.getByTestId(`terminal-${key}`)).toBeVisible()
   await fake.session(id!).state('ready')
 })
+
+test('Ctrl+Shift+C copies the selected terminal text', async ({ page }) => {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  const fake = await open(page)
+  await page.getByText('bastion', { exact: true }).first().dblclick()
+  const [id] = await fake.sessionIds()
+  await fake.session(id!).connect()
+  await fake.session(id!).output('copy-me-please')
+  await expect.poll(() => termText(page)).toContain('copy-me-please')
+  await page.evaluate(() => (Object.values((window as any).__dalanTerm)[0] as any).selectAll())
+  await page.locator('.xterm-helper-textarea').first().focus()
+  await page.keyboard.press('Control+Shift+C')
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain('copy-me-please')
+})

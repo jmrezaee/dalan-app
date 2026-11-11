@@ -96,7 +96,20 @@ onMounted(() => {
   })
   // ⌘ shortcuts (new tab, palette, ...) belong to the app: tell xterm to ignore them so they reach the window.
   // ⌃Tab cycles tabs, so it is ours too.
-  term.attachCustomKeyEventHandler(e => !e.metaKey && !(e.ctrlKey && e.key === 'Tab'))
+  // Ctrl+C is the shell's interrupt, so copy needs another key: Ctrl+Shift+C always copies the selection
+  // (off a Mac, Ctrl+Shift+V pastes: the browser does it). Off a Mac, Ctrl+C also copies while text is selected (as in Windows Terminal); with
+  // nothing selected it still interrupts. On a Mac, ⌘C and ⌘V are the usual keys and Ctrl+C always interrupts.
+  const mac = navigator.platform.toLowerCase().includes('mac')
+  const copySelection = () => { const s = term?.getSelection(); if (s) navigator.clipboard.writeText(s).catch(() => {}) }
+  term.attachCustomKeyEventHandler((e) => {
+    if (e.metaKey || (e.ctrlKey && e.key === 'Tab')) return false
+    if (e.type === 'keydown' && e.ctrlKey && !e.altKey && e.code === 'KeyC' && (e.shiftKey || (!mac && term?.hasSelection()))) {
+      copySelection()
+      return false
+    }
+    if (!mac && e.ctrlKey && e.shiftKey && !e.altKey && e.code === 'KeyV') return false // the browser pastes; xterm sends it on
+    return true
+  })
   term.onSelectionChange(() => {
     const sel = term?.getSelection()
     if (settings.terminal.copy_on_select && sel) navigator.clipboard.writeText(sel).catch(() => {})
