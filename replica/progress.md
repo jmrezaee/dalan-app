@@ -299,6 +299,37 @@ Order: P26 and P27 first, then T1 to T7, then P28 (one hand-check session for ev
 
 - [x] **P30 Several SFTP tabs (S01, S21, S22):** the first SFTP tab stays fixed; more open from the palette ("New SFTP tab") or a host's menu ("Connect with SFTP in a new tab"), up to 8, and close with their own X (running transfers are cancelled first). Each tab is its own `useSftpStore(tabKey)` instance, so panes, transfers and questions never mix; the Rust side already keyed everything by connection id and did not change. ⌘1 Vault, ⌘2.. the SFTP tabs, then sessions. Lock closes all of them. Tests: `e2e:sftp-tabs`, `unit:sessionsStore`. Left: a look in the real window (hand-checks.md, section G).
 
+### Windows installer (from `replica/windows-installer/spec.md`; read it in full before each of these phases)
+
+Decisions, 2026-11-11:
+
+- branded NSIS
+- two editions: just-me (default, no admin) and all users
+- extras: shortcuts, launch, opt-in ssh:// links, opt-in start with Windows, keep or delete data on uninstall
+- English only
+
+The artwork is ready in `src-tauri/windows/` and the mockups are in `replica/windows-installer/installer-mockups.png`.
+
+- [~] **W1 Template and branding** (spec §7, §12, §13 W1): built 2026-11-11, **not yet run on Windows.** The template (tauri-cli 2.12.4, `src-tauri/windows/`, our changes listed in `UPSTREAM.md`), `check:nsis`, our English copy, `tauri.windows.conf.json` (publisher is the placeholder "Dalan team", still to confirm) and the CI job `windows-installer` are in; left: push, see that job go green and look at its installer (the pywinauto screenshots are W4). Notes for W2: updates skip page 4 only if we add `$UpdateMode`; the all-users upload in release.yml must not use tauri-action's upload (same file name as the just-me setup). Original scope:
+  - Vendor Tauri's NSIS template for the pinned CLI version: `UPSTREAM.md` plus the check script.
+  - Our English copy, the artwork, and `tauri.windows.conf.json`.
+  - CI builds the just-me installer from it.
+  - **Ask Mehrdad for the publisher name** before setting it.
+- [ ] **W2 Pages and logic** (spec §3 to §8, §13 W2):
+  - The "Choose extras" page; the HKCU registry writes, with detection of another `ssh://` handler.
+  - Remembered choices; silent options; the uninstaller "Your data" page.
+  - `/UPDATE` keeps everything; the mixed-edition guard.
+  - The all-users overlay, a second CI matrix entry, renamed output, `latest-allusers.json`.
+  - Pester tests 1–6.
+- [ ] **W3 App side** (spec §9, §13 W3):
+  - A strict `--open-url` parser in Rust, plus a confirmation card (a link never connects by itself); `--minimized`.
+  - Settings › System switches (needs the `winreg` crate: **ask first**); the About edition line; the download-page link.
+  - Tests.
+- [ ] **W4 Installer walk and hand check** (spec §10, §13 W4):
+  - `pnpm walk:installer` (pywinauto) gallery for both editions and the uninstaller, uploaded by CI.
+  - The signing check once secrets exist.
+  - A Windows section in `hand-checks.md`; mark the phase `[h]` until someone on Windows runs it.
+
 ## Backlog (not scheduled; Mehrdad picks from here after P29)
 
 - Touch ID / Windows Hello unlock (M4 item 5).
