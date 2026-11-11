@@ -27,3 +27,28 @@ How-to for each step is in `replica/launch/release.md`. Checked 2026-11-06.
 1. Check the version is the same in `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `package.json`.
 2. `git tag v0.1.0 && git push origin v0.1.0`. The workflow builds macOS, Windows and Linux and makes a **draft** release.
 3. Try an installer from the draft, then publish it.
+
+## Silent install (Windows)
+
+For IT and scripts. The setup takes Tauri's options and ours. Examples:
+
+```
+Dalan_0.1.2_x64-setup.exe /S /DESKTOP=1 /SSHLINKS=1
+Dalan_0.1.2_x64-allusers-setup.exe /S
+"%LOCALAPPDATA%\Dalan\uninstall.exe" /S /DELETEDATA=1
+```
+
+| option | meaning |
+| --- | --- |
+| `/S` | silent: no pages, the defaults below |
+| `/STARTMENU=0\|1` | Start menu shortcut (default 1) |
+| `/DESKTOP=0\|1` | desktop shortcut (default 0) |
+| `/SSHLINKS=0\|1` | open `ssh://` links with Dalan (default 0) |
+| `/AUTOSTART=0\|1` | start Dalan when signing in to Windows (default 0) |
+| `/UPDATE` | what the auto-updater runs: keeps the saved choices, shortcuts and data |
+| `/NS` | no shortcuts at all |
+| `/D=<folder>` | install folder (must be last) |
+| uninstaller `/DELETEDATA=1` | also delete the vault and settings (a plain `/S` keeps them) |
+
+A choice that is not on the command line comes from the last install's saved choices, then from the default.
+Only one edition can be installed on a PC: the second setup stops with a message (and a non-zero exit code).

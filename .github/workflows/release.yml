@@ -110,8 +110,51 @@ jobs:
           projectPath: .
           args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
 
-  checksums:
+  # The second Windows edition: the same app for everyone on a PC (needs administrator rights). tauri-action uploads
+  # the just-me setup above; this job builds the all-users one, renames it so the two files don't collide, uploads it
+  # and writes latest-allusers.json, which the all-users build's updater reads.
+  windows-allusers:
     needs: build
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: pnpm install --frozen-lockfile
+      - name: Point the updater at this repository
+        run: sed -i "s#OWNER/dalan-app#${{ github.repository }}#" src-tauri/tauri.release.conf.json src-tauri/tauri.windows-allusers.conf.json
+      - name: Build the all-users installer
+        run: pnpm tauri build --bundles nsis --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.windows-allusers.conf.json
+      - name: Rename, upload and write latest-allusers.json
+        run: |
+          cd src-tauri/target/release/bundle/nsis
+          setup=$(ls *-setup.exe)
+          new="${setup/-setup.exe/-allusers-setup.exe}"
+          mv "$setup" "$new" && mv "$setup.sig" "$new.sig"
+          version=$(node -p "require('../../../../tauri.conf.json').version")
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${new}"
+          sig=$(cat "$new.sig")
+          jq -n --arg v "$version" --arg d "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg u "$url" --arg s "$sig" \
+            '{version: $v, notes: "Dalan for all users", pub_date: $d, platforms: {"windows-x86_64": {signature: $s, url: $u}, "windows-x86_64-nsis": {signature: $s, url: $u}}}' > latest-allusers.json
+          cat latest-allusers.json
+          gh release upload "${GITHUB_REF_NAME}" "$new" "$new.sig" latest-allusers.json --repo "${GITHUB_REPOSITORY}" --clobber
+
+  checksums:
+    needs: [build, windows-allusers]
     runs-on: ubuntu-latest
     steps:
       - name: SHA256SUMS.txt on the release

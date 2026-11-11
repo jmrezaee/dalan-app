@@ -7,19 +7,27 @@
     "homepage": "https://github.com/jmrezaee/dalan-app",
     "windows": {
       "allowDowngrades": false,
-      "webviewInstallMode": { "type": "embedBootstrapper", "silent": true },
+      "webviewInstallMode": {
+        "type": "embedBootstrapper",
+        "silent": true
+      },
       "nsis": {
         "template": "windows/installer.nsi",
         "installMode": "currentUser",
-        "languages": ["English"],
-        "customLanguageFiles": { "English": "windows/English.nsh" },
+        "languages": [
+          "English"
+        ],
+        "customLanguageFiles": {
+          "English": "windows/English.nsh"
+        },
         "displayLanguageSelector": false,
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico",
         "headerImage": "windows/installer-header.bmp",
         "uninstallerHeaderImage": "windows/installer-header.bmp",
         "sidebarImage": "windows/installer-sidebar.bmp",
-        "compression": "lzma"
+        "compression": "lzma",
+        "installerHooks": "windows/hooks.nsh"
       }
     }
   }

@@ -29,4 +29,21 @@ To upgrade: fetch the two files at the new tag, merge them into `installer.nsi` 
   kept the install folder. Without it an update would forget a custom folder.
 - **`English.nsh`:** every upstream string id kept, reworded; new ids for the pages above. The spec's
   `appRunning` text ("click Retry") was changed: the template's prompt has OK and Cancel, no Retry.
-- Not changed yet (phase W2): the "Choose extras" page, registry writes, the uninstaller's data page, silent options.
+
+## Our changes (W2)
+
+All the new logic is in our own files (`options-page.nsh`, `data-page.nsh`, `hooks.nsh`), so `installer.nsi` only
+gets small, marked edits:
+
+- `Var`s and `!include` of `options-page.nsh` after the template's `Var`s; `DALAN_DIR` comes from `hooks.nsh`
+  (`__FILEDIR__`), because the bundler copies the template elsewhere.
+- `Page custom DalanOptionsPage DalanOptionsLeave` between the folder page and the installing page.
+- `.onInit` calls `DalanGuardEdition` (one edition per PC) and `DalanInitOptions` (defaults, saved choices, command line).
+- The finish page lost its desktop-shortcut button (it is a choice on the extras page now).
+- `CreateOrUpdateDesktopShortcut` is called in every mode; both shortcut functions return when the choice is off.
+- The uninstaller's confirm page (with the "Delete app data" checkbox) is replaced by `un.DalanDataPage`, which sets
+  the same variable; a done page (`MUI_UNPAGE_FINISH`) was added; `un.onInit` reads `/DELETEDATA=1`.
+- Hooks: `NSIS_HOOK_POSTINSTALL` calls `DalanApplyOptions`, `NSIS_HOOK_POSTUNINSTALL` calls `un.DalanPostUninstall`.
+- Strings: the extras page, log lines, the data and done pages, the one-edition messages. The spec's "Another app
+  currently opens these links: {name}." became "{name} currently opens these links." because NSIS reads `$Var.` as a
+  variable name that includes the dot.

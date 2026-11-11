@@ -133,11 +133,17 @@ jobs:
         if: always()
         run: scripts/test-servers.sh down
 
-  # The Windows installer (replica/windows-installer/spec.md, W1): builds the branded NSIS setup from our template on a
-  # Windows runner and keeps it as an artifact. Not signed, and no updater files (those are release.yml's job).
+  # The Windows installer (replica/windows-installer/spec.md, W1 and W2): builds both editions from our template on a
+  # Windows runner and runs the Pester tests (tests/windows/installer.Tests.ps1) that install and uninstall for real.
+  # Not signed, and no updater files (those are release.yml's job).
   windows-installer:
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -150,20 +156,36 @@ jobs:
         with:
           workspaces: src-tauri
       - run: pnpm install --frozen-lockfile
-      # The WiX tools are not needed for NSIS, but the bundler downloads NSIS itself from GitHub, which sometimes
-      # answers 5xx: retry the build once.
-      - name: Build the installer
-        shell: bash
+      # The bundler downloads NSIS itself from GitHub, which sometimes answers 5xx: each build retries once.
+      - name: Build the just-me installer
         run: pnpm tauri build --bundles nsis || (sleep 30 && pnpm tauri build --bundles nsis)
-      - name: Check the installer's name and size
-        shell: bash
+      - name: Keep it, then build the all-users installer
         run: |
-          ls -l src-tauri/target/release/bundle/nsis/
-          test -f "src-tauri/target/release/bundle/nsis/Dalan_$(node -p "require('./package.json').version")_x64-setup.exe"
+          mkdir installers
+          cp src-tauri/target/release/bundle/nsis/*-setup.exe installers/
+          pnpm tauri build --bundles nsis --config src-tauri/tauri.windows-allusers.conf.json || (sleep 30 && pnpm tauri build --bundles nsis --config src-tauri/tauri.windows-allusers.conf.json)
+          setup=$(ls src-tauri/target/release/bundle/nsis/*-setup.exe)
+          cp "$setup" "installers/$(basename "${setup/-setup.exe/-allusers-setup.exe}")"
+          ls -l installers
+      - name: The previous release's installer, for the update test
+        run: |
+          mkdir prev
+          gh release download --repo "${GITHUB_REPOSITORY}" --pattern 'Dalan_*_x64-setup.exe' --dir prev || echo "no earlier release: the update test is skipped"
+      - name: Pester tests
+        shell: pwsh
+        run: |
+          $user = (Get-ChildItem installers\*_x64-setup.exe).FullName
+          $all = (Get-ChildItem installers\*_x64-allusers-setup.exe).FullName
+          $prev = Get-ChildItem prev\*_x64-setup.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          $env:DALAN_SETUP_USER = $user
+          $env:DALAN_SETUP_ALLUSERS = $all
+          if ($prev) { $env:DALAN_PREV_SETUP = $prev.FullName }
+          Invoke-Pester -Path tests/windows -CI -Output Detailed
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: windows-installer
-          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          name: windows-installers
+          path: installers/*.exe
           retention-days: 7
 
   # The real Dalan binary on Linux (WebKitGTK) driven by WebdriverIO through tauri-driver, against the Docker test

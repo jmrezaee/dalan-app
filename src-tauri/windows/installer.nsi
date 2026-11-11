@@ -79,6 +79,13 @@ Var NoShortcutMode
 Var WixMode
 Var OldMainBinaryName
 
+; --- Dalan --- the extras page, the registry writes, the uninstaller's data page (hooks.nsh sets DALAN_DIR)
+!ifndef DALAN_DIR
+  !error "installer.nsi needs bundle > windows > nsis > installerHooks to point at windows/hooks.nsh"
+!endif
+!include "${DALAN_DIR}\options-page.nsh"
+; --- /Dalan ---
+
 Name "${PRODUCTNAME}"
 BrandingText "${COPYRIGHT}"
 OutFile "${OUTFILE}"
@@ -461,6 +468,10 @@ Var AppStartMenuFolder
 !endif
 !insertmacro MUI_PAGE_STARTMENU Application $AppStartMenuFolder
 
+; --- Dalan --- the "Choose extras" page: shortcuts, ssh:// links, start with Windows
+Page custom DalanOptionsPage DalanOptionsLeave
+; --- /Dalan ---
+
 ; 7. Installation page
 !insertmacro MUI_PAGE_INSTFILES
 
@@ -474,10 +485,8 @@ Var AppStartMenuFolder
 !define MUI_FINISHPAGE_TEXT "$(finishText)$\r$\n$\r$\n$(finishHint)"
 !define MUI_FINISHPAGE_RUN_TEXT "$(finishRun)"
 ; --- /Dalan ---
-; Use show readme button in the finish page as a button create a desktop shortcut
-!define MUI_FINISHPAGE_SHOWREADME
-!define MUI_FINISHPAGE_SHOWREADME_TEXT "$(createDesktop)"
-!define MUI_FINISHPAGE_SHOWREADME_FUNCTION CreateOrUpdateDesktopShortcut
+; --- Dalan --- the desktop shortcut is a choice on the extras page now, not a button here
+; --- /Dalan ---
 ; Show run app after installation.
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_FUNCTION RunMainBinary
@@ -492,46 +501,27 @@ FunctionEnd
 ; 1. Confirm uninstall page
 Var DeleteAppDataCheckbox
 Var DeleteAppDataCheckboxState
-!define /ifndef WS_EX_LAYOUTRTL         0x00400000
-!define MUI_PAGE_CUSTOMFUNCTION_SHOW un.ConfirmShow
-Function un.ConfirmShow ; Add add a `Delete app data` check box
-  ; $1 inner dialog HWND
-  ; $2 window DPI
-  ; $3 style
-  ; $4 x
-  ; $5 y
-  ; $6 width
-  ; $7 height
-  FindWindow $1 "#32770" "" $HWNDPARENT ; Find inner dialog
-  System::Call "user32::GetDpiForWindow(p r1) i .r2"
-  ${If} $(^RTL) = 1
-    StrCpy $3 "${__NSD_CheckBox_EXSTYLE} | ${WS_EX_LAYOUTRTL}"
-    IntOp $4 50 * $2
-  ${Else}
-    StrCpy $3 "${__NSD_CheckBox_EXSTYLE}"
-    IntOp $4 0 * $2
-  ${EndIf}
-  IntOp $5 100 * $2
-  IntOp $6 400 * $2
-  IntOp $7 25 * $2
-  IntOp $4 $4 / 96
-  IntOp $5 $5 / 96
-  IntOp $6 $6 / 96
-  IntOp $7 $7 / 96
-  System::Call 'user32::CreateWindowEx(i r3, w "${__NSD_CheckBox_CLASS}", w "$(deleteAppData)", i ${__NSD_CheckBox_STYLE}, i r4, i r5, i r6, i r7, p r1, i0, i0, i0) i .s'
-  Pop $DeleteAppDataCheckbox
-  SendMessage $HWNDPARENT ${WM_GETFONT} 0 0 $1
-  SendMessage $DeleteAppDataCheckbox ${WM_SETFONT} $1 1
-FunctionEnd
-!define MUI_PAGE_CUSTOMFUNCTION_LEAVE un.ConfirmLeave
-Function un.ConfirmLeave
-  SendMessage $DeleteAppDataCheckbox ${BM_GETCHECK} 0 0 $DeleteAppDataCheckboxState
-FunctionEnd
-!define MUI_PAGE_CUSTOMFUNCTION_PRE un.SkipIfPassive
-!insertmacro MUI_UNPAGE_CONFIRM
+; --- Dalan --- replaces Tauri's page with its "Delete app data" checkbox: a page with two choices, keep (the default)
+; and delete. It sets $DeleteAppDataCheckboxState, which the uninstall section below reads.
+!include "${DALAN_DIR}\data-page.nsh"
+UninstPage custom un.DalanDataPage un.DalanDataLeave
+; --- /Dalan ---
 
 ; 2. Uninstalling Page
 !insertmacro MUI_UNPAGE_INSTFILES
+
+; --- Dalan --- 3. Done page: says where the data was kept, or that it was deleted
+!if "${SIDEBARIMAGE}" != ""
+  !define MUI_UNWELCOMEFINISHPAGE_BITMAP "${SIDEBARIMAGE}"
+!endif
+!ifdef MUI_FINISHPAGE_TITLE
+  !undef MUI_FINISHPAGE_TITLE
+!endif
+!define MUI_FINISHPAGE_TITLE "$(unDoneTitle)"
+!define MUI_PAGE_CUSTOMFUNCTION_PRE un.DalanFinishPre
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW un.DalanFinishShow
+!insertmacro MUI_UNPAGE_FINISH
+; --- /Dalan ---
 
 ;Languages
 ; PageReinstall reads the misspelled `choowHowToInstall` as a fallback, and makensis warns
@@ -570,6 +560,11 @@ Function .onInit
   !endif
 
   !insertmacro SetContext
+
+  ; --- Dalan --- one edition per PC; then the options (defaults, saved choices, command line)
+  Call DalanGuardEdition
+  Call DalanInitOptions
+  ; --- /Dalan ---
 
   ${If} $INSTDIR == "${PLACEHOLDER_INSTALL_DIR}"
     ; Set default install location
@@ -810,12 +805,9 @@ Section Install
     Call CreateOrUpdateStartMenuShortcut
   !insertmacro MUI_STARTMENU_WRITE_END
 
-  ; Create desktop shortcut for silent and passive installers
-  ; because finish page will be skipped
-  ${If} $PassiveMode = 1
-  ${OrIf} ${Silent}
-    Call CreateOrUpdateDesktopShortcut
-  ${EndIf}
+  ; --- Dalan --- the desktop shortcut follows the extras page (or the command line) in every mode
+  Call CreateOrUpdateDesktopShortcut
+  ; --- /Dalan ---
 
   !ifmacrodef NSIS_HOOK_POSTINSTALL
     !insertmacro NSIS_HOOK_POSTINSTALL
@@ -858,6 +850,14 @@ Function un.onInit
   ${IfNot} ${Errors}
     StrCpy $UpdateMode 1
   ${EndIf}
+
+  ; --- Dalan --- `uninstall.exe /S /DELETEDATA=1` also deletes the vault and settings; a plain /S keeps them
+  ${GetOptions} $CMDLINE "/DELETEDATA=" $R0
+  ${IfNot} ${Errors}
+  ${AndIf} $R0 == "1"
+    StrCpy $DeleteAppDataCheckboxState 1
+  ${EndIf}
+  ; --- /Dalan ---
 FunctionEnd
 
 Section Uninstall
@@ -1034,6 +1034,11 @@ Function CreateOrUpdateStartMenuShortcut
       Return
     ${EndIf}
   ${EndIf}
+  ; --- Dalan ---
+  ${If} $OptStartMenu = 0
+    Return
+  ${EndIf}
+  ; --- /Dalan ---
 
   !if "${STARTMENUFOLDER}" != ""
     CreateDirectory "$SMPROGRAMS\$AppStartMenuFolder"
@@ -1063,6 +1068,11 @@ Function CreateOrUpdateDesktopShortcut
       Return
     ${EndIf}
   ${EndIf}
+  ; --- Dalan ---
+  ${If} $OptDesktop = 0
+    Return
+  ${EndIf}
+  ; --- /Dalan ---
 
   CreateShortcut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
   !insertmacro SetLnkAppUserModelId "$DESKTOP\${PRODUCTNAME}.lnk"

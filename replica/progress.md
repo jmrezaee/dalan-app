@@ -315,7 +315,7 @@ The artwork is ready in `src-tauri/windows/` and the mockups are in `replica/win
   - Our English copy, the artwork, and `tauri.windows.conf.json`.
   - CI builds the just-me installer from it.
   - **Ask Mehrdad for the publisher name** before setting it.
-- [ ] **W2 Pages and logic** (spec §3 to §8, §13 W2):
+- [~] **W2 Pages and logic** (spec §3 to §8, §13 W2): built 2026-11-11, **never compiled or run** (no NSIS plugins or Windows on the Mac; the CI job `windows-installer` is the first compile and runs Pester 1–6). Files: `options-page.nsh`, `data-page.nsh`, `hooks.nsh`, `tauri.windows-allusers.conf.json`, release job `windows-allusers`, `tests/windows/installer.Tests.ps1`, silent options in `replica/launch/release-setup.md`. Left: push, fix whatever CI finds, the pages' look. Original scope:
   - The "Choose extras" page; the HKCU registry writes, with detection of another `ssh://` handler.
   - Remembered choices; silent options; the uninstaller "Your data" page.
   - `/UPDATE` keeps everything; the mixed-edition guard.
