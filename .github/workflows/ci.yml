@@ -181,6 +181,21 @@ jobs:
           $env:DALAN_SETUP_ALLUSERS = $all
           if ($prev) { $env:DALAN_PREV_SETUP = $prev.FullName }
           Invoke-Pester -Path tests/windows -CI -Output Detailed
+      # Every page of both installers and the uninstaller, as screenshots, with a gallery next to the mockups (W4).
+      - name: Installer walk with screenshots
+        if: always()
+        shell: pwsh
+        run: |
+          pip install pywinauto pillow
+          $env:DALAN_SETUP_USER = (Get-ChildItem installers\*_x64-setup.exe).FullName
+          $env:DALAN_SETUP_ALLUSERS = (Get-ChildItem installers\*_x64-allusers-setup.exe).FullName
+          python tests/windows/walk-installer.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: installer-walk
+          path: test-results/installer-walk
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         if: always()
         with:

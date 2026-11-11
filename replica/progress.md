@@ -325,7 +325,7 @@ The artwork is ready in `src-tauri/windows/` and the mockups are in `replica/win
   - A strict `--open-url` parser in Rust, plus a confirmation card (a link never connects by itself); `--minimized`.
   - Settings › System switches (needs the `winreg` crate: **ask first**); the About edition line; the download-page link.
   - Tests.
-- [ ] **W4 Installer walk and hand check** (spec §10, §13 W4):
+- [h] **W4 Installer walk and hand check** (spec §10, §13 W4): built 2026-11-11, **never run.** `tests/windows/walk-installer.py` (`pnpm walk:installer`; pywinauto; both editions plus the uninstaller; gallery next to the mockups) and a CI step that uploads it as `installer-walk`; Pester 7 (signature, skipped until `DALAN_EXPECT_SIGNED=1`) and 8 (the app starts with a valid and with injection links); release notes in `release.yml`; section H of `hand-checks.md`. **Nothing from W1 to W4 has been compiled or run on Windows yet:** the first push of the `windows-installer` job decides what is left (expect NSIS fixes, and pywinauto control names to adjust). Then someone on Windows runs section H. Original scope:
   - `pnpm walk:installer` (pywinauto) gallery for both editions and the uninstaller, uploaded by CI.
   - The signing check once secrets exist.
   - A Windows section in `hand-checks.md`; mark the phase `[h]` until someone on Windows runs it.

@@ -81,6 +81,7 @@
     "check:features": "node scripts/features-check.mjs",
     "check:hooks": "node scripts/check-no-test-hooks.mjs",
     "check:nsis": "node scripts/check-nsis-template.mjs",
+    "walk:installer": "python tests/windows/walk-installer.py",
     "walk": "node tests/walk/run.mjs",
     "walk:ci": "node tests/walk/run.mjs --headless",
     "test:visual": "scripts/in-playwright-docker.sh pnpm exec playwright test --project=visual",

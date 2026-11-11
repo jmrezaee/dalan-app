@@ -155,4 +155,30 @@ Describe 'Dalan installer' {
     Invoke-Setup $SetupUser @('/S') | Should -Not -Be 0
     Join-Path $UserDir $Exe | Should -Not -Exist
   }
+
+  # Only when the build is signed (the signing secrets exist): DALAN_EXPECT_SIGNED=1.
+  It '7. both setups and the installed uninstaller carry a valid signature' -Skip:($env:DALAN_EXPECT_SIGNED -ne '1') {
+    foreach ($f in @($SetupUser, $SetupAll)) { (Get-AuthenticodeSignature $f).Status | Should -Be 'Valid' }
+    Invoke-Setup $SetupUser @('/S') | Should -Be 0
+    (Get-AuthenticodeSignature (Join-Path $UserDir 'uninstall.exe')).Status | Should -Be 'Valid'
+  }
+
+  # The behaviour of a link is covered by the Rust and browser tests; here the installed app must simply start with
+  # one (and with injection attempts) and keep running, and nothing a link says may start another program.
+  It '8. the installed app starts with a valid link and with injection links' {
+    Invoke-Setup $SetupUser @('/S') | Should -Be 0
+    $app = Join-Path $UserDir $Exe
+    foreach ($link in @('ssh://deploy@10.0.0.5:22', 'ssh://-oProxyCommand=calc@h', 'ssh://h -o x', 'ssh://%2Doops@h')) {
+      $p = Start-Process -FilePath $app -ArgumentList @('--open-url', "`"$link`"") -PassThru
+      try {
+        Start-Sleep -Seconds 8
+        $p.HasExited | Should -BeFalse -Because "the app should still be running after $link"
+      }
+      finally {
+        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
+      }
+    }
+    Get-Process -Name 'calc', 'CalculatorApp' -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
+  }
 }

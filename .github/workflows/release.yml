@@ -103,7 +103,13 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Dalan ${{ github.ref_name }}
-          releaseBody: See the assets below to download. Checksums are in SHA256SUMS.txt.
+          releaseBody: |
+            See the assets below to download. Checksums are in SHA256SUMS.txt.
+
+            **Windows:** `Dalan_<version>_x64-setup.exe` installs for you only and needs no administrator rights.
+            `Dalan_<version>_x64-allusers-setup.exe` installs for everyone on the PC; it asks for administrator rights, and so does each of its updates.
+            Only one of the two can be installed. Silent install options for IT: replica/launch/release-setup.md ("Silent install").
+            Builds are not signed yet: Windows SmartScreen may warn (More info, then Run anyway), and macOS needs right-click, Open.
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
