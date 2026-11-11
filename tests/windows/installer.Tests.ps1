@@ -31,6 +31,8 @@ BeforeAll {
   function Invoke-Uninstall([string]$Dir, [string[]]$Arguments = @('/S')) {
     return Invoke-Setup (Join-Path $Dir 'uninstall.exe') ($Arguments + "_?=$Dir")
   }
+  # Where a shortcut points. (The template re-targets existing shortcuts on an update, so their timestamps change.)
+  function Get-LinkTarget([string]$Path) { (New-Object -ComObject WScript.Shell).CreateShortcut($Path).TargetPath }
   function Get-Reg($Hive, $Key, $Name) { (Get-ItemProperty -Path "${Hive}:\$Key" -Name $Name -ErrorAction SilentlyContinue).$Name }
   # Back to a clean PC: uninstall whatever is there, then remove what is left.
   function Reset-Dalan {
@@ -92,7 +94,7 @@ Describe 'Dalan installer' {
     Set-Content (Join-Path $DataDirs[0] 'marker.txt') 'vault'
 
     Invoke-Setup $SetupUser @('/S', '/DESKTOP=1', '/SSHLINKS=1', '/AUTOSTART=1') | Should -Be 0
-    $before = @($StartMenu, $Desktop | ForEach-Object { (Get-Item $_).LastWriteTimeUtc })
+    $before = @($StartMenu, $Desktop | ForEach-Object { Get-LinkTarget $_ })
 
     # What the auto-updater runs
     Invoke-Setup $SetupUser @('/S', '/UPDATE') | Should -Be 0
@@ -102,7 +104,7 @@ Describe 'Dalan installer' {
     (Get-Reg HKCU $k 'Autostart') | Should -Be 1
     (Get-Reg HKCU 'Software\Classes\ssh\shell\open\command' '(default)') | Should -Be ($SshCommand -f (Join-Path $UserDir $Exe))
     (Get-Reg HKCU 'Software\Microsoft\Windows\CurrentVersion\Run' 'Dalan') | Should -Match '--minimized$'
-    @($StartMenu, $Desktop | ForEach-Object { (Get-Item $_).LastWriteTimeUtc }) | Should -Be $before
+    @($StartMenu, $Desktop | ForEach-Object { Get-LinkTarget $_ }) | Should -Be $before
     Join-Path $DataDirs[0] 'marker.txt' | Should -Exist
   }
 

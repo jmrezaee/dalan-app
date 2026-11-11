@@ -141,7 +141,16 @@ def install_walk(setup: Path, label: str, options: dict[str, bool]):
 def reinstall_page(setup: Path, label: str):
     """Setup over an existing install: the "Already installed" page. The setup is closed without installing."""
     app, dlg = open_app(setup)
-    run_page(f"{label}-reinstall", lambda: (wait_page(dlg, "Welcome to Dalan"), press(dlg), wait_page(dlg, "Dalan is already installed"), shot(dlg, f"{label}-reinstall")))
+    def page():
+        wait_page(dlg, "Welcome to Dalan")
+        press(dlg)
+        time.sleep(4)
+        screen_shot(f"{label}-reinstall-after-next")  # what is on screen after Next (kept to see why the page may not show)
+        steps[-1]["note"] = "debug: the whole screen after pressing Next"
+        wait_page(dlg, "Dalan is already installed", 20)
+        shot(dlg, f"{label}-reinstall")
+
+    run_page(f"{label}-reinstall", page)
     app.kill()
 
 
