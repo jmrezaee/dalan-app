@@ -155,5 +155,5 @@ export const useSettingsStore = defineStore('settings', () => {
     save('history', { enabled })
   }
 
-  return { detectOs, setDetectOs, postQuantum, setPostQuantum, localShell, setLocalShell, shortcutOverrides, combos, setShortcut, logsEnabled, setLogs, historyEnabled, setHistory, theme, terminal, autoLockMinutes, loaded, resolvedTheme, load, setTheme, setTerminal, setAutoLock, aiGet: api.aiGet, aiSave: api.aiSave, appInfo: api.appInfo, diagnosticsText: api.diagnosticsText, updateCheck: api.updateCheck, updateInstall: api.updateInstall }
+  return { detectOs, setDetectOs, postQuantum, setPostQuantum, localShell, setLocalShell, shortcutOverrides, combos, setShortcut, logsEnabled, setLogs, historyEnabled, setHistory, theme, terminal, autoLockMinutes, loaded, resolvedTheme, load, setTheme, setTerminal, setAutoLock, aiGet: api.aiGet, aiSave: api.aiSave, appInfo: api.appInfo, systemIntegrationGet: api.systemIntegrationGet, systemIntegrationSet: api.systemIntegrationSet, openDefaultApps: api.openDefaultApps, diagnosticsText: api.diagnosticsText, updateCheck: api.updateCheck, updateInstall: api.updateInstall }
 })

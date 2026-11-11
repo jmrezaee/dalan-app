@@ -38,3 +38,8 @@ pub struct TunnelChanged {
 pub struct QuitRequested {
     pub live_sessions: u32,
 }
+
+/// A link (`dalan-app.exe --open-url ssh://...`) arrived, on a cold start or from a second launch. The UI asks
+/// `links_take` for what is waiting (it may not have been listening when a cold start queued the first one).
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct LinkReceived {}

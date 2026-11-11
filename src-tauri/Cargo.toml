@@ -55,3 +55,7 @@ opt-level = 3
 # One Dalan at a time: a second launch focuses the first window instead (desktop only).
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2"
+
+# Settings > System and the installer share some registry keys (src/system_integration.rs). Windows only.
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"

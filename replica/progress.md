@@ -321,7 +321,7 @@ The artwork is ready in `src-tauri/windows/` and the mockups are in `replica/win
   - `/UPDATE` keeps everything; the mixed-edition guard.
   - The all-users overlay, a second CI matrix entry, renamed output, `latest-allusers.json`.
   - Pester tests 1–6.
-- [ ] **W3 App side** (spec §9, §13 W3):
+- [~] **W3 App side** (spec §9, §13 W3): built 2026-11-11. Rust: `open_url.rs` (strict parser, 14 tests incl. the injection cases; queue; `--open-url`, `--minimized`, single-instance forwarding), `system_integration.rs` (`winreg` added for Windows only, with your OK; type-checked for Windows in a scratch crate but never run there), 4 commands + the `link-received` event. UI: `links` store, `LinkDialog` (Cancel focused, a link never connects by itself), Settings > System (Windows only) and the About install lines, `useConnectAddress` shared with the new-tab quick connect. Tests: `e2e:links` (7), the fake backend's `receiveLink` / `setSystem`. Left: the Windows run (Pester 8 needs the installed exe started with a valid and an injection link; not written yet), the download-page link (belongs with the all-users file in W4/release), and the real-window check. Original scope:
   - A strict `--open-url` parser in Rust, plus a confirmation card (a link never connects by itself); `--minimized`.
   - Settings › System switches (needs the `winreg` crate: **ask first**); the About edition line; the download-page link.
   - Tests.

@@ -14,6 +14,7 @@ const snippetsStore = useSnippetsStore()
 const logsStore = useLogsStore()
 const forwardsStore = useForwardsStore()
 const quitStore = useQuitStore()
+const linksStore = useLinksStore()
 const workspaces = useWorkspacesStore()
 const workspaceView = ref<{ askSave: () => void }[] | null>(null)
 const settings = useSettingsStore()
@@ -28,6 +29,7 @@ onMounted(() => {
   workspaces.refresh()
   forwardsStore.watch()
   quitStore.watch()
+  linksStore.watch()
   settings.load()
 })
 onBeforeUnmount(() => {
@@ -264,6 +266,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
 
     <CommandPalette v-model:open="paletteOpen" @action="onPaletteAction" />
     <QuitDialog />
+    <LinkDialog />
     <DroppedSessionsCard />
 
     <AlertDialog v-model:open="closeOpen">

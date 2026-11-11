@@ -187,6 +187,10 @@ export function install(opts: Options) {
     },
     /** The window was closed or ⌘Q pressed with live sessions: Rust sends this and holds the quit back. */
     quitRequested: (liveSessions: number) => emitEvent('quit-requested', { live_sessions: liveSessions }),
+    /** A link from another app arrives: queued like Rust does, then the event tells the UI to look. */
+    receiveLink: (target: { user: string | null, host: string, port: number } | null) => { m.links.push(target); emitEvent('link-received', {}) },
+    /** Pretend to run on Windows with these Settings > System values. */
+    setSystem: (patch: Partial<typeof m.system>) => { m.system = { ...m.system, supported: true, ...patch } },
     /** Transfers: drive one by hand after `manualTransfers()`. */
     manualTransfers: (on = true) => { m.manualTransfers = on },
     transferIds: () => [...m.transfers.keys()],

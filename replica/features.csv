@@ -93,3 +93,5 @@ Terminal bell sound setting,terminal,could,yes,partial,walk:ch15;e2e:rules,,P25;
 Import review filter and group selection,hosts,should,yes,yes,walk:ch02;e2e:import,,P25; waits for hand check; promoted 2026-11-07: covered by automated tests
 "SFTP open with a chosen app,  remembered per file type",sftp,could,yes,partial,,,P25 follow-up; waits for hand check
 Several SFTP tabs (each with its own two panes and transfers; open a host in a new one),sftp,should,unknown,yes,e2e:sftp-tabs;unit:sessionsStore,,P30; S21 S22; needs a look in the real window
+Open ssh:// links from other apps with Dalan (Windows; always asks first),shell,could,unknown,partial,e2e:links;rust:open_url.rs,,W3; S23; Rust parser and the confirmation card are tested; the Windows registry side has never run on Windows (see W4 hand check)
+Start Dalan when signing in to Windows (--minimized),shell,could,unknown,partial,rust:system_integration.rs,,W3; never run on Windows

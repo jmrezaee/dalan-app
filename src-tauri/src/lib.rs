@@ -14,6 +14,7 @@ pub mod keys;
 pub mod known_hosts;
 pub mod logs;
 pub mod mosh;
+pub mod open_url;
 pub mod osdetect;
 mod perms;
 pub mod proxy;
@@ -25,6 +26,7 @@ pub mod sftp;
 pub mod snippets;
 pub mod ssh;
 pub mod state;
+pub mod system_integration;
 pub mod telnet;
 pub mod themes;
 pub mod tunnels;
@@ -43,6 +45,10 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::app::app_info,
             commands::app::quit_app,
             commands::app::quit_cancel,
+            commands::app::links_take,
+            commands::app::system_integration_get,
+            commands::app::system_integration_set,
+            commands::app::open_default_apps,
             commands::vault::vault_status,
             commands::vault::vault_create,
             commands::vault::vault_unlock,
@@ -147,7 +153,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::VaultLocked,
             events::AutoLockWarning,
             events::TunnelChanged,
-            events::QuitRequested
+            events::QuitRequested,
+            events::LinkReceived
         ])
 }
 
@@ -180,7 +187,9 @@ pub fn run() {
     let app = tauri::Builder::default();
     // Must be the first plugin. A second launch (a double-click on the icon) shows the running window instead.
     #[cfg(desktop)]
-    let app = app.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+    let app = app.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        // A second launch with `--open-url ssh://...` (a link clicked in another app) is queued for the UI.
+        open_url::handle_args(app, &args);
         if let Some(w) = app.get_webview_window("main") {
             let _ = w.unminimize();
             let _ = w.show();
@@ -208,6 +217,15 @@ pub fn run() {
                 [],
             );
             app.manage(AppState::new(conn));
+            app.manage(open_url::LinkQueue::default());
+            // `--minimized` (start with Windows) starts in the taskbar; a link on the command line brings the window up.
+            let args: Vec<String> = std::env::args().collect();
+            if open_url::wants_minimized(&args) {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.minimize();
+                }
+            }
+            open_url::handle_args(app.handle(), &args);
             // The updater only exists in release builds, whose config carries `plugins.updater`.
             if app.config().plugins.0.contains_key("updater") {
                 app.handle()

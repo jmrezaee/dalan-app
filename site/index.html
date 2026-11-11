@@ -81,6 +81,7 @@
       <a data-asset="win" href="#" class="rounded-lg border border-border bg-bg p-5 hover:border-accent transition-colors"><div class="text-lg">Windows</div><div class="text-sm text-muted mt-1">Windows 10 and 11 · installer .exe</div></a>
       <a data-asset="linux" href="#" class="rounded-lg border border-border bg-bg p-5 hover:border-accent transition-colors"><div class="text-lg">Linux</div><div class="text-sm text-muted mt-1">.AppImage · .deb · .rpm</div></a>
     </div>
+    <p class="mt-4 text-xs text-muted">Installing on Windows for everyone on a shared PC? <a class="underline hover:text-text" data-asset="winall" href="#">Get the all-users installer.</a> It asks for administrator rights.</p>
     <p class="mt-4 text-xs text-muted">Checksums are listed on the release page.</p>
   </div>
 </section>
@@ -122,6 +123,7 @@
   const assets = {
     mac:   `${base}/download/v${VERSION}/Dalan_${VERSION}_universal.dmg`,
     win:   `${base}/download/v${VERSION}/Dalan_${VERSION}_x64-setup.exe`,
+    winall: `${base}/download/v${VERSION}/Dalan_${VERSION}_x64-allusers-setup.exe`,
     linux: `${base}/latest`,
   };
   document.querySelectorAll('[data-version]').forEach(e => e.textContent = 'v' + VERSION);

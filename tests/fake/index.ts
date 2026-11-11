@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import type { Page } from '@playwright/test'
 import type { Options } from './backend'
 import type { Seed } from './model'
+import type { SystemIntegration_Serialize } from '../../app/types/bindings'
 import { NOW } from './scenarios/helpers'
 
 export { NOW }
@@ -76,6 +77,8 @@ export class Fake {
   }
 
   quitRequested = (liveSessions: number) => this.run<void>('quitRequested', liveSessions)
+  receiveLink = (target: { user: string | null, host: string, port: number } | null) => this.run<void>('receiveLink', target)
+  setSystem = (patch: Partial<SystemIntegration_Serialize>) => this.run<void>('setSystem', patch)
   tunnel = (id: string) => ({ state: (state: 'stopped' | 'starting' | 'active' | 'reconnecting' | 'error', message?: string) => this.run<void>('tunnel', id, state, message ?? null) })
 
   manualTransfers = (on = true) => this.run<void>('manualTransfers', on)

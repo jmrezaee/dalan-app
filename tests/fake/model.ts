@@ -2,7 +2,7 @@
 // a password is only a flag (`password: true`), like the real `has_password`.
 import type {
   AgentChoice, EnvVar, ForwardKind, Inherited_Serialize, KeySummary_Serialize, KnownHost_Serialize, LogSummary_Serialize,
-  PackageSummary, ProxyChoice_Serialize, SerialConfig, TemplateSummary, TunnelState, HostSummary_Serialize, GroupSummary_Serialize,
+  PackageSummary, ProxyChoice_Serialize, SerialConfig, TemplateSummary, TunnelState, HostSummary_Serialize, GroupSummary_Serialize, SshTarget_Serialize, SystemIntegration_Serialize,
 } from '../../app/types/bindings'
 
 export interface Profile {
@@ -111,6 +111,10 @@ export interface Model {
   answerLog: string[]
   /** Commands that fail once with this error (`fake.failNext`). */
   failNext: Map<string, { code: string, message: string }>
+  /** `ssh://` links that arrived and wait for the UI (`fake.receiveLink`); `null` is one that didn't parse. */
+  links: (SshTarget_Serialize | null)[]
+  /** What Settings > System shows. Not supported (a Mac or Linux) until a test says it runs on Windows. */
+  system: SystemIntegration_Serialize
 }
 
 export function createModel(seed: Seed): Model {
@@ -146,6 +150,8 @@ export function createModel(seed: Seed): Model {
     unhandled: [],
     answerLog: [],
     failNext: new Map(),
+    links: [],
+    system: { supported: false, ssh_links: false, autostart: false, other_handler: null, pinned: false, edition: null, install_dir: null },
   }
 }
 

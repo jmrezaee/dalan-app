@@ -7,12 +7,39 @@ import { cn } from '@/lib/utils'
 import { SHORTCUT_ACTIONS, defaultCombo, eventCombo, formatCombo } from '~/utils/shortcuts'
 import { terminalThemeLabels } from '~/utils/terminal-themes'
 import { Input } from '@/components/ui/input'
+import type { SystemIntegration_Serialize } from '~/types/bindings'
 const { label: shortcutLabel } = useShortcutLabel()
 
 const settings = useSettingsStore()
 const sftp = useSftpStore()
-const sections = ['Appearance', 'Terminal', 'Logs', 'AI', 'Shortcuts', 'Security', 'About'] as const
-const section = ref<typeof sections[number]>('Appearance')
+// Windows only: "System" (ssh:// links, start with Windows). The registry is Rust's business: `supported` says whether to show it.
+type SectionName = 'Appearance' | 'Terminal' | 'Logs' | 'AI' | 'Shortcuts' | 'Security' | 'System' | 'About'
+type SystemInfo = SystemIntegration_Serialize
+const NO_SYSTEM: SystemInfo = { supported: false, ssh_links: false, autostart: false, other_handler: null, pinned: false, edition: null, install_dir: null }
+const system = ref<SystemInfo>(NO_SYSTEM)
+const sections = computed<SectionName[]>(() => ['Appearance', 'Terminal', 'Logs', 'AI', 'Shortcuts', 'Security', ...(system.value.supported ? ['System' as const] : []), 'About'])
+const section = ref<SectionName>('Appearance')
+onMounted(async () => { system.value = await settings.systemIntegrationGet().catch(() => NO_SYSTEM) })
+async function openDefaultApps() {
+  try {
+    await settings.openDefaultApps()
+  }
+  catch {
+    toast.error('Couldn\'t open Windows Settings.')
+  }
+}
+function switchSystem(which: 'sshLinks' | 'autostart', on: boolean) {
+  return setSystem({ [which]: on })
+}
+async function setSystem(patch: { sshLinks?: boolean, autostart?: boolean }) {
+  try {
+    system.value = await settings.systemIntegrationSet(patch.sshLinks ?? null, patch.autostart ?? null)
+  }
+  catch (e) {
+    toast.error(e instanceof Error ? e.message : 'Couldn\'t change that setting.')
+    system.value = await settings.systemIntegrationGet().catch(() => NO_SYSTEM)
+  }
+}
 const changeOpen = ref(false)
 
 // ---- AI: your own API key, used by the side panel's "Ask AI" tab. The key goes to Rust once and is never shown again.
@@ -246,6 +273,8 @@ const num = (v: string | number, fallback: number) => (Number.isFinite(Number(v)
 
         <template v-else-if="section === 'About'">
           <div class="row"><span class="flex-1">Version</span><span class="font-mono text-sm">{{ info?.version ?? '…' }}</span></div>
+          <div v-if="system.supported" class="row"><span class="flex-1">Installed</span><span class="text-sm text-muted">{{ system.edition === 'allusers' ? 'For everyone on this PC' : 'For you' }}</span></div>
+          <div v-if="system.install_dir" class="row"><span class="flex-1">Install folder</span><span class="truncate font-mono text-xs text-muted" :title="system.install_dir">{{ system.install_dir }}</span></div>
           <div class="row"><span class="flex-1">System</span><span class="text-sm text-muted">{{ info?.platform ?? '…' }}</span></div>
           <div class="row"><span class="flex-1">Data folder</span><span class="truncate font-mono text-xs text-muted" :title="info?.data_dir">{{ info?.data_dir ?? '…' }}</span></div>
           <div class="row">
@@ -265,7 +294,7 @@ const num = (v: string | number, fallback: number) => (Number.isFinite(Number(v)
           </div>
         </template>
 
-        <template v-else>
+        <template v-else-if="section === 'Security'">
           <div class="row">
             <span class="flex-1">Lock after idle</span>
             <Select :model-value="String(settings.autoLockMinutes)" @update:model-value="(v) => settings.setAutoLock(Number(v))">
@@ -276,6 +305,24 @@ const num = (v: string | number, fallback: number) => (Number.isFinite(Number(v)
           <div class="row">
             <span class="flex flex-1 flex-col">Change master password<span class="text-xs text-muted">Re-encrypts every secret in one step.</span></span>
             <Button variant="secondary" @click="changeOpen = true">Change…</Button>
+          </div>
+        </template>
+
+        <template v-else-if="section === 'System'">
+          <div class="row">
+            <span class="flex flex-1 flex-col">Open ssh:// links with Dalan
+              <span class="text-xs text-muted">Links in your browser or chat like ssh://deploy@10.0.0.5 open a new tab in Dalan. Dalan always asks before connecting.</span>
+              <span v-if="system.pinned && !system.ssh_links" class="text-xs text-muted">
+                Windows uses {{ system.other_handler }} for these links.
+                <button type="button" class="underline hover:text-text" @click="openDefaultApps">Open Default apps</button> to change it.
+              </span>
+              <span v-else-if="system.other_handler && !system.ssh_links" class="text-xs text-muted">{{ system.other_handler }} currently opens these links. Turning this on makes Dalan open them instead.</span>
+            </span>
+            <Switch aria-label="Open ssh:// links with Dalan" :model-value="system.ssh_links" :disabled="system.pinned && !system.ssh_links" @update:model-value="(v: boolean) => switchSystem('sshLinks', v)" />
+          </div>
+          <div class="row">
+            <span class="flex flex-1 flex-col">Start Dalan when I sign in to Windows<span class="text-xs text-muted">Useful if tunnels start when Dalan unlocks.</span></span>
+            <Switch aria-label="Start Dalan when I sign in to Windows" :model-value="system.autostart" @update:model-value="(v: boolean) => switchSystem('autostart', v)" />
           </div>
         </template>
       </div>

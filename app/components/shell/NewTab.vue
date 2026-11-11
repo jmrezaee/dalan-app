@@ -1,12 +1,11 @@
 <script setup lang="ts">
 // S16: pick a host to connect in this tab. Recent hosts first; typing searches all of them.
-import { toast } from 'vue-sonner'
 import { LayoutGrid, Plug, Plus, Search, SquareTerminal } from '@lucide/vue'
 import { Checkbox } from '@/components/ui/checkbox'
 import type { HostSummary } from '~/types/bindings'
 import { osLetter, osName } from '~/utils/os'
 import { cn } from '@/lib/utils'
-import { findQuickHost, parseQuickConnect } from '~/utils/quickConnect'
+import { parseQuickConnect } from '~/utils/quickConnect'
 
 const emit = defineEmits<{ newHost: [] }>()
 const hosts = useHostsStore()
@@ -44,14 +43,7 @@ const { label: shortcutLabel } = useShortcutLabel()
 const quick = computed(() => (results.value.length ? null : parseQuickConnect(query.value)))
 const quickLabel = computed(() => (quick.value ? `${quick.value.username ? `${quick.value.username}@` : ''}${quick.value.address}${quick.value.port ? `:${quick.value.port}` : ''}` : ''))
 async function connectQuick() {
-  const q = quick.value
-  if (!q) return
-  const existing = findQuickHost(hosts.hosts, q)
-  if (existing) return void sessions.open(existing)
-  const err = await hosts.save({ id: null, label: q.address, address: q.address, port: q.port, username: q.username, password: null, clear_password: false, group_id: null, key_id: null, identity_id: null, startup_snippet_id: null, jump_mode: 'inherit', jump_host_ids: [], tags: [] })
-  if (err) return void toast.error(err)
-  const saved = findQuickHost(hosts.hosts, q)
-  if (saved) sessions.open(saved)
+  if (quick.value) await connectAddress(quick.value)
 }
 
 function ago(ms: number | null | undefined) {

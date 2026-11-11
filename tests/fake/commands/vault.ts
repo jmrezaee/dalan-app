@@ -1,6 +1,6 @@
 import { fail, type Handlers } from '../types'
 
-type Keys = 'appInfo' | 'quitApp' | 'quitCancel' | 'vaultStatus' | 'vaultCreate' | 'vaultUnlock' | 'vaultLock' | 'vaultChangePassword' | 'vaultTouch' | 'settingsGetAll' | 'settingsSet' | 'updateCheck' | 'updateInstall' | 'diagnosticsText' | 'aiGet' | 'aiSave' | 'aiSuggest' | 'historyList' | 'historyClear'
+type Keys = 'appInfo' | 'quitApp' | 'quitCancel' | 'linksTake' | 'systemIntegrationGet' | 'systemIntegrationSet' | 'openDefaultApps' | 'vaultStatus' | 'vaultCreate' | 'vaultUnlock' | 'vaultLock' | 'vaultChangePassword' | 'vaultTouch' | 'settingsGetAll' | 'settingsSet' | 'updateCheck' | 'updateInstall' | 'diagnosticsText' | 'aiGet' | 'aiSave' | 'aiSuggest' | 'historyList' | 'historyClear'
 
 /** The password every scenario's vault opens with. A test secret, not a real one. */
 export const MASTER = 'correct-horse'
@@ -8,6 +8,15 @@ export const MASTER = 'correct-horse'
 export const vault: Pick<Handlers, Keys> = {
   quitApp: () => undefined,
   quitCancel: () => undefined,
+  linksTake: (_a, { m }) => m.links.splice(0),
+  systemIntegrationGet: (_a, { m }) => m.system,
+  systemIntegrationSet: (a, { m }) => {
+    if (!m.system.supported) fail('validation', 'This is a Windows setting.')
+    if (typeof a.sshLinks === 'boolean') { m.system.ssh_links = a.sshLinks; if (a.sshLinks) m.system.other_handler = null }
+    if (typeof a.autostart === 'boolean') m.system.autostart = a.autostart
+    return m.system
+  },
+  openDefaultApps: () => null,
   appInfo: () => ({ version: '0.1.0', data_dir: '/home/me/.local/share/app.dalan.desktop', platform: 'linux' }),
   vaultStatus: (_a, { m }) => {
     const left = Math.ceil((m.vault.cooldownUntil - Date.now()) / 1000)

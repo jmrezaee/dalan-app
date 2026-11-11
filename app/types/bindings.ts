@@ -11,6 +11,14 @@ export const commands = {
 	quitApp: () => __TAURI_INVOKE<void>("quit_app"),
 	/**  The UI's answer "Keep working": the next quit asks again. */
 	quitCancel: () => __TAURI_INVOKE<void>("quit_cancel"),
+	/**  The `ssh://` links that arrived and wait for the UI (see `open_url`). `None` is a link that didn't parse. */
+	linksTake: () => __TAURI_INVOKE<(SshTarget_Serialize | null)[]>("links_take"),
+	/**  Settings > System (Windows): what the registry says now. Other systems answer `supported: false`. */
+	systemIntegrationGet: () => typedError<SystemIntegration_Serialize, AppError>(__TAURI_INVOKE("system_integration_get")),
+	/**  Turns "Open ssh:// links with Dalan" and "Start Dalan when I sign in" on or off. A switch left `None` is kept. */
+	systemIntegrationSet: (sshLinks: boolean | null, autostart: boolean | null) => typedError<SystemIntegration_Serialize, AppError>(__TAURI_INVOKE("system_integration_set", { sshLinks, autostart })),
+	/**  Opens Windows Settings > Default apps (opened here, not by the webview). */
+	openDefaultApps: () => typedError<null, AppError>(__TAURI_INVOKE("open_default_apps")),
 	/**  First run? Locked? Allowed while locked. */
 	vaultStatus: () => typedError<VaultStatus_Serialize, AppError>(__TAURI_INVOKE("vault_status")),
 	/**  F10: derive the key, write the vault row, and leave the vault unlocked. */
@@ -180,6 +188,7 @@ export const commands = {
 /** Events */
 export const events = {
 	autoLockWarning: makeEvent<AutoLockWarning, AutoLockWarning>("auto-lock-warning"),
+	linkReceived: makeEvent<LinkReceived, LinkReceived>("link-received"),
 	quitRequested: makeEvent<QuitRequested, QuitRequested>("quit-requested"),
 	tunnelChanged: makeEvent<TunnelChanged_Serialize, TunnelChanged_Deserialize>("tunnel-changed"),
 	vaultLocked: makeEvent<VaultLocked, VaultLocked>("vault-locked"),
@@ -905,6 +914,12 @@ export type KnownHost_Serialize = {
 	last_seen_at: number | null,
 };
 
+/**
+ *  A link (`dalan-app.exe --open-url ssh://...`) arrived, on a cold start or from a second launch. The UI asks
+ *  `links_take` for what is waiting (it may not have been listening when a cold start queued the first one).
+ */
+export type LinkReceived = Record<string, never>;
+
 export type LockReason = 
 /**  The user pressed Lock. */
 "manual" | 
@@ -1146,10 +1161,62 @@ export type SnippetsAll_Serialize = {
 	snippets: SnippetSummary_Serialize[],
 };
 
+/**  What a valid link asked for. */
+export type SshTarget = SshTarget_Serialize | SshTarget_Deserialize;
+
+/**  What a valid link asked for. */
+export type SshTarget_Deserialize = {
+	user?: string | null,
+	host: string,
+	port: number,
+};
+
+/**  What a valid link asked for. */
+export type SshTarget_Serialize = {
+	user: string | null,
+	host: string,
+	port: number,
+};
+
 export type Suggestion = {
 	command: string,
 	/**  The model asked a question instead of giving a command (the text after `# `). */
 	is_question: boolean,
+};
+
+/**  What Settings shows. On other systems `supported` is false and the rest is empty. */
+export type SystemIntegration = SystemIntegration_Serialize | SystemIntegration_Deserialize;
+
+/**  What Settings shows. On other systems `supported` is false and the rest is empty. */
+export type SystemIntegration_Deserialize = {
+	supported: boolean,
+	/**  Dalan is the `ssh://` handler. */
+	ssh_links: boolean,
+	/**  Dalan starts when the person signs in. */
+	autostart: boolean,
+	/**  Another app opens `ssh://` links (its name), so ticking the switch takes them over. */
+	other_handler?: string | null,
+	/**  The person picked that app in Windows Settings: Dalan can't override it, only point them there. */
+	pinned: boolean,
+	/**  `"user"` (installed for this person) or `"allusers"`, from the installer's saved choices. */
+	edition?: string | null,
+	install_dir?: string | null,
+};
+
+/**  What Settings shows. On other systems `supported` is false and the rest is empty. */
+export type SystemIntegration_Serialize = {
+	supported: boolean,
+	/**  Dalan is the `ssh://` handler. */
+	ssh_links: boolean,
+	/**  Dalan starts when the person signs in. */
+	autostart: boolean,
+	/**  Another app opens `ssh://` links (its name), so ticking the switch takes them over. */
+	other_handler: string | null,
+	/**  The person picked that app in Windows Settings: Dalan can't override it, only point them there. */
+	pinned: boolean,
+	/**  `"user"` (installed for this person) or `"allusers"`, from the installer's saved choices. */
+	edition: string | null,
+	install_dir: string | null,
 };
 
 /**  A tag and how many servers use it (the Tags menu). */
