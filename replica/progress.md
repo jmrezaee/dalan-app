@@ -330,6 +330,10 @@ The artwork is ready in `src-tauri/windows/` and the mockups are in `replica/win
   - The signing check once secrets exist.
   - A Windows section in `hand-checks.md`; mark the phase `[h]` until someone on Windows runs it.
 
+### Download page (from `replica/launch/landing-v2.md`; read it in full first)
+
+- [ ] **L1 Download page rebuild:** rebuild `site/index.html` from the canvas (https://claude.ai/artifact/VWhMrR9t799hwjzeKda32n): hero with real screenshots, the three feature rows, the security band, six cards, OS-aware download (Windows just-me primary, all-users as a link), FAQ, phone layout. Add `pnpm site:shots` (baselines → `site/img/*.webp`), local fonts, tokens only, and `tests/site/site.spec.ts`. Keep the Pages workflow's `REPO`/`VERSION` sed working. Hand check: open the published page on a Mac, a Windows PC and a phone and check each gets the right button and file.
+
 ## Backlog (not scheduled; Mehrdad picks from here after P29)
 
 - Touch ID / Windows Hello unlock (M4 item 5).
