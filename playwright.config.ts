@@ -35,6 +35,7 @@ export default defineConfig({
     { name: 'e2e-light', testDir: 'tests/e2e', grep: /@theme/, use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 }, colorScheme: 'light' } },
     { name: 'a11y', testDir: 'tests/a11y', use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } } },
     { name: 'visual', testDir: 'tests/visual', snapshotPathTemplate: '{testDir}/__screenshots__/{arg}{ext}', use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } } },
+    { name: 'site', testDir: 'tests/site', use: { ...devices['Desktop Chrome'] } },
     { name: 'fake', testDir: 'tests/fake', use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } } },
   ],
 })

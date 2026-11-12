@@ -4,137 +4,535 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Dalan: your servers, one keystroke away</title>
-<meta name="description" content="Dalan is our team's SSH client: hosts, keys, tunnels and files in one calm desktop app, encrypted on your own computer.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f1115'/%3E%3Cpath d='M8 27V15c0-5 4-9 8-11 4 2 8 6 8 11v12' fill='none' stroke='%233cc8c0' stroke-width='2.5'/%3E%3Crect x='14' y='18' width='4' height='7' fill='%2366d6cf'/%3E%3C/svg%3E">
-<style>/*! tailwindcss v4.3.4 | MIT License | https://tailwindcss.com */
-@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:block))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-space-y-reverse:0;--tw-divide-y-reverse:0;--tw-border-style:solid;--tw-leading:initial;--tw-font-weight:initial;--tw-tracking:initial;--tw-shadow:0 0 #0000;--tw-shadow-color:initial;--tw-shadow-alpha:100%;--tw-inset-shadow:0 0 #0000;--tw-inset-shadow-color:initial;--tw-inset-shadow-alpha:100%;--tw-ring-color:initial;--tw-ring-shadow:0 0 #0000;--tw-inset-ring-color:initial;--tw-inset-ring-shadow:0 0 #0000;--tw-ring-inset:initial;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-offset-shadow:0 0 #0000}}}@layer theme{:root,:host{--spacing:.25rem;--font-weight-medium:500;--font-weight-semibold:600;--font-weight-bold:700;--tracking-tight:-.025em;--default-transition-duration:.15s;--default-transition-timing-function:cubic-bezier(.4, 0, .2, 1);--default-font-family:var(--font-ui);--default-mono-font-family:var(--font-code)}}@layer base{*,:after,:before,::backdrop{box-sizing:border-box;border:0 solid;margin:0;padding:0}::file-selector-button{box-sizing:border-box;border:0 solid;margin:0;padding:0}html,:host{-webkit-text-size-adjust:100%;tab-size:4;line-height:1.5;font-family:var(--default-font-family,-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji");font-feature-settings:var(--default-font-feature-settings,normal);font-variation-settings:var(--default-font-variation-settings,normal);-webkit-tap-highlight-color:transparent}hr{height:0;color:inherit;border-top-width:1px}abbr:where([title]){-webkit-text-decoration:underline dotted;text-decoration:underline dotted}h1,h2,h3,h4,h5,h6{font-size:inherit;font-weight:inherit}a{color:inherit;-webkit-text-decoration:inherit;-webkit-text-decoration:inherit;-webkit-text-decoration:inherit;text-decoration:inherit}b,strong{font-weight:bolder}code,kbd,samp,pre{font-family:var(--default-mono-font-family,ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);font-feature-settings:var(--default-mono-font-feature-settings,normal);font-variation-settings:var(--default-mono-font-variation-settings,normal);font-size:1em}small{font-size:80%}sub,sup{vertical-align:baseline;font-size:75%;line-height:0;position:relative}sub{bottom:-.25em}sup{top:-.5em}table{text-indent:0;border-color:inherit;border-collapse:collapse}:-moz-focusring:where(:not(iframe)){outline:auto}progress{vertical-align:baseline}summary{display:list-item}ol,ul,menu{list-style:none}img,svg,video,canvas,audio,iframe,embed,object{vertical-align:middle;display:block}img,video{max-width:100%;height:auto}button,input,select,optgroup,textarea{font:inherit;font-feature-settings:inherit;font-variation-settings:inherit;letter-spacing:inherit;color:inherit;opacity:1;background-color:#0000;border-radius:0}::file-selector-button{font:inherit;font-feature-settings:inherit;font-variation-settings:inherit;letter-spacing:inherit;color:inherit;opacity:1;background-color:#0000;border-radius:0}:where(select:is([multiple],[size])) optgroup{font-weight:bolder}:where(select:is([multiple],[size])) optgroup option{padding-inline-start:20px}::file-selector-button{margin-inline-end:4px}::placeholder{opacity:1}@supports (not ((-webkit-appearance:-apple-pay-button))) or (contain-intrinsic-size:1px){::placeholder{color:currentColor}@supports (color:color-mix(in lab, red, red)){::placeholder{color:color-mix(in oklab, currentcolor 50%, transparent)}}}textarea{resize:vertical}::-webkit-search-decoration{-webkit-appearance:none}::-webkit-date-and-time-value{min-height:1lh;text-align:inherit}::-webkit-datetime-edit{display:inline-flex}::-webkit-datetime-edit-fields-wrapper{padding:0}::-webkit-datetime-edit{padding-block:0}::-webkit-datetime-edit-year-field{padding-block:0}::-webkit-datetime-edit-month-field{padding-block:0}::-webkit-datetime-edit-day-field{padding-block:0}::-webkit-datetime-edit-hour-field{padding-block:0}::-webkit-datetime-edit-minute-field{padding-block:0}::-webkit-datetime-edit-second-field{padding-block:0}::-webkit-datetime-edit-millisecond-field{padding-block:0}::-webkit-datetime-edit-meridiem-field{padding-block:0}::-webkit-calendar-picker-indicator{line-height:1}:-moz-ui-invalid{box-shadow:none}button,input:where([type=button],[type=reset],[type=submit]){appearance:button}::file-selector-button{appearance:button}::-webkit-inner-spin-button{height:auto}::-webkit-outer-spin-button{height:auto}[hidden]:where(:not([hidden=until-found])){display:none!important}html,body{background:var(--bg);color:var(--text);font-family:var(--font-ui);-webkit-font-smoothing:antialiased;font-size:13px;line-height:20px}*{border-color:var(--border)}:focus-visible{outline:2px solid var(--accent);outline-offset:2px}::selection{background:var(--accent)}@supports (color:color-mix(in lab, red, red)){::selection{background:color-mix(in srgb, var(--accent) 35%, transparent)}}@media (prefers-reduced-motion:reduce){*,:before,:after{transition-duration:1ms!important;animation-duration:1ms!important}}}@layer components;@layer utilities{.absolute{position:absolute}.relative{position:relative}.top-3{top:calc(var(--spacing) * 3)}.right-3{right:calc(var(--spacing) * 3)}.col-span-2{grid-column:span 2/span 2}.mx-auto{margin-inline:auto}.mt-1{margin-top:var(--spacing)}.mt-2{margin-top:calc(var(--spacing) * 2)}.mt-3{margin-top:calc(var(--spacing) * 3)}.mt-4{margin-top:calc(var(--spacing) * 4)}.mt-6{margin-top:calc(var(--spacing) * 6)}.mt-8{margin-top:calc(var(--spacing) * 8)}.mt-12{margin-top:calc(var(--spacing) * 12)}.mr-auto{margin-right:auto}.ml-auto{margin-left:auto}.block{display:block}.flex{display:flex}.grid{display:grid}.inline-flex{display:inline-flex}.aspect-\[16\/10\]{aspect-ratio:16/10}.size-2{width:calc(var(--spacing) * 2);height:calc(var(--spacing) * 2)}.size-7{width:calc(var(--spacing) * 7);height:calc(var(--spacing) * 7)}.size-8{width:calc(var(--spacing) * 8);height:calc(var(--spacing) * 8)}.h-5{height:calc(var(--spacing) * 5)}.h-7{height:calc(var(--spacing) * 7)}.h-8{height:calc(var(--spacing) * 8)}.h-10{height:calc(var(--spacing) * 10)}.h-12{height:calc(var(--spacing) * 12)}.h-16{height:calc(var(--spacing) * 16)}.w-40{width:calc(var(--spacing) * 40)}.w-\[150px\]{width:150px}.w-\[300px\]{width:300px}.max-w-\[560px\]{max-width:560px}.max-w-\[760px\]{max-width:760px}.max-w-\[920px\]{max-width:920px}.max-w-\[1080px\]{max-width:1080px}.min-w-0{min-width:0}.flex-1{flex:1}.cursor-pointer{cursor:pointer}.list-disc{list-style-type:disc}.grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.flex-col{flex-direction:column}.flex-wrap{flex-wrap:wrap}.place-items-center{place-items:center}.items-center{align-items:center}.items-end{align-items:flex-end}.justify-between{justify-content:space-between}.justify-end{justify-content:flex-end}.gap-1{gap:var(--spacing)}.gap-2{gap:calc(var(--spacing) * 2)}.gap-3{gap:calc(var(--spacing) * 3)}.gap-4{gap:calc(var(--spacing) * 4)}.gap-5{gap:calc(var(--spacing) * 5)}.gap-8{gap:calc(var(--spacing) * 8)}:where(.space-y-0\.5>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing) * .5) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing) * .5) * calc(1 - var(--tw-space-y-reverse)))}:where(.space-y-1>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(var(--spacing) * var(--tw-space-y-reverse));margin-block-end:calc(var(--spacing) * calc(1 - var(--tw-space-y-reverse)))}:where(.space-y-4>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing) * 4) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing) * 4) * calc(1 - var(--tw-space-y-reverse)))}.gap-x-6{column-gap:calc(var(--spacing) * 6)}.gap-x-8{column-gap:calc(var(--spacing) * 8)}.gap-y-2{row-gap:calc(var(--spacing) * 2)}:where(.divide-y>:not(:last-child)){--tw-divide-y-reverse:0;border-bottom-style:var(--tw-border-style);border-top-style:var(--tw-border-style);border-top-width:calc(1px * var(--tw-divide-y-reverse));border-bottom-width:calc(1px * calc(1 - var(--tw-divide-y-reverse)))}:where(.divide-border>:not(:last-child)){border-color:var(--border)}.overflow-hidden{overflow:hidden}.rounded-full{border-radius:2147483647px}.rounded-lg{border-radius:10px}.rounded-md{border-radius:6px}.rounded-pill{border-radius:999px}.rounded-sm{border-radius:4px}.rounded-xl{border-radius:14px}.rounded-t-md{border-top-left-radius:6px;border-top-right-radius:6px}.rounded-l-md{border-top-left-radius:6px;border-bottom-left-radius:6px}.rounded-r-md{border-top-right-radius:6px;border-bottom-right-radius:6px}.border{border-style:var(--tw-border-style);border-width:1px}.border-y{border-block-style:var(--tw-border-style);border-block-width:1px}.border-t{border-top-style:var(--tw-border-style);border-top-width:1px}.border-r{border-right-style:var(--tw-border-style);border-right-width:1px}.border-b{border-bottom-style:var(--tw-border-style);border-bottom-width:1px}.border-l{border-left-style:var(--tw-border-style);border-left-width:1px}.border-l-2{border-left-style:var(--tw-border-style);border-left-width:2px}.border-accent{border-color:var(--accent)}.border-bg\/30{border-color:var(--bg)}@supports (color:color-mix(in lab, red, red)){.border-bg\/30{border-color:color-mix(in oklab, var(--bg) 30%, transparent)}}.border-border{border-color:var(--border)}.border-border-input{border-color:var(--border-input)}.border-danger{border-color:var(--danger)}.bg-\[\#808080\]{background-color:gray}.bg-accent{background-color:var(--accent)}.bg-bg{background-color:var(--bg)}.bg-chrome{background-color:var(--chrome)}.bg-danger{background-color:var(--danger)}.bg-danger-solid{background-color:var(--danger-solid)}.bg-success{background-color:var(--success)}.bg-surface{background-color:var(--surface)}.bg-surface-hover{background-color:var(--surface-hover)}.bg-surface-raised{background-color:var(--surface-raised)}.bg-terminal-bg{background-color:var(--terminal-bg)}.bg-terminal-cursor{background-color:var(--terminal-cursor)}.bg-warning{background-color:var(--warning)}.fill-surface{fill:var(--surface)}.p-2{padding:calc(var(--spacing) * 2)}.p-3{padding:calc(var(--spacing) * 3)}.p-4{padding:calc(var(--spacing) * 4)}.p-5{padding:calc(var(--spacing) * 5)}.px-1\.5{padding-inline:calc(var(--spacing) * 1.5)}.px-2{padding-inline:calc(var(--spacing) * 2)}.px-3{padding-inline:calc(var(--spacing) * 3)}.px-4{padding-inline:calc(var(--spacing) * 4)}.px-6{padding-inline:calc(var(--spacing) * 6)}.py-0\.5{padding-block:calc(var(--spacing) * .5)}.py-4{padding-block:calc(var(--spacing) * 4)}.py-8{padding-block:calc(var(--spacing) * 8)}.py-16{padding-block:calc(var(--spacing) * 16)}.pt-16{padding-top:calc(var(--spacing) * 16)}.pr-2{padding-right:calc(var(--spacing) * 2)}.pb-12{padding-bottom:calc(var(--spacing) * 12)}.pb-16{padding-bottom:calc(var(--spacing) * 16)}.pb-20{padding-bottom:calc(var(--spacing) * 20)}.pl-3{padding-left:calc(var(--spacing) * 3)}.pl-5{padding-left:calc(var(--spacing) * 5)}.text-center{text-align:center}.font-mono{font-family:var(--font-code)}.font-sans{font-family:var(--font-ui)}.text-2xl{font-size:24px;line-height:var(--tw-leading,32px);font-weight:var(--tw-font-weight,700)}.text-2xs{font-size:11px;line-height:var(--tw-leading,14px);font-weight:var(--tw-font-weight,500)}.text-base{font-size:14px;line-height:var(--tw-leading,20px);font-weight:var(--tw-font-weight,500)}.text-lg{font-size:16px;line-height:var(--tw-leading,24px);font-weight:var(--tw-font-weight,600)}.text-sm{font-size:13px;line-height:var(--tw-leading,20px);font-weight:var(--tw-font-weight,400)}.text-xl{font-size:20px;line-height:var(--tw-leading,28px);font-weight:var(--tw-font-weight,600)}.text-xs{font-size:12px;line-height:var(--tw-leading,16px);font-weight:var(--tw-font-weight,400)}.text-\[13px\]{font-size:13px}.text-\[15px\]{font-size:15px}.text-\[17px\]{font-size:17px}.text-\[40px\]{font-size:40px}.leading-6{--tw-leading:calc(var(--spacing) * 6);line-height:calc(var(--spacing) * 6)}.leading-7{--tw-leading:calc(var(--spacing) * 7);line-height:calc(var(--spacing) * 7)}.leading-\[1\.25\]{--tw-leading:1.25;line-height:1.25}.leading-\[48px\]{--tw-leading:48px;line-height:48px}.font-bold{--tw-font-weight:var(--font-weight-bold);font-weight:var(--font-weight-bold)}.font-medium{--tw-font-weight:var(--font-weight-medium);font-weight:var(--font-weight-medium)}.font-semibold{--tw-font-weight:var(--font-weight-semibold);font-weight:var(--font-weight-semibold)}.tracking-tight{--tw-tracking:var(--tracking-tight);letter-spacing:var(--tracking-tight)}.text-accent{color:var(--accent)}.text-ansi-blue{color:var(--ansi-blue)}.text-ansi-bright-black{color:var(--ansi-bright-black)}.text-ansi-cyan{color:var(--ansi-cyan)}.text-ansi-green{color:var(--ansi-green)}.text-ansi-magenta{color:var(--ansi-magenta)}.text-ansi-red{color:var(--ansi-red)}.text-ansi-yellow{color:var(--ansi-yellow)}.text-danger{color:var(--danger)}.text-muted{color:var(--text-muted)}.text-on-accent{color:var(--on-accent)}.text-on-danger{color:var(--on-danger)}.text-terminal-fg{color:var(--terminal-fg)}.text-text{color:var(--text)}.italic{font-style:italic}.not-italic{font-style:normal}.underline{text-decoration-line:underline}.antialiased{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}.opacity-50{opacity:.5}.shadow-pop{--tw-shadow:var(--elev-pop);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-2{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-accent,.ring-accent\/35{--tw-ring-color:var(--accent)}@supports (color:color-mix(in lab, red, red)){.ring-accent\/35{--tw-ring-color:color-mix(in oklab, var(--accent) 35%, transparent)}}.transition-colors{transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function));transition-duration:var(--tw-duration,var(--default-transition-duration))}@media (hover:hover){.hover\:border-accent:hover{border-color:var(--accent)}.hover\:bg-accent-hover:hover{background-color:var(--accent-hover)}.hover\:bg-surface-hover:hover{background-color:var(--surface-hover)}.hover\:text-text:hover{color:var(--text)}}@media (min-width:40rem){.sm\:grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.sm\:px-6{padding-inline:calc(var(--spacing) * 6)}.sm\:text-\[52px\]{font-size:52px}.sm\:leading-\[60px\]{--tw-leading:60px;line-height:60px}}@media (min-width:48rem){.md\:grid-cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}.md\:grid-cols-\[1fr_2fr\]{grid-template-columns:1fr 2fr}}}:root{--font-ui:Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;--font-code:"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;--radius:6px;--motion-fast:.1s;--motion-base:.16s;--motion-slow:.24s;--motion-ease:cubic-bezier(.2,.8,.2,1);--layout-tabbar-height:40px;--layout-tabbar-inset-mac:78px;--layout-tab-min:120px;--layout-tab-max:220px;--layout-vault-nav:220px;--layout-vault-nav-collapsed:56px;--layout-vault-nav-collapse-below:1100px;--layout-toolbar-height:48px;--layout-sheet-width:440px;--layout-side-panel-width:320px;--layout-palette-width:640px;--layout-palette-max-height:420px;--layout-host-card-min:240px;--layout-row-height:44px;--layout-row-height-compact:28px;--layout-pane-header:28px;--layout-content-padding:24px;--z-base:0;--z-sticky:10;--z-dropdown:40;--z-sheet:50;--z-dialog:60;--z-palette:70;--z-toast:80;--z-tooltip:90;color-scheme:light;--bg:#fff;--surface:#f5f6f8;--surface-raised:#fff;--surface-hover:#eceef2;--chrome:#eceff3;--border:#dfe3e8;--border-input:#868f9c;--text:#161a20;--text-muted:#5a6370;--accent:#0b7a76;--accent-hover:#086561;--on-accent:#fff;--danger:#c42b2b;--danger-solid:#c42b2b;--on-danger:#fff;--success:#3a7a1c;--warning:#8a5a00;--on-warning:#fff;--terminal-bg:#fbfbfc;--terminal-fg:#1f2329;--terminal-cursor:#0b7a76;--ansi-black:#1f2329;--ansi-red:#c4313b;--ansi-green:#2b7a30;--ansi-yellow:#865c00;--ansi-blue:#1f5fd1;--ansi-magenta:#8e3fb5;--ansi-cyan:#0e7680;--ansi-white:#5e6672;--ansi-bright-black:#6b7380;--ansi-bright-red:#a3242d;--ansi-bright-green:#1f6224;--ansi-bright-yellow:#6e4b00;--ansi-bright-blue:#1847a8;--ansi-bright-magenta:#73308f;--ansi-bright-cyan:#0a5f66;--ansi-bright-white:#2d333b;--elev-card:0 1px 2px #1018280f;--elev-pop:0 8px 24px #10182824, 0 0 0 1px #1018280d;--elev-drag:0 12px 32px #10182833;--sc-background:var(--bg);--sc-foreground:var(--text);--sc-card:var(--surface);--sc-card-foreground:var(--text);--sc-popover:var(--surface-raised);--sc-popover-foreground:var(--text);--sc-primary:var(--accent);--sc-primary-foreground:var(--on-accent);--sc-secondary:var(--surface-hover);--sc-secondary-foreground:var(--text);--sc-muted:var(--surface);--sc-muted-foreground:var(--text-muted);--sc-accent:var(--surface-hover);--sc-accent-foreground:var(--text);--sc-destructive:var(--danger-solid);--sc-destructive-foreground:var(--on-danger);--sc-input:var(--border-input);--sc-ring:var(--accent);--sc-sidebar:var(--surface);--sc-sidebar-foreground:var(--text);--sc-sidebar-primary:var(--accent);--sc-sidebar-primary-foreground:var(--on-accent);--sc-sidebar-accent:var(--surface-hover);--sc-sidebar-accent-foreground:var(--text);--sc-sidebar-border:var(--border);--sc-sidebar-ring:var(--accent);--sc-border:var(--border)}.dark{color-scheme:dark;--bg:#0f1115;--surface:#161a20;--surface-raised:#1c2128;--surface-hover:#242a33;--chrome:#0b0d10;--border:#2a313b;--border-input:#5f6979;--text:#e6e9ef;--text-muted:#9aa3b1;--accent:#3cc8c0;--accent-hover:#66d6cf;--on-accent:#04201e;--danger:#f07178;--danger-solid:#e5484d;--on-danger:#16080a;--success:#86d05c;--warning:#e8b85a;--on-warning:#1a1305;--terminal-bg:#0d0f13;--terminal-fg:#d7dbe2;--terminal-cursor:#3cc8c0;--ansi-black:#262b33;--ansi-red:#ef6b73;--ansi-green:#8fd17f;--ansi-yellow:#e8c46a;--ansi-blue:#6aa7ff;--ansi-magenta:#c99bf0;--ansi-cyan:#5fd0d8;--ansi-white:#c9ced8;--ansi-bright-black:#7a8494;--ansi-bright-red:#ff8a90;--ansi-bright-green:#a9e29a;--ansi-bright-yellow:#f3d58a;--ansi-bright-blue:#8dbcff;--ansi-bright-magenta:#dab6f6;--ansi-bright-cyan:#86e0e6;--ansi-bright-white:#f2f4f8;--elev-card:none;--elev-pop:0 8px 24px #00000073, 0 0 0 1px #ffffff0a;--elev-drag:0 12px 32px #0000008c;--sc-background:var(--bg);--sc-foreground:var(--text);--sc-card:var(--surface);--sc-card-foreground:var(--text);--sc-popover:var(--surface-raised);--sc-popover-foreground:var(--text);--sc-primary:var(--accent);--sc-primary-foreground:var(--on-accent);--sc-secondary:var(--surface-hover);--sc-secondary-foreground:var(--text);--sc-muted:var(--surface);--sc-muted-foreground:var(--text-muted);--sc-accent:var(--surface-hover);--sc-accent-foreground:var(--text);--sc-destructive:var(--danger-solid);--sc-destructive-foreground:var(--on-danger);--sc-input:var(--border-input);--sc-ring:var(--accent);--sc-sidebar:var(--surface);--sc-sidebar-foreground:var(--text);--sc-sidebar-primary:var(--accent);--sc-sidebar-primary-foreground:var(--on-accent);--sc-sidebar-accent:var(--surface-hover);--sc-sidebar-accent-foreground:var(--text);--sc-sidebar-border:var(--border);--sc-sidebar-ring:var(--accent);--sc-border:var(--border)}@property --tw-space-y-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-divide-y-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-border-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-leading{syntax:"*";inherits:false}@property --tw-font-weight{syntax:"*";inherits:false}@property --tw-tracking{syntax:"*";inherits:false}@property --tw-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-shadow-color{syntax:"*";inherits:false}@property --tw-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-inset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-shadow-color{syntax:"*";inherits:false}@property --tw-inset-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-ring-color{syntax:"*";inherits:false}@property --tw-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-ring-color{syntax:"*";inherits:false}@property --tw-inset-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-ring-inset{syntax:"*";inherits:false}@property --tw-ring-offset-width{syntax:"<length>";inherits:false;initial-value:0}@property --tw-ring-offset-color{syntax:"*";inherits:false;initial-value:#fff}@property --tw-ring-offset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}</style>
+<meta name="description" content="Dalan keeps hosts, keys, tunnels and files in one calm desktop app. Encrypted on your computer. No account, no cloud. For macOS, Windows and Linux.">
+<meta name="color-scheme" content="dark">
+<link rel="preload" href="fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+  /* The colours, fonts and sizes of this page are the app's tokens (replica/design/tokens.json), dark theme.
+     `pnpm site:shots` rewrites the block below from replica/design/tokens.css; do not edit it by hand.
+     Layout and copy follow replica/launch/landing-v2.md. */
+  /* tokens:start (generated by scripts/site-shots.mjs) */
+  :root {
+    --font-ui: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --font-code: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --radius: 6px; /* shadcn-vue base radius */
+    --motion-fast: 100ms;
+    --motion-base: 160ms;
+    --motion-slow: 240ms;
+    --motion-ease: cubic-bezier(.2,.8,.2,1);
+    --layout-tabbar-height: 40px;
+    --layout-tabbar-inset-mac: 78px;
+    --layout-tab-min: 120px;
+    --layout-tab-max: 220px;
+    --layout-vault-nav: 220px;
+    --layout-vault-nav-collapsed: 56px;
+    --layout-vault-nav-collapse-below: 1100px;
+    --layout-toolbar-height: 48px;
+    --layout-sheet-width: 440px;
+    --layout-side-panel-width: 320px;
+    --layout-palette-width: 640px;
+    --layout-palette-max-height: 420px;
+    --layout-host-card-min: 240px;
+    --layout-row-height: 44px;
+    --layout-row-height-compact: 28px;
+    --layout-pane-header: 28px;
+    --layout-content-padding: 24px;
+    --z-base: 0;
+    --z-sticky: 10;
+    --z-dropdown: 40;
+    --z-sheet: 50;
+    --z-dialog: 60;
+    --z-palette: 70;
+    --z-toast: 80;
+    --z-tooltip: 90;
+    --bg: #0f1115;
+    --surface: #161a20;
+    --surface-raised: #1c2128;
+    --surface-hover: #242a33;
+    --scrim: #000000cc;
+    --chrome: #0b0d10;
+    --border: #2a313b;
+    --border-input: #5f6979;
+    --text: #e6e9ef;
+    --text-muted: #9aa3b1;
+    --accent: #3cc8c0;
+    --accent-hover: #66d6cf;
+    --on-accent: #04201e;
+    --danger: #f07178;
+    --danger-solid: #e5484d;
+    --on-danger: #16080a;
+    --success: #86d05c;
+    --warning: #e8b85a;
+    --on-warning: #1a1305;
+    --elev-card: none;
+    --elev-pop: 0 8px 24px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.04);
+    --elev-drag: 0 12px 32px rgba(0,0,0,.55);
+  }
+  /* tokens:end */
+
+  @font-face { font-family: Inter; src: url(fonts/inter-latin-wght-normal.woff2) format('woff2'); font-weight: 100 900; font-display: swap; }
+  @font-face { font-family: 'JetBrains Mono'; src: url(fonts/jetbrains-mono-latin-wght-normal.woff2) format('woff2'); font-weight: 100 800; font-display: swap; }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html { color-scheme: dark; scroll-behavior: smooth; scroll-padding-top: 80px; }
+  body { margin: 0; background: var(--chrome); color: var(--text); font: 400 16px/26px var(--font-ui); -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+  h1, h2, h3, p, ul { margin: 0; }
+  ul { padding: 0; list-style: none; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { color: var(--accent-hover); }
+  p a { text-decoration: underline; text-underline-offset: 3px; } /* a link inside a sentence is told apart by more than colour */
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+  [hidden] { display: none !important; }
+  img { display: block; max-width: 100%; height: auto; }
+  svg { flex: none; }
+  .mono { font-family: var(--font-code); }
+  .skip { position: absolute; left: 12px; top: -60px; z-index: 30; background: var(--accent); color: var(--on-accent); padding: 10px 16px; border-radius: 8px; font-weight: 600; }
+  .skip:focus { top: 12px; color: var(--on-accent); }
+
+  /* ---- buttons, chips, cards */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; padding: 0 20px; border-radius: 8px; border: 1px solid transparent; font: 600 15px/1 var(--font-ui); white-space: nowrap; transition: background var(--motion-base), border-color var(--motion-base); }
+  .btn svg { width: 18px; height: 18px; }
+  .btn-p { background: var(--accent); color: var(--on-accent); }
+  .btn-p:hover { background: var(--accent-hover); color: var(--on-accent); }
+  .btn-s { border-color: var(--border); color: var(--text); }
+  .btn-s:hover { border-color: var(--border-input); color: var(--text); }
+  .chip { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: 500 13px var(--font-ui); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+  .eyebrow { font: 500 13px var(--font-code); color: var(--accent); }
+  .shot { border-radius: 10px; border: 1px solid var(--border); box-shadow: var(--elev-drag); background: var(--surface); width: 100%; }
+  .muted { color: var(--text-muted); }
+  .wrap { max-width: 1200px; margin: 0 auto; }
+  h2 { font-size: 40px; line-height: 48px; font-weight: 700; letter-spacing: -.6px; }
+  .lead { color: var(--text-muted); font-size: 17px; line-height: 28px; }
+
+  /* ---- nav */
+  .nav { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--chrome) 82%, transparent); backdrop-filter: blur(12px); border-bottom: 1px solid var(--surface); }
+  .nav .wrap { height: 64px; padding: 0 24px; display: flex; align-items: center; gap: 28px; }
+  .brand { display: flex; align-items: center; gap: 10px; color: var(--text); font-size: 17px; font-weight: 650; }
+  .brand:hover { color: var(--text); }
+  .brand svg { width: 28px; height: 28px; }
+  .links { display: flex; gap: 24px; font-size: 14px; }
+  .links a { color: var(--text-muted); }
+  .links a:hover { color: var(--text); }
+  .pill { margin-left: auto; font: 500 12px var(--font-code); color: var(--text-muted); border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; }
+  .nav .btn { height: 36px; padding: 0 14px; font-size: 14px; }
+  .menu { display: none; position: relative; }
+  .menu summary { width: 40px; height: 40px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; list-style: none; }
+  .menu summary::-webkit-details-marker { display: none; }
+  .menu summary svg { width: 18px; height: 18px; }
+  .menu nav { position: absolute; right: 0; top: 48px; min-width: 180px; display: flex; flex-direction: column; background: var(--surface-raised); border: 1px solid var(--border); border-radius: 10px; padding: 6px; box-shadow: var(--elev-pop); }
+  .menu nav a { padding: 10px 12px; border-radius: 6px; color: var(--text); font-size: 15px; }
+  .menu nav a:hover { background: var(--surface-hover); color: var(--text); }
+
+  /* ---- hero */
+  .hero { position: relative; padding: 96px 24px 0; text-align: center; overflow-x: clip; }
+  .glow { position: absolute; left: 50%; transform: translateX(-50%); pointer-events: none; background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 18%, transparent), transparent); }
+  .hero .glow { top: 260px; width: 1200px; height: 700px; }
+  .hero-text { position: relative; max-width: 880px; margin: 0 auto; display: flex; flex-direction: column; align-items: center; gap: 22px; }
+  .hero .chip { height: 30px; font-size: 12px; }
+  h1 { font-size: 68px; line-height: 74px; font-weight: 700; letter-spacing: -1.5px; }
+  h1 em { font-style: normal; color: var(--accent); }
+  .hero .sub { max-width: 640px; font-size: 19px; line-height: 30px; color: var(--text-muted); }
+  .actions { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-top: 6px; }
+  .note { font-size: 13px; line-height: 20px; color: var(--text-muted); }
+  .stage { position: relative; max-width: 1120px; margin: 64px auto 0; }
+  .stage .over { position: absolute; width: 46%; right: -48px; bottom: -56px; border-color: var(--border-input); }
+  .keycap { position: absolute; left: -36px; bottom: 64px; background: var(--surface-raised); border: 1px solid var(--border-input); border-radius: 12px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; box-shadow: var(--elev-pop); font-size: 14px; }
+  .kbd { font: 500 13px var(--font-code); padding: 3px 8px; border-radius: 6px; background: var(--surface-hover); border: 1px solid var(--border); border-bottom-width: 2px; }
+
+  /* ---- chips, features */
+  .inside { padding: 130px 24px 0; text-align: center; }
+  .inside p { font-size: 13px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 18px; }
+  .inside .row { max-width: 1100px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+  .features { padding: 120px 24px 0; }
+  .features .wrap { display: flex; flex-direction: column; gap: 120px; }
+  .feature { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 64px; align-items: center; }
+  .feature.flip { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
+  .copy { display: flex; flex-direction: column; gap: 18px; }
+  .copy .small { color: var(--text); font-size: 15px; }
+  .copy code { font-family: var(--font-code); color: var(--text); }
+  .ticks { display: flex; flex-direction: column; gap: 10px; color: var(--text); font-size: 15px; }
+  .ticks li { display: flex; gap: 10px; }
+  .ticks li::before { content: '—'; color: var(--accent); }
+  .pair { position: relative; }
+  .pair .over { position: absolute; width: 52%; right: -40px; bottom: -48px; border-color: var(--border-input); }
+
+  /* ---- security */
+  .security { padding: 140px 24px 0; }
+  .band { position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: 20px; background: linear-gradient(180deg, var(--surface), var(--bg)); padding: 64px; }
+  .band .arch { position: absolute; right: -60px; top: -40px; width: 420px; height: 420px; opacity: .06; color: var(--accent); }
+  .band .grid { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 56px; align-items: center; }
+  .band .left { display: flex; flex-direction: column; gap: 26px; }
+  .band .head { display: flex; flex-direction: column; gap: 14px; }
+  .points { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 26px 28px; }
+  .point { display: flex; flex-direction: column; gap: 6px; }
+  .point svg { width: 22px; height: 22px; color: var(--accent); fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+  .point b { font-weight: 600; }
+  .point span { color: var(--text-muted); font-size: 15px; line-height: 23px; }
+
+  /* ---- more */
+  .more { padding: 140px 24px 0; }
+  .more .wrap { display: flex; flex-direction: column; gap: 36px; }
+  .more h2 { font-size: 32px; line-height: 40px; letter-spacing: -.4px; max-width: 640px; }
+  .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; }
+  .tile:hover { border-color: var(--border-input); }
+  .crop { height: 200px; overflow: hidden; border-bottom: 1px solid var(--border); background: var(--bg); }
+  .crop img { width: 100%; height: 100%; object-fit: cover; }
+  .tile .body { padding: 20px 22px 24px; display: flex; flex-direction: column; gap: 6px; }
+  .tile h3 { font-size: 17px; font-weight: 600; }
+  .tile p { color: var(--text-muted); font-size: 15px; line-height: 23px; }
+
+  /* ---- download */
+  .download { padding: 150px 24px 0; }
+  .download .wrap { display: flex; flex-direction: column; gap: 36px; }
+  .download .head { display: flex; flex-direction: column; gap: 10px; text-align: center; align-items: center; }
+  .download h2 { font-size: 44px; line-height: 52px; }
+  .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+  .dl { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 28px; display: flex; flex-direction: column; gap: 14px; }
+  .dl.is-you { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 20px 60px color-mix(in srgb, var(--accent) 10%, transparent); }
+  .dl > svg { width: 30px; height: 30px; color: var(--text); fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+  .dl h3 { font-size: 22px; font-weight: 600; }
+  .dl .btn { margin-top: 8px; }
+  .three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+  .three .btn { padding: 0 8px; font-size: 14px; }
+  .center { text-align: center; }
+
+  /* ---- help */
+  .help { padding: 150px 24px 0; }
+  .help .wrap { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 64px; }
+  .help .left { display: flex; flex-direction: column; gap: 14px; }
+  .faq { border-top: 1px solid var(--border); }
+  details.q { border-bottom: 1px solid var(--border); padding: 18px 0; }
+  details.q summary { cursor: pointer; list-style: none; font: 600 16px/24px var(--font-ui); display: flex; justify-content: space-between; gap: 16px; }
+  details.q summary::-webkit-details-marker { display: none; }
+  details.q summary::after { content: '+'; color: var(--accent); font-weight: 400; font-size: 22px; line-height: 24px; }
+  details.q[open] summary::after { content: '–'; }
+  details.q p { margin-top: 10px; color: var(--text-muted); }
+
+  /* ---- closing, footer */
+  .closing { position: relative; padding: 160px 24px 120px; text-align: center; overflow-x: clip; }
+  .closing .glow { top: 40px; width: 900px; height: 420px; }
+  .closing .in { position: relative; display: flex; flex-direction: column; align-items: center; gap: 22px; }
+  .closing svg { width: 64px; height: 64px; }
+  .closing h2 { font-size: 48px; line-height: 56px; letter-spacing: -.8px; }
+  footer { border-top: 1px solid var(--surface); }
+  footer .wrap { padding: 28px 24px; display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: center; font-size: 13px; color: var(--text-muted); }
+  footer .who { display: flex; align-items: center; gap: 8px; color: var(--text); }
+  footer .who svg { width: 18px; height: 18px; }
+  footer a { color: var(--text-muted); }
+  footer a:hover { color: var(--text); }
+  footer .credit { margin-left: auto; }
+
+  /* ---- smaller screens */
+  @media (max-width: 1000px) {
+    .links, .hide-sm { display: none; }
+    .menu { display: block; }
+    .nav .wrap { gap: 14px; }
+    .feature, .feature.flip, .band .grid, .help .wrap { grid-template-columns: minmax(0, 1fr); }
+    .feature { gap: 32px; }
+    .feature.flip .pair { order: 2; }
+    .tiles, .cards { grid-template-columns: minmax(0, 1fr); }
+    .band { padding: 40px 28px; }
+    h1 { font-size: 52px; line-height: 58px; }
+    .help .wrap { gap: 32px; }
+  }
+  @media (max-width: 640px) {
+    body { line-height: 25px; }
+    .nav .wrap { height: 56px; padding: 0 16px; }
+    .nav .pill { display: none; }
+    .nav .btn { margin-left: auto; }
+    .hero { padding: 48px 16px 0; }
+    .hero .glow { top: 300px; width: 600px; height: 500px; }
+    .hero-text { gap: 18px; }
+    h1 { font-size: 40px; line-height: 44px; letter-spacing: -1px; }
+    .hero .sub { font-size: 17px; line-height: 27px; }
+    .actions { width: 100%; flex-direction: column; margin-top: 4px; }
+    .actions .btn { width: 100%; height: 48px; }
+    .stage { margin-top: 40px; }
+    .inside { padding: 48px 16px 0; }
+    .inside p { font-size: 11px; letter-spacing: 1.4px; margin-bottom: 12px; }
+    .chip { height: 30px; padding: 0 12px; font-size: 12px; }
+    .inside .row { gap: 8px; }
+    .features { padding: 72px 16px 0; }
+    .features .wrap { gap: 72px; }
+    .copy { gap: 14px; }
+    h2, .more h2 { font-size: 28px; line-height: 34px; letter-spacing: -.4px; }
+    .lead { font-size: 16px; line-height: 25px; }
+    .security, .more { padding: 72px 16px 0; }
+    .band { padding: 28px 20px; border-radius: 16px; }
+    .band .grid { gap: 20px; }
+    .points { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+    .band .left { gap: 20px; }
+    .tiles { gap: 16px; }
+    .crop { height: 150px; }
+    .tile .body { padding: 16px 18px 20px; }
+    .tile p { font-size: 15px; }
+    .download { padding: 80px 16px 0; }
+    .download h2 { font-size: 32px; line-height: 38px; }
+    .dl { padding: 20px; gap: 10px; }
+    .dl h3 { font-size: 18px; }
+    .help { padding: 80px 16px 0; }
+    .closing { padding: 96px 16px 72px; }
+    .closing svg { width: 52px; height: 52px; }
+    .closing h2 { font-size: 30px; line-height: 36px; letter-spacing: -.4px; }
+    .closing .btn { width: 100%; }
+    footer .wrap { padding: 24px 16px; flex-direction: column; align-items: flex-start; gap: 10px; }
+    footer .credit { margin-left: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { transition: none !important; animation: none !important; }
+  }
+</style>
 </head>
-<body class="bg-bg text-text antialiased">
-<header class="max-w-[1080px] mx-auto px-4 sm:px-6 h-16 flex items-center gap-3">
-  <svg aria-hidden="true" viewBox="0 0 32 32" class="size-7"><rect width="32" height="32" rx="7" class="fill-surface"/><path d="M8 27V15c0-5 4-9 8-11 4 2 8 6 8 11v12" fill="none" stroke="var(--accent)" stroke-width="2.5"/><rect x="14" y="18" width="4" height="7" fill="var(--accent-hover)"/></svg>
-  <span class="text-lg font-semibold">Dalan</span>
-  <nav class="ml-auto flex items-center gap-5 text-sm text-muted">
-    <a class="hover:text-text" href="#how">How it works</a>
-    <a class="hover:text-text" href="#faq">FAQ</a>
-    <a class="hover:text-text" data-link="notes" href="#">Release notes</a>
-  </nav>
+<body>
+<a class="skip" href="#features">Skip to the features</a>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top">
+      <svg role="img" aria-label="Dalan" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="var(--surface-raised)"></rect><path d="M8 27V15c0-5 4-9 8-11 4 2 8 6 8 11v12" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round"></path><rect x="14" y="18" width="4" height="7" fill="var(--accent-hover)"></rect></svg>
+      Dalan
+    </a>
+    <nav class="links" aria-label="Page">
+      <a href="#features">Features</a><a href="#security">Security</a><a href="#download">Download</a><a href="#help">Help</a>
+    </nav>
+    <span class="pill" data-version>v0.1.2</span>
+    <a class="btn btn-p" href="#download">Download</a>
+    <details class="menu">
+      <summary aria-label="Open menu"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"></path></svg></summary>
+      <nav aria-label="Page (menu)"><a href="#features">Features</a><a href="#security">Security</a><a href="#download">Download</a><a href="#help">Help</a></nav>
+    </details>
+  </div>
 </header>
 
 <main>
-<section class="max-w-[1080px] mx-auto px-4 sm:px-6 pt-16 pb-12 text-center">
-  <h1 class="text-[40px] leading-[48px] sm:text-[52px] sm:leading-[60px] font-bold tracking-tight">Your servers, one keystroke away.</h1>
-  <p class="mt-4 text-[17px] leading-7 text-muted max-w-[560px] mx-auto">Dalan keeps your hosts, keys, tunnels and files in one calm desktop app, encrypted on your own computer.</p>
-  <div class="mt-8 flex flex-col items-center gap-3">
-    <a data-download class="h-12 px-6 rounded-md bg-accent text-on-accent font-semibold text-base inline-flex items-center gap-2 hover:bg-accent-hover transition-colors" href="#download">Download for macOS</a>
-    <p class="text-xs text-muted"><a class="underline hover:text-text" href="#download">Other platforms</a> · <a class="underline hover:text-text" data-link="notes" href="#">Release notes</a> · <span data-version>v0.1.0</span></p>
-  </div>
-  <div class="mt-12 rounded-xl border border-border bg-surface aspect-[16/10] max-w-[920px] mx-auto grid place-items-center text-sm text-muted" role="img" aria-label="Screenshot placeholder">
-    Real screenshot goes here once M2 ships: Hosts view with a terminal open, dark theme.
-  </div>
-</section>
-
-<section class="border-y border-border bg-surface">
-  <div class="max-w-[1080px] mx-auto px-4 sm:px-6 py-16 grid md:grid-cols-[1fr_2fr] gap-8">
-    <h2 class="text-2xl">Server details shouldn't live in five places.</h2>
-    <ul class="space-y-4 text-[15px] leading-6 text-muted">
-      <li>An old SSH config, a note, a chat message, someone's memory. New teammates spend their first day hunting for them.</li>
-      <li>Keys and passwords get passed around in chat, and nobody knows which key opens which server.</li>
-      <li>One terminal window per server, a separate app for files, and tunnels kept alive in a forgotten tab.</li>
-    </ul>
-  </div>
-</section>
-
-<section id="how" class="max-w-[1080px] mx-auto px-4 sm:px-6 py-16">
-  <h2 class="text-2xl">How it works</h2>
-  <ol class="mt-8 grid md:grid-cols-3 gap-4">
-    <li class="rounded-lg border border-border bg-surface p-5"><div class="text-accent font-mono text-sm">01</div><h3 class="mt-2 text-lg">Set a master password</h3><p class="mt-2 text-muted">It encrypts your keys and passwords on this computer. Nothing is sent anywhere.</p></li>
-    <li class="rounded-lg border border-border bg-surface p-5"><div class="text-accent font-mono text-sm">02</div><h3 class="mt-2 text-lg">Bring your servers in</h3><p class="mt-2 text-muted">Import your SSH config, or add a host in a few fields. Groups pass their username, key and jump host to every server inside.</p></li>
-    <li class="rounded-lg border border-border bg-surface p-5"><div class="text-accent font-mono text-sm">03</div><h3 class="mt-2 text-lg">Press <kbd class="font-mono text-sm px-1.5 py-0.5 rounded-sm bg-surface-hover border border-border">⌘K</kbd> and type</h3><p class="mt-2 text-muted">Pick a server, press Enter, and you're in. Tabs, splits, files and tunnels are one keystroke away.</p></li>
-  </ol>
-</section>
-
-<section class="max-w-[1080px] mx-auto px-4 sm:px-6 pb-16">
-  <h2 class="text-2xl">What's different</h2>
-  <div class="mt-8 grid sm:grid-cols-2 gap-4">
-    <div class="rounded-lg border border-border p-5"><h3 class="text-lg">No account, no cloud</h3><p class="mt-2 text-muted">Your vault is one encrypted file on your machine. Dalan doesn't send telemetry.</p></div>
-    <div class="rounded-lg border border-border p-5"><h3 class="text-lg">Connect in one keystroke</h3><p class="mt-2 text-muted">⌘K, a few letters, Enter. Recent servers are always at the top.</p></div>
-    <div class="rounded-lg border border-border p-5"><h3 class="text-lg">Jump hosts and tunnels that come back</h3><p class="mt-2 text-muted">A chain through a bastion is one setting. Tunnels reconnect by themselves after sleep or a network change.</p></div>
-    <div class="rounded-lg border border-border p-5"><h3 class="text-lg">Safe by default</h3><p class="mt-2 text-muted">Every server's identity is checked. If it changes, Dalan stops and tells you why that matters.</p></div>
-  </div>
-  <h3 class="mt-12 text-lg">The basics, done well</h3>
-  <ul class="mt-4 grid sm:grid-cols-2 gap-x-8 gap-y-2 text-muted list-disc pl-5">
-    <li>Tabs, split panes and typing into many servers at once</li>
-    <li>Files side by side; edit remotely in your own editor</li>
-    <li>Snippets for one server or twenty</li>
-    <li>Generate, import and install keys in one step</li>
-    <li>Local, remote and SOCKS tunnels</li>
-    <li>Dark and light themes, your font and size</li>
-  </ul>
-</section>
-
-<section id="download" class="border-y border-border bg-surface">
-  <div class="max-w-[1080px] mx-auto px-4 sm:px-6 py-16">
-    <h2 class="text-2xl">Download</h2>
-    <p class="mt-2 text-muted">Free for the team. Current version <span data-version>v0.1.0</span>.</p>
-    <div class="mt-8 grid md:grid-cols-3 gap-4">
-      <a data-asset="mac" href="#" class="rounded-lg border border-border bg-bg p-5 hover:border-accent transition-colors"><div class="text-lg">macOS</div><div class="text-sm text-muted mt-1">Apple silicon and Intel · .dmg</div></a>
-      <a data-asset="win" href="#" class="rounded-lg border border-border bg-bg p-5 hover:border-accent transition-colors"><div class="text-lg">Windows</div><div class="text-sm text-muted mt-1">Windows 10 and 11 · installer .exe</div></a>
-      <a data-asset="linux" href="#" class="rounded-lg border border-border bg-bg p-5 hover:border-accent transition-colors"><div class="text-lg">Linux</div><div class="text-sm text-muted mt-1">.AppImage · .deb · .rpm</div></a>
+  <section id="top" class="hero">
+    <div class="glow" aria-hidden="true"></div>
+    <div class="hero-text">
+      <span class="chip"><span class="dot"></span>Built for our team · free · macOS, Windows, Linux</span>
+      <h1>Your servers,<br><em>one keystroke away.</em></h1>
+      <p class="sub">Dalan keeps hosts, keys, tunnels and files in one calm desktop app. Everything is encrypted on your computer. No account, no cloud.</p>
+      <div class="actions">
+        <a class="btn btn-p" href="#download" data-hero data-asset="auto">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-hero-icon hidden><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg>
+          <span data-hero-label>See downloads</span>
+        </a>
+        <a class="btn btn-s" href="#download" data-other>Other platforms</a>
+      </div>
+      <p class="note" data-hero-meta>Dalan is a desktop app. Open this page on your computer, or send yourself the link.</p>
     </div>
-    <p class="mt-4 text-xs text-muted">Installing on Windows for everyone on a shared PC? <a class="underline hover:text-text" data-asset="winall" href="#">Get the all-users installer.</a> It asks for administrator rights.</p>
-    <p class="mt-4 text-xs text-muted">Checksums are listed on the release page.</p>
-  </div>
-</section>
+    <div class="stage">
+      <img class="shot" src="img/hero.webp" srcset="img/hero-640.webp 640w, img/hero.webp 1280w" sizes="(min-width: 1200px) 1120px, 100vw" width="1280" height="800" alt="Dalan with a terminal open on web-1, showing git status and a directory listing" fetchpriority="high" decoding="async">
+      <img class="shot over hide-sm" src="img/palette.webp" srcset="img/palette-640.webp 640w, img/palette.webp 1280w" sizes="520px" width="1280" height="800" alt="The command palette searching hosts, tabs and actions" loading="lazy" decoding="async">
+      <div class="keycap hide-sm"><span class="kbd">⌘</span><span class="kbd">K</span><span>type a few letters, press Enter</span></div>
+    </div>
+  </section>
 
-<section id="faq" class="max-w-[760px] mx-auto px-4 sm:px-6 py-16">
-  <h2 class="text-2xl">Questions</h2>
-  <div class="mt-6 divide-y divide-border border-y border-border">
-    <details class="py-4"><summary class="cursor-pointer text-base">Where are my passwords and keys stored?</summary><p class="mt-2 text-muted">In an encrypted file on your computer, locked with your master password. They never leave it. Only the part of Dalan that makes the connection can read them.</p></details>
-    <details class="py-4"><summary class="cursor-pointer text-base">I forgot my master password. Now what?</summary><p class="mt-2 text-muted">There's no recovery. That's the point of local encryption. Set up a fresh vault and re-import your servers.</p></details>
-    <details class="py-4"><summary class="cursor-pointer text-base">Can I import what I already have?</summary><p class="mt-2 text-muted">Yes: your SSH config (with its keys and known hosts) and CSV files. Importers for other SSH clients are on the list.</p></details>
-    <details class="py-4"><summary class="cursor-pointer text-base">Does it sync between my laptop and desktop?</summary><p class="mt-2 text-muted">Not yet. Export and import for now. Sync is planned, and it will be end-to-end encrypted when it comes.</p></details>
-    <details class="py-4"><summary class="cursor-pointer text-base">Do I need to install anything on my servers?</summary><p class="mt-2 text-muted">No. Dalan speaks standard SSH and SFTP.</p></details>
-    <details class="py-4"><summary class="cursor-pointer text-base">macOS says the app can't be verified.</summary><p class="mt-2 text-muted">Builds are signed and notarized once our Apple Developer account is set up. Until then, right-click the app, choose Open, then Open again. You only need to do this once.</p></details>
-    <details class="py-4"><summary class="cursor-pointer text-base">Something broke. Where do I report it?</summary><p class="mt-2 text-muted"><a class="text-accent underline" data-link="issues" href="#">Open an issue</a> and include the version from Settings → About.</p></details>
-  </div>
-</section>
+  <section class="inside" aria-label="What's inside">
+    <p>Everything you reach for, in one window</p>
+    <div class="row">
+      <span class="chip">SSH</span><span class="chip">SFTP</span><span class="chip">Port forwarding</span><span class="chip">Jump hosts</span><span class="chip">Snippets</span><span class="chip">Workspaces</span><span class="chip">Broadcast</span><span class="chip">Session logs</span><span class="chip">SSH keys</span><span class="chip">Telnet</span><span class="chip">Serial</span><span class="chip">Mosh</span>
+    </div>
+  </section>
 
-<section class="max-w-[1080px] mx-auto px-4 sm:px-6 pb-20 text-center">
-  <h2 class="text-2xl">Stop hunting for server details.</h2>
-  <a data-download class="mt-6 h-12 px-6 rounded-md bg-accent text-on-accent font-semibold text-base inline-flex items-center hover:bg-accent-hover transition-colors" href="#download">Download Dalan</a>
-  <p class="mt-3 text-xs text-muted">Free for the team · macOS, Windows, Linux · <span data-version>v0.1.0</span></p>
-</section>
+  <section id="features" class="features">
+    <div class="wrap">
+      <div class="feature">
+        <div class="copy">
+          <span class="eyebrow">01 · Connect</span>
+          <h2>Press ⌘K, type, press Enter.</h2>
+          <p class="lead">One search box for every server, open tab, snippet and action. Recent servers come first. In a new tab you can also type <code>deploy@10.0.0.5</code> and go.</p>
+          <ul class="ticks">
+            <li>Tabs that stay open while you work elsewhere</li>
+            <li>Jump through a bastion with one setting</li>
+            <li>ssh:// links from your browser open in Dalan (Windows)</li>
+          </ul>
+        </div>
+        <img class="shot" src="img/palette.webp" srcset="img/palette-640.webp 640w, img/palette.webp 1280w" sizes="(min-width: 1200px) 700px, 100vw" width="1280" height="800" alt="Command palette with hosts, open tabs and actions" loading="lazy" decoding="async">
+      </div>
+
+      <div class="feature flip">
+        <div class="pair">
+          <img class="shot" src="img/hosts.webp" srcset="img/hosts-640.webp 640w, img/hosts.webp 1280w" sizes="(min-width: 1200px) 700px, 100vw" width="1280" height="800" alt="Hosts screen with Production, Staging and Home lab groups" loading="lazy" decoding="async">
+          <img class="shot over hide-sm" src="img/hosteditor.webp" srcset="img/hosteditor-640.webp 640w, img/hosteditor.webp 1280w" sizes="360px" width="1280" height="800" alt="Host editor showing a jump route through the bastion" loading="lazy" decoding="async">
+        </div>
+        <div class="copy">
+          <span class="eyebrow">02 · Organise</span>
+          <h2>Set it once on a group. Every server inherits it.</h2>
+          <p class="lead">Username, key, jump host, theme and environment flow down from a group to every server inside it. Each field shows where it came from, and any server can override it.</p>
+          <p class="small">Bring what you have: SSH config, CSV, PuTTY and MobaXterm exports.</p>
+        </div>
+      </div>
+
+      <div class="feature">
+        <div class="copy">
+          <span class="eyebrow">03 · Many servers</span>
+          <h2>One command, as many servers as you need.</h2>
+          <p class="lead">Save the commands you type often as snippets. Run one on a whole group: Dalan opens a workspace with a pane per server and tells you which ones still need a password.</p>
+          <p class="small">Split panes, focus mode, and broadcast typing to every live pane.</p>
+        </div>
+        <img class="shot" src="img/runon.webp" srcset="img/runon-640.webp 640w, img/runon.webp 1280w" sizes="(min-width: 1200px) 700px, 100vw" width="1280" height="800" alt="Run a snippet on Production servers, with three hosts selected" loading="lazy" decoding="async">
+      </div>
+    </div>
+  </section>
+
+  <section id="security" class="security">
+    <div class="band wrap">
+      <svg class="arch" aria-hidden="true" viewBox="0 0 32 32"><path d="M8 27V15c0-5 4-9 8-11 4 2 8 6 8 11v12" fill="none" stroke="currentColor" stroke-width="1.2"></path></svg>
+      <div class="grid">
+        <div class="left">
+          <div class="head">
+            <span class="eyebrow">04 · Safe by default</span>
+            <h2>Protective, and quiet about it.</h2>
+          </div>
+          <div class="points">
+            <div class="point"><svg aria-hidden="true" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg><b>Encrypted on this computer</b><span>One vault file, locked with your master password. It never leaves your machine.</span></div>
+            <div class="point"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path><path d="m9 12 2 2 4-4"></path></svg><b>Every server checked</b><span>If a server's identity changes, Dalan stops and explains why that matters.</span></div>
+            <div class="point"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"></path><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"></circle></svg><b>Keys stay out of sight</b><span>Passwords and private keys are only ever handled by the part that connects.</span></div>
+            <div class="point"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="9" x2="15" y1="15" y2="9"></line></svg><b>No account, no telemetry</b><span>Nothing to sign up for, nothing sent home. Updates come from our GitHub releases.</span></div>
+          </div>
+        </div>
+        <img class="shot" src="img/identity.webp" srcset="img/identity-640.webp 640w, img/identity.webp 1280w" sizes="(min-width: 1200px) 520px, 100vw" width="1280" height="800" alt="The server's identity changed warning, blocking the connection" loading="lazy" decoding="async">
+      </div>
+    </div>
+  </section>
+
+  <section class="more" aria-label="More features">
+    <div class="wrap">
+      <h2>The basics, done carefully.</h2>
+      <div class="tiles">
+        <article class="tile"><div class="crop"><img src="img/sftp.webp" srcset="img/sftp-640.webp 640w, img/sftp.webp 1280w" sizes="(min-width: 1200px) 390px, 100vw" width="1280" height="800" alt="SFTP with two panes" style="object-position: left top" loading="lazy" decoding="async"></div><div class="body"><h3>Files side by side</h3><p>Drag between your computer and a server. Edit a remote file in your own editor and Dalan uploads it when you save.</p></div></article>
+        <article class="tile"><div class="crop"><img src="img/tunnels.webp" srcset="img/tunnels-640.webp 640w, img/tunnels.webp 1280w" sizes="(min-width: 1200px) 390px, 100vw" width="1280" height="800" alt="Port forwarding rules" style="object-position: center top" loading="lazy" decoding="async"></div><div class="body"><h3>Tunnels that come back</h3><p>Local, remote and SOCKS forwards that reconnect by themselves after sleep or a network change.</p></div></article>
+        <article class="tile"><div class="crop"><img src="img/dropped.webp" srcset="img/dropped-640.webp 640w, img/dropped.webp 1280w" sizes="(min-width: 1200px) 390px, 100vw" width="1280" height="800" alt="Connections dropped card with Reconnect all" style="object-position: center center" loading="lazy" decoding="async"></div><div class="body"><h3>Drops, handled</h3><p>When the Wi-Fi blinks, one card lists what dropped. Reconnect all, or let Dalan retry for you.</p></div></article>
+        <article class="tile"><div class="crop"><img src="img/sidepanel.webp" srcset="img/sidepanel-640.webp 640w, img/sidepanel.webp 1280w" sizes="(min-width: 1200px) 390px, 100vw" width="1280" height="800" alt="Terminal side panel with snippets and history" style="object-position: right top" loading="lazy" decoding="async"></div><div class="body"><h3>A side panel for the terminal</h3><p>Snippets, history, themes and fonts next to the shell, plus command suggestions with your own AI key.</p></div></article>
+        <article class="tile"><div class="crop"><img src="img/hosteditor.webp" srcset="img/hosteditor-640.webp 640w, img/hosteditor.webp 1280w" sizes="(min-width: 1200px) 390px, 100vw" width="1280" height="800" alt="Jump host route in the host editor" style="object-position: right center" loading="lazy" decoding="async"></div><div class="body"><h3>Jump hosts and proxies</h3><p>See the route from you to the server. Each hop asks its own questions, so you always know which machine is talking.</p></div></article>
+        <article class="tile"><div class="crop"><img src="img/unlock.webp" srcset="img/unlock-640.webp 640w, img/unlock.webp 1280w" sizes="(min-width: 1200px) 390px, 100vw" width="1280" height="800" alt="The unlock screen" style="object-position: center center" loading="lazy" decoding="async"></div><div class="body"><h3>Locks itself</h3><p>After a quiet spell Dalan locks the vault and closes sessions. One password brings it back.</p></div></article>
+      </div>
+    </div>
+  </section>
+
+  <section id="download" class="download">
+    <div class="wrap">
+      <div class="head">
+        <h2>Get Dalan</h2>
+        <p class="lead">Free for the team. Version <span data-version>0.1.2</span> · <a data-link="notes" href="https://github.com/OWNER/dalan-app/releases/latest">Release notes</a></p>
+      </div>
+      <div class="cards">
+        <div class="dl" data-card="mac">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 5a2 2 0 0 1 2 2v8.526a2 2 0 0 0 .212.897l1.068 2.127a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.068-2.127A2 2 0 0 0 4 15.526V7a2 2 0 0 1 2-2z"></path><path d="M20.054 15.987H3.946"></path></svg>
+          <h3>macOS</h3>
+          <p class="muted">Apple silicon and Intel</p>
+          <a class="btn btn-p" href="https://github.com/OWNER/dalan-app/releases/latest" data-asset="mac">Download .dmg</a>
+          <p class="note">Drag Dalan to Applications. Updates install themselves.</p>
+        </div>
+        <div class="dl" data-card="win">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></svg>
+          <h3>Windows</h3>
+          <p class="muted">Windows 10 and 11 · x64</p>
+          <a class="btn btn-p" href="https://github.com/OWNER/dalan-app/releases/latest" data-asset="win">Download installer</a>
+          <p class="note">Installs for you only, no administrator rights. <a data-asset="winall" href="https://github.com/OWNER/dalan-app/releases/latest">Installing for everyone on a shared PC?</a></p>
+        </div>
+        <div class="dl" data-card="linux">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" x2="20" y1="19" y2="19"></line></svg>
+          <h3>Linux</h3>
+          <p class="muted">x64 · most current distributions</p>
+          <div class="three">
+            <a class="btn btn-s" href="https://github.com/OWNER/dalan-app/releases/latest" data-asset="appimage">.AppImage</a><a class="btn btn-s" href="https://github.com/OWNER/dalan-app/releases/latest" data-asset="deb">.deb</a><a class="btn btn-s" href="https://github.com/OWNER/dalan-app/releases/latest" data-asset="rpm">.rpm</a>
+          </div>
+          <p class="note">The AppImage updates itself; packages update with the next download.</p>
+        </div>
+      </div>
+      <p class="center note" style="font-size: 14px">Checksums and older versions are on the <a data-link="releases" href="https://github.com/OWNER/dalan-app/releases">releases page</a>.</p>
+    </div>
+  </section>
+
+  <section id="help" class="help">
+    <div class="wrap">
+      <div class="left">
+        <h2>Questions</h2>
+        <p class="muted">Something not covered here? <a data-link="issues" href="https://github.com/OWNER/dalan-app/issues/new">Open an issue</a> and include the version from Settings › About.</p>
+      </div>
+      <div class="faq">
+        <details class="q" open><summary>Where are my passwords and keys stored?</summary><p>In one encrypted file on your computer, locked with your master password. They never leave it, and the window you click in never sees them.</p></details>
+        <details class="q"><summary>I forgot my master password. Now what?</summary><p>There's no recovery; that's the point of local encryption. Set up a fresh vault and import your servers again.</p></details>
+        <details class="q"><summary>Can I bring my existing servers?</summary><p>Yes: your SSH config, a CSV file, or a PuTTY or MobaXterm export. Keys stay where they are until you import them yourself.</p></details>
+        <details class="q"><summary>Which Windows installer do I need?</summary><p>The main one installs Dalan for you, without administrator rights, and updates quietly. The all-users installer is for shared PCs and asks for administrator rights.</p></details>
+        <details class="q"><summary>Does it sync between my computers?</summary><p>Not yet. Dalan keeps everything on the computer you installed it on. Sync is planned, and it will be end-to-end encrypted.</p></details>
+        <details class="q"><summary>Do my servers need anything installed?</summary><p>No. Dalan speaks standard SSH and SFTP. Mosh needs mosh-server on the server, as usual.</p></details>
+        <details class="q"><summary>macOS says the app can't be verified.</summary><p>Until signing is set up, right-click Dalan in Applications, choose Open, then Open again. You only do this once. Windows may show a SmartScreen warning for the same reason: choose More info, then Run anyway.</p></details>
+      </div>
+    </div>
+  </section>
+
+  <section class="closing">
+    <div class="glow" aria-hidden="true"></div>
+    <div class="in">
+      <svg role="img" aria-label="Dalan" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="var(--surface-raised)"></rect><path d="M8 27V15c0-5 4-9 8-11 4 2 8 6 8 11v12" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round"></path><rect x="14" y="18" width="4" height="7" fill="var(--accent-hover)"></rect></svg>
+      <h2>Stop hunting for server details.</h2>
+      <a class="btn btn-p" href="#download" data-hero data-asset="auto"><span data-hero-label>See downloads</span></a>
+    </div>
+  </section>
 </main>
 
-<footer class="border-t border-border">
-  <div class="max-w-[1080px] mx-auto px-4 sm:px-6 py-8 flex flex-wrap gap-x-6 gap-y-2 text-xs text-muted">
-    <span>Dalan · Built in-house</span>
-    <a class="hover:text-text" data-link="notes" href="#">Release notes</a>
-    <a class="hover:text-text" data-link="issues" href="#">Report a problem</a>
-    <span>Fonts: Inter, JetBrains Mono (SIL OFL) · Icons: Lucide (ISC)</span>
+<footer>
+  <div class="wrap">
+    <span class="who"><svg aria-hidden="true" viewBox="0 0 32 32"><path d="M8 27V15c0-5 4-9 8-11 4 2 8 6 8 11v12" fill="none" stroke="var(--accent)" stroke-width="3"></path></svg>Dalan · built in-house</span>
+    <a data-link="notes" href="https://github.com/OWNER/dalan-app/releases/latest">Release notes</a>
+    <a data-link="issues" href="https://github.com/OWNER/dalan-app/issues/new">Report a problem</a>
+    <a data-link="repo" href="https://github.com/OWNER/dalan-app">Licences</a>
+    <span class="credit">Fonts: Inter, JetBrains Mono (SIL OFL) · Icons: Lucide (ISC)</span>
   </div>
 </footer>
 
 <script>
-  // Edit these two lines once the GitHub repo exists. Asset names match tauri-action defaults; adjust if you rename them.
+  // The Pages workflow fills in these two lines (REPO and VERSION): keep their shape.
   const REPO = 'OWNER/dalan-app';
-  const VERSION = '0.1.0';
+  const VERSION = '0.1.2';
   const base = `https://github.com/${REPO}/releases`;
+  const dl = `${base}/download/v${VERSION}`;
   const assets = {
-    mac:   `${base}/download/v${VERSION}/Dalan_${VERSION}_universal.dmg`,
-    win:   `${base}/download/v${VERSION}/Dalan_${VERSION}_x64-setup.exe`,
-    winall: `${base}/download/v${VERSION}/Dalan_${VERSION}_x64-allusers-setup.exe`,
-    linux: `${base}/latest`,
+    mac: `${dl}/Dalan_${VERSION}_universal.dmg`,
+    win: `${dl}/Dalan_${VERSION}_x64-setup.exe`,
+    winall: `${dl}/Dalan_${VERSION}_x64-allusers-setup.exe`,
+    appimage: `${dl}/Dalan_${VERSION}_amd64.AppImage`,
+    deb: `${dl}/Dalan_${VERSION}_amd64.deb`,
+    rpm: `${dl}/Dalan-${VERSION}-1.x86_64.rpm`,
   };
-  document.querySelectorAll('[data-version]').forEach(e => e.textContent = 'v' + VERSION);
-  document.querySelectorAll('[data-asset]').forEach(a => a.href = assets[a.dataset.asset]);
-  document.querySelectorAll('[data-link="notes"]').forEach(a => a.href = `${base}/latest`);
-  document.querySelectorAll('[data-link="issues"]').forEach(a => a.href = `https://github.com/${REPO}/issues/new`);
+  const hero = {
+    mac: { label: 'Download for macOS', asset: 'mac', meta: 'Apple silicon and Intel · .dmg' },
+    win: { label: 'Download for Windows', asset: 'win', meta: 'Windows 10 and 11 · no administrator rights needed' },
+    linux: { label: 'Download for Linux', asset: 'appimage', meta: 'AppImage, .deb and .rpm' },
+  };
+
+  // Which computer is this? navigator.userAgentData.platform first, the user agent string as the fallback.
+  // Phones, tablets and anything unknown get "See downloads".
+  const uaData = navigator.userAgentData;
   const ua = navigator.userAgent;
-  const os = /Mac/.test(ua) ? 'mac' : /Win/.test(ua) ? 'win' : /Linux/.test(ua) ? 'linux' : null;
-  const label = { mac: 'Download for macOS', win: 'Download for Windows', linux: 'Download for Linux' };
-  const hero = document.querySelector('[data-download]');
-  if (os) { hero.textContent = label[os]; hero.href = assets[os]; } else { hero.textContent = 'Download Dalan'; }
+  const fromText = t => (/Win/i.test(t) ? 'win' : /Mac/i.test(t) ? 'mac' : /Linux|X11|CrOS|Chrome OS/i.test(t) ? 'linux' : null);
+  const touchMac = /Mac/.test(`${uaData?.platform ?? ''} ${ua}`) && navigator.maxTouchPoints > 1; // iPadOS says "Macintosh"
+  const phone = uaData?.mobile === true || /iPhone|iPad|iPod|Android/.test(ua) || touchMac;
+  const os = phone ? null : fromText(uaData?.platform ?? '') || fromText(ua);
+
+  document.querySelectorAll('[data-version]').forEach(e => { e.textContent = e.classList.contains('pill') ? `v${VERSION}` : VERSION; });
+  document.querySelectorAll('[data-asset]').forEach(a => { const url = assets[a.dataset.asset]; if (url) a.href = url; });
+  document.querySelectorAll('[data-link="notes"]').forEach(a => { a.href = `${base}/latest`; });
+  document.querySelectorAll('[data-link="releases"]').forEach(a => { a.href = base; });
+  document.querySelectorAll('[data-link="issues"]').forEach(a => { a.href = `https://github.com/${REPO}/issues/new`; });
+  document.querySelectorAll('[data-link="repo"]').forEach(a => { a.href = `https://github.com/${REPO}`; });
+
+  const pick = os ? hero[os] : null;
+  document.querySelectorAll('[data-hero]').forEach(a => {
+    a.querySelector('[data-hero-label]').textContent = pick ? pick.label : 'See downloads';
+    a.href = pick ? assets[pick.asset] : '#download';
+    a.querySelector('[data-hero-icon]')?.removeAttribute('hidden');
+    if (!pick) a.querySelector('[data-hero-icon]')?.setAttribute('hidden', '');
+  });
+  const meta = document.querySelector('[data-hero-meta]');
+  if (meta) meta.textContent = pick ? `${pick.meta} · v${VERSION}` : 'Dalan is a desktop app. Open this page on your computer, or send yourself the link.';
+  document.querySelectorAll('[data-other]').forEach(a => { a.hidden = !pick; }); // phones get one button
+  if (os) document.querySelector(`[data-card="${os}"]`)?.classList.add('is-you');
 </script>
 </body>
 </html>

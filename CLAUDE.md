@@ -104,7 +104,7 @@ cd src-tauri && cargo clippy -- -D warnings && cargo test
 - **T1 to T7 are done** (fake backend, test servers, `pnpm walk`, browser, accessibility and visual tests; `pnpm test:app` and `pnpm walk:app` run the real app in Docker, leftovers are in `progress.md`; `replica/testing/hand-checks.md` is the manual list and `pnpm check:features` guards `features.csv`; `pnpm test:perf` times 2,000 hosts and a flood; `pnpm test:app:long` is the 30-minute memory run; `tests/fixtures/db` holds a database per migration). **P28 is `[h]`:** the merged hand-check list is ready in `replica/testing/hand-checks.md`; it waits for Mehrdad's results. **Next after that:** P29 (first release), in `replica/progress.md`.
 - **P30 is done:** several SFTP tabs (one store per tab; its hand check is section G in `replica/testing/hand-checks.md`).
 - **The Windows installer is built** (W1 to W3 done, released in v0.1.2; W4 waits for the Windows hand checks in section H of `hand-checks.md`).
-- **Next: the download page rebuild.** The spec is `replica/launch/landing-v2.md` and the canvas is https://claude.ai/artifact/VWhMrR9t799hwjzeKda32n (desktop, phone and download-button boards). Start with `go L1`.
+- **L1 (the download page rebuild) is built** (`[h]`): `site/index.html`, `pnpm site:shots`, `tests/site/`; its hand check (the right button and file on a Mac, a Windows PC and a phone) is in `replica/progress.md`.
 - **Manual checks:** a phase that needs Mehrdad to test something by hand is not done until he has reported back.
 - **M1 is done when F01, F11 and F12 work against a real server:**
   - unlock

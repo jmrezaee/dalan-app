@@ -1,0 +1,79 @@
+{
+  "hero": {
+    "source": "S18-connected",
+    "w": 1280,
+    "h": 800,
+    "w640": 640,
+    "h640": 400
+  },
+  "palette": {
+    "source": "S17-palette",
+    "w": 1280,
+    "h": 800,
+    "w640": 640,
+    "h640": 400
+  },
+  "hosts": {
+    "source": "S02-grid",
+    "w": 1280,
+    "h": 800,
+    "w640": 640,
+    "h640": 400
+  },
+  "hosteditor": {
+    "source": "S03-edit-jump-page",
+    "w": 1280,
+    "h": 800,
+    "w640": 640,
+    "h640": 400
+  },
+  "runon": {
+    "source": "S13-run-on-hosts",
+    "w": 1280,
+    "h": 800,
+    "w640": 640,
+    "h640": 400
+  },
+  "identity": {
+    "source": "S18-identity-changed",
+    "w": 1280,
+    "h": 800,
+    "w640": 640,
+    "h640": 400
+  },
+  "sftp": {
+    "source": "S21-sftp",
+    "w": 1280,
+    "h": 800,
+    "w640": 640,
+    "h640": 400
+  },
+  "tunnels": {
+    "source": "S09-tunnels",
+    "w": 1280,
+    "h": 800,
+    "w640": 640,
+    "h640": 400
+  },
+  "dropped": {
+    "source": "S18-dropped-card",
+    "w": 1280,
+    "h": 800,
+    "w640": 640,
+    "h640": 400
+  },
+  "sidepanel": {
+    "source": "S20-side-panel",
+    "w": 1280,
+    "h": 800,
+    "w640": 640,
+    "h640": 400
+  },
+  "unlock": {
+    "source": "S24-unlock",
+    "w": 1280,
+    "h": 800,
+    "w640": 640,
+    "h640": 400
+  }
+}
