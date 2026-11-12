@@ -178,8 +178,8 @@ tests/windows/walk-installer.py              pywinauto walk with screenshots (§
 ```json
 {
   "bundle": {
-    "publisher": "Dalan team",
-    "copyright": "© 2026 Dalan team",
+    "publisher": "Mehrdad Rezaee",
+    "copyright": "© 2026 Mehrdad Rezaee",
     "shortDescription": "Desktop SSH client",
     "homepage": "https://github.com/OWNER/dalan-app",
     "windows": {
