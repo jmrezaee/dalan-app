@@ -50,6 +50,8 @@ export const team = (): Seed => ({
     { id: 'r-stage', name: 'cache-staging', address: '127.0.0.1', environment: 'staging', route: 'host', host_id: 'h-stage', write_mode: 'open' },
     { id: 'r-local', name: 'local', address: 'localhost', write_mode: 'open' },
     { id: 'r-sessions', name: 'sessions-prod', address: '10.0.2.11', port: 7000, environment: 'production', route: 'host', host_id: 'h-bastion', write_mode: 'read_only' },
+    { id: 'r-cluster', name: 'events-cluster', address: '10.0.2.11', port: 7000, kind: 'cluster', environment: 'staging', route: 'host', host_id: 'h-bastion', write_mode: 'open' },
+    { id: 'r-sentinel', name: 'queue-sentinel', address: '10.0.2.21:26379, 10.0.2.22:26379', port: 26379, kind: 'sentinel', sentinel_master: 'mymaster', route: 'host', host_id: 'h-bastion', write_mode: 'confirm' },
   ],
   forwards: [
     { id: 'f-db', host_id: 'h-bastion', label: 'Postgres', kind: 'local', bind_address: '127.0.0.1', bind_port: 5432, dest_address: '10.0.2.21', dest_port: 5432, autostart: false, state: 'active', connections: 2, error: null },

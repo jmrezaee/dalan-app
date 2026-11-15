@@ -9,12 +9,12 @@
 use std::sync::Mutex;
 use std::time::Instant;
 
-use redis::aio::MultiplexedConnection;
 use redis::Value;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use specta::Type;
 
+use super::cluster::Conn;
 use super::gate::{self, Class, CommandTable, Decision};
 use super::write::{self, Args, PendingStore, RedisConfirmLevel, RedisPending, Target};
 use crate::db::now_ms;
@@ -354,7 +354,7 @@ fn text_reply(text: &str, error: bool) -> RedisConsoleOutcome {
 
 /// Sends commands and prints the answer. A server's own error is printed, not thrown: it is the reply.
 async fn run(
-    conn: &mut MultiplexedConnection,
+    conn: &mut Conn,
     commands: &[Args],
     selected: Option<u32>,
 ) -> AppResult<RedisConsoleReply> {
@@ -388,7 +388,7 @@ impl ConsoleState {
 }
 
 /// How big the collection is that an unbounded read would return (for the gate's "heavy").
-async fn length_for(conn: &mut MultiplexedConnection, args: &[Vec<u8>]) -> Option<u64> {
+async fn length_for(conn: &mut Conn, args: &[Vec<u8>]) -> Option<u64> {
     let size = gate::unbounded_read(args)?;
     let key = args.get(1)?;
     redis::cmd(size)
@@ -400,7 +400,7 @@ async fn length_for(conn: &mut MultiplexedConnection, args: &[Vec<u8>]) -> Optio
 
 /// Runs one console line through the gate.
 pub async fn exec(
-    conn: &mut MultiplexedConnection,
+    conn: &mut Conn,
     table: &CommandTable,
     pending: &PendingStore,
     state: &ConsoleState,
@@ -486,7 +486,7 @@ pub async fn exec(
 
 #[allow(clippy::too_many_arguments)]
 async fn finish(
-    conn: &mut MultiplexedConnection,
+    conn: &mut Conn,
     pending: &PendingStore,
     target: &Target,
     commands: Vec<Args>,
@@ -530,7 +530,7 @@ async fn finish(
 
 /// "Send", "Run anyway" or the typed-name dialog's button: runs what `exec` held, once.
 pub async fn commit(
-    conn: &mut MultiplexedConnection,
+    conn: &mut Conn,
     pending: &PendingStore,
     target: &Target,
     pending_id: &str,
@@ -741,10 +741,7 @@ fn docs_map(docs: &Value) -> std::collections::HashMap<String, (String, Option<S
 }
 
 /// The commands this server has, for Tab completion and the syntax line.
-pub async fn commands(
-    conn: &mut MultiplexedConnection,
-    table: &CommandTable,
-) -> Vec<RedisCommandInfo> {
+pub async fn commands(conn: &mut Conn, table: &CommandTable) -> Vec<RedisCommandInfo> {
     // `COMMAND DOCS` exists from Redis 7; older servers get the arity instead.
     let docs = redis::cmd("COMMAND")
         .arg("DOCS")

@@ -205,15 +205,29 @@ pub fn validate(input: &RedisDatabaseInput) -> AppResult<()> {
         ));
     }
     let address = input.address.trim();
+    // A Sentinel database lists its sentinels: "10.0.2.21:26379, 10.0.2.22:26379". Each entry is checked like an address.
+    let entries: Vec<&str> = if input.kind == RedisKind::Sentinel {
+        address
+            .split(',')
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+            .collect()
+    } else {
+        vec![address]
+    };
     if address.is_empty()
         || address.len() > 255
-        || address
-            .chars()
-            .any(|c| c.is_whitespace() || c.is_control() || c == '/')
+        || entries.is_empty()
+        || entries.iter().any(|e| {
+            e.chars()
+                .any(|c| c.is_whitespace() || c.is_control() || c == '/' || c == ',')
+        })
     {
-        return Err(AppError::validation(
-            "The address is a host name or an IP address, without spaces or a path.",
-        ));
+        return Err(AppError::validation(if input.kind == RedisKind::Sentinel {
+            "List the sentinels as addresses with a comma between them, such as 10.0.2.21:26379, 10.0.2.22:26379."
+        } else {
+            "The address is a host name or an IP address, without spaces or a path."
+        }));
     }
     if input.port == 0 {
         return Err(AppError::validation(
@@ -733,6 +747,36 @@ mod tests {
                 .code,
             ErrorCode::NotFound
         );
+    }
+
+    #[test]
+    fn a_sentinel_database_lists_its_sentinels_and_the_others_take_one_address() {
+        let sentinel = |address: &str| RedisDatabaseInput {
+            kind: RedisKind::Sentinel,
+            sentinel_master: Some("mymaster".into()),
+            address: address.into(),
+            ..input("sessions")
+        };
+        for ok in [
+            "10.0.2.21:26379",
+            "10.0.2.21:26379, 10.0.2.22:26379,10.0.2.23",
+            "s1.internal , s2.internal",
+        ] {
+            assert!(validate(&sentinel(ok)).is_ok(), "{ok}");
+        }
+        for bad in ["", " , ", "10.0.2.21 26379", "s1/x, s2"] {
+            assert_eq!(
+                validate(&sentinel(bad)).unwrap_err().code,
+                ErrorCode::Validation,
+                "{bad}"
+            );
+        }
+        // A single server or a cluster takes one address: a list is refused.
+        let single = RedisDatabaseInput {
+            address: "10.0.2.21, 10.0.2.22".into(),
+            ..input("cache")
+        };
+        assert_eq!(validate(&single).unwrap_err().code, ErrorCode::Validation);
     }
 
     #[test]

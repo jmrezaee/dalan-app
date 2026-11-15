@@ -9,12 +9,12 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use redis::aio::MultiplexedConnection;
 use redis::Value;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use super::browse::RedisBytes;
+use super::cluster::Conn;
 use super::conn::redis_error;
 use super::gate::{self, Class, CommandTable, Decision};
 use super::store::RedisWriteMode;
@@ -538,7 +538,7 @@ fn reply_bytes(v: Value) -> Option<Vec<u8>> {
     }
 }
 
-pub(super) async fn send(conn: &mut MultiplexedConnection, commands: &[Args]) -> AppResult<Value> {
+pub(super) async fn send(conn: &mut Conn, commands: &[Args]) -> AppResult<Value> {
     let build = |a: &Args| {
         let mut c = redis::Cmd::new();
         for part in a {
@@ -684,7 +684,7 @@ fn approve(
 
 /// Runs a plan: its check first, then its commands.
 async fn execute(
-    conn: &mut MultiplexedConnection,
+    conn: &mut Conn,
     plan: &Plan,
     target: &Target,
     class: Class,
@@ -756,7 +756,7 @@ pub(super) fn release(
 
 /// Step one. Runs the write at once when the mode allows it, or answers with what to confirm.
 pub async fn prepare(
-    conn: &mut MultiplexedConnection,
+    conn: &mut Conn,
     table: &CommandTable,
     pending: &PendingStore,
     target: &Target,
@@ -827,7 +827,7 @@ pub async fn prepare(
 
 /// Step two. Runs the kept bytes, once.
 pub async fn commit(
-    conn: &mut MultiplexedConnection,
+    conn: &mut Conn,
     pending: &PendingStore,
     target: &Target,
     pending_id: &str,

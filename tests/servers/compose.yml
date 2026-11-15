@@ -61,6 +61,60 @@ services:
     command: ["redis-server", "--requirepass", "test-redis", "--user", "app-ro", "on", ">ro-pass", "~*", "&*", "+@read", "+@connection", "+info", "+dbsize", "+select", "+config|get"]
 
   # kbd: password, then "Verification code:" (a time-based code; scripts/test-servers.sh otp prints the current one).
+  # Redis Cluster (R6): three primaries and three replicas. No published ports: the nodes announce their
+  # addresses on this network, so the cluster is only reachable through a host (`a`), like a production one.
+  rc1: &rcnode
+    image: redis:7
+    container_name: dalan-test-rc1
+    networks: { default: { aliases: [rc1] } }
+    command: ["redis-server", "--port", "7000", "--cluster-enabled", "yes", "--cluster-node-timeout", "5000", "--requirepass", "test-redis", "--masterauth", "test-redis"]
+  rc2: { <<: *rcnode, container_name: dalan-test-rc2, networks: { default: { aliases: [rc2] } } }
+  rc3: { <<: *rcnode, container_name: dalan-test-rc3, networks: { default: { aliases: [rc3] } } }
+  rc4: { <<: *rcnode, container_name: dalan-test-rc4, networks: { default: { aliases: [rc4] } } }
+  rc5: { <<: *rcnode, container_name: dalan-test-rc5, networks: { default: { aliases: [rc5] } } }
+  rc6: { <<: *rcnode, container_name: dalan-test-rc6, networks: { default: { aliases: [rc6] } } }
+  # Joins the six nodes once (a second run finds the cluster already made and does nothing).
+  rc-init:
+    image: redis:7
+    container_name: dalan-test-rc-init
+    depends_on: [rc1, rc2, rc3, rc4, rc5, rc6]
+    restart: "no"
+    command:
+      - sh
+      - -c
+      - |
+        sleep 3
+        nodes=""
+        for n in rc1 rc2 rc3 rc4 rc5 rc6; do nodes="$$nodes $$(getent hosts $$n | cut -d' ' -f1):7000"; done
+        redis-cli -a test-redis --no-auth-warning --cluster create $$nodes --cluster-replicas 1 --cluster-yes || true
+
+  # Redis Sentinel (R6): one primary, two replicas, three sentinels watching "mymaster". Also only on this network.
+  rs-primary:
+    image: redis:7
+    container_name: dalan-test-rs-primary
+    networks: { default: { aliases: [rs-primary] } }
+    command: ["redis-server", "--requirepass", "test-redis", "--masterauth", "test-redis"]
+  rs-replica1: &rsreplica
+    image: redis:7
+    container_name: dalan-test-rs-replica1
+    networks: { default: { aliases: [rs-replica1] } }
+    depends_on: [rs-primary]
+    command: ["redis-server", "--replicaof", "rs-primary", "6379", "--requirepass", "test-redis", "--masterauth", "test-redis"]
+  rs-replica2: { <<: *rsreplica, container_name: dalan-test-rs-replica2, networks: { default: { aliases: [rs-replica2] } } }
+  rs-s1: &rssentinel
+    image: redis:7
+    container_name: dalan-test-rs-s1
+    networks: { default: { aliases: [rs-s1] } }
+    depends_on: [rs-primary]
+    command:
+      - sh
+      - -c
+      - |
+        printf 'port 26379\nsentinel resolve-hostnames yes\nsentinel monitor mymaster rs-primary 6379 2\nsentinel auth-pass mymaster test-redis\nsentinel down-after-milliseconds mymaster 3000\nsentinel failover-timeout mymaster 10000\n' > /tmp/sentinel.conf
+        exec redis-server /tmp/sentinel.conf --sentinel
+  rs-s2: { <<: *rssentinel, container_name: dalan-test-rs-s2, networks: { default: { aliases: [rs-s2] } } }
+  rs-s3: { <<: *rssentinel, container_name: dalan-test-rs-s3, networks: { default: { aliases: [rs-s3] } } }
+
   kbd:
     build: ./debian-sshd
     container_name: dalan-test-kbd

@@ -8,12 +8,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use redis::aio::MultiplexedConnection;
 use redis::Value;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use super::browse::RedisBytes;
+use super::cluster::Conn;
 use super::conn::redis_error;
 use super::gate::{self, Class, CommandTable, Decision};
 use super::write::{self, Target};
@@ -134,7 +134,7 @@ impl BulkState {
 
 /// Walks the keyspace and keeps what matches. `pattern` empty means every key.
 pub async fn preview(
-    conn: &mut MultiplexedConnection,
+    conn: &mut Conn,
     state: &BulkState,
     pattern: &str,
     key_type: Option<&str>,
@@ -143,45 +143,53 @@ pub async fn preview(
     state.stop.store(false, Ordering::Relaxed);
     let mut keys: Vec<Vec<u8>> = Vec::new();
     let mut seen = std::collections::HashSet::new();
-    let mut cursor = "0".to_string();
     let mut scanned = 0u64;
-    let complete = loop {
-        if state.stopped() {
-            break false;
-        }
-        let mut cmd = redis::cmd("SCAN");
-        cmd.arg(&cursor);
-        if !pattern.is_empty() && pattern != "*" {
-            cmd.arg("MATCH").arg(pattern.as_bytes());
-        }
-        cmd.arg("COUNT").arg(SCAN_COUNT);
-        if let Some(t) = key_type.filter(|t| !t.is_empty()) {
-            cmd.arg("TYPE")
-                .arg(if t == "json" { "ReJSON-RL" } else { t });
-        }
-        let (next, page): (String, Vec<Vec<u8>>) =
-            cmd.query_async(conn).await.map_err(|e| redis_error(&e))?;
-        scanned += SCAN_COUNT as u64;
-        for k in page {
-            // SCAN can return a key twice while the keyspace changes.
-            if seen.insert(k.clone()) {
-                keys.push(k);
+    // One server, or every primary of a cluster, one after another.
+    let targets = conn.scan_targets().await?;
+    let mut complete = true;
+    'nodes: for mut target in targets {
+        let mut cursor = "0".to_string();
+        loop {
+            if state.stopped() {
+                complete = false;
+                break 'nodes;
+            }
+            let mut cmd = redis::cmd("SCAN");
+            cmd.arg(&cursor);
+            if !pattern.is_empty() && pattern != "*" {
+                cmd.arg("MATCH").arg(pattern.as_bytes());
+            }
+            cmd.arg("COUNT").arg(SCAN_COUNT);
+            if let Some(t) = key_type.filter(|t| !t.is_empty()) {
+                cmd.arg("TYPE")
+                    .arg(if t == "json" { "ReJSON-RL" } else { t });
+            }
+            let (next, page): (String, Vec<Vec<u8>>) = cmd
+                .query_async(&mut target)
+                .await
+                .map_err(|e| redis_error(&e))?;
+            scanned += SCAN_COUNT as u64;
+            for k in page {
+                // SCAN can return a key twice while the keyspace changes.
+                if seen.insert(k.clone()) {
+                    keys.push(k);
+                }
+            }
+            if keys.len() > MAX_KEYS {
+                return Err(AppError::validation(
+                    "More than 5,000,000 keys match. Narrow the pattern and preview again.",
+                ));
+            }
+            emit(RedisBulkEvent::Scanning {
+                found: keys.len() as u64,
+                scanned,
+            });
+            cursor = next;
+            if cursor == "0" {
+                break;
             }
         }
-        if keys.len() > MAX_KEYS {
-            return Err(AppError::validation(
-                "More than 5,000,000 keys match. Narrow the pattern and preview again.",
-            ));
-        }
-        emit(RedisBulkEvent::Scanning {
-            found: keys.len() as u64,
-            scanned,
-        });
-        cursor = next;
-        if cursor == "0" {
-            break true;
-        }
-    };
+    }
     let count = keys.len() as u64;
     let sample = keys
         .iter()
@@ -203,9 +211,22 @@ pub async fn preview(
 }
 
 /// One batch as a pipeline, and how many keys the server says it changed.
-fn batch_command(action: RedisBulkAction, keys: &[Vec<u8>], unlink: bool) -> redis::Pipeline {
+fn batch_command(
+    action: RedisBulkAction,
+    keys: &[Vec<u8>],
+    unlink: bool,
+    per_key: bool,
+) -> redis::Pipeline {
     let mut pipe = redis::pipe();
     match action {
+        // In a cluster the keys of a batch live in different slots, and one command may only name keys of one
+        // slot. So each key gets its own command; `Conn` sends each to its node, grouped per node.
+        RedisBulkAction::Delete if per_key => {
+            for k in keys {
+                pipe.cmd(if unlink { "UNLINK" } else { "DEL" })
+                    .arg(k.as_slice());
+            }
+        }
         RedisBulkAction::Delete => {
             let c = pipe.cmd(if unlink { "UNLINK" } else { "DEL" });
             for k in keys {
@@ -271,7 +292,7 @@ pub fn approve(
 /// Runs the action on the previewed keys, 500 at a time with a short pause. Stop keeps what is done.
 /// The caller has asked `approve` first; this takes the preview, so it runs once.
 pub async fn run(
-    conn: &mut MultiplexedConnection,
+    conn: &mut Conn,
     table: &CommandTable,
     state: &BulkState,
     target: &Target,
@@ -302,7 +323,7 @@ pub async fn run(
         if state.stopped() {
             break;
         }
-        let reply: Value = batch_command(action, chunk, unlink)
+        let reply: Value = batch_command(action, chunk, unlink, conn.is_cluster())
             .query_async(conn)
             .await
             .map_err(|e| redis_error(&e))?;
@@ -415,24 +436,31 @@ mod tests {
     #[test]
     fn batches_are_one_unlink_or_one_command_per_key() {
         let k = keys(3);
-        assert!(packed(&batch_command(RedisBulkAction::Delete, &k, true))
-            .contains("UNLINK $9 session:0 $9 session:1 $9 session:2"));
         assert!(
-            packed(&batch_command(RedisBulkAction::Delete, &k, false)).contains("DEL $9 session:0")
+            packed(&batch_command(RedisBulkAction::Delete, &k, true, false))
+                .contains("UNLINK $9 session:0 $9 session:1 $9 session:2")
+        );
+        assert!(
+            packed(&batch_command(RedisBulkAction::Delete, &k, false, false))
+                .contains("DEL $9 session:0")
         );
         let expire = packed(&batch_command(
             RedisBulkAction::Expire { ttl_ms: 60_000 },
             &k,
             true,
+            false,
         ));
         assert_eq!(expire.matches("PEXPIRE").count(), 3);
         assert!(expire.contains("60000"));
         assert_eq!(
-            packed(&batch_command(RedisBulkAction::Persist, &k, true))
+            packed(&batch_command(RedisBulkAction::Persist, &k, true, false))
                 .matches("PERSIST")
                 .count(),
             3
         );
+        // A cluster: one UNLINK per key, so no command names keys of two slots.
+        let per_key = packed(&batch_command(RedisBulkAction::Delete, &k, true, true));
+        assert_eq!(per_key.matches("UNLINK").count(), 3);
         assert_eq!(
             keys(1201).chunks(BATCH).map(<[_]>::len).collect::<Vec<_>>(),
             [500, 500, 201]

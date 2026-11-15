@@ -6,7 +6,7 @@ import type { Model, RedisDb } from '../model'
 import type { RedisBytes } from '../../../app/types/bindings'
 import { globToRegExp, keyspace, otherKeyspace, type FakeKey } from './redisKeys'
 
-type Keys = 'redisDbList' | 'redisDbSave' | 'redisDbDelete' | 'redisDbTest' | 'redisOpen' | 'redisRespond' | 'redisSelect' | 'redisClose'
+type Keys = 'redisNodes' | 'redisDbList' | 'redisDbSave' | 'redisDbDelete' | 'redisDbTest' | 'redisOpen' | 'redisRespond' | 'redisSelect' | 'redisClose'
   | 'redisScan' | 'redisKeyInfo' | 'redisValuePage'
 
 const PAGE = 500
@@ -48,13 +48,34 @@ const summary = (m: import('../model').Model, d: RedisDb) => ({
 
 function check(m: import('../model').Model, i: any) {
   if (!String(i.name ?? '').trim()) fail('validation', 'Give the database a name of up to 64 characters.')
-  if (!String(i.address ?? '').trim() || /\s|\//.test(String(i.address).trim())) fail('validation', 'The address is a host name or an IP address, without spaces or a path.')
+  const entries = i.kind === 'sentinel' ? String(i.address ?? '').split(',').map((e: string) => e.trim()).filter(Boolean) : [String(i.address ?? '').trim()]
+  if (!entries.length || entries.some((e: string) => !e || /\s|\/|,/.test(e))) fail('validation', i.kind === 'sentinel' ? 'List the sentinels as addresses with a comma between them, such as 10.0.2.21:26379, 10.0.2.22:26379.' : 'The address is a host name or an IP address, without spaces or a path.')
   if (!(Number(i.port) >= 1 && Number(i.port) <= 65535)) fail('validation', 'The port must be between 1 and 65535.')
+  if (i.kind === 'sentinel' && !String(i.sentinel_master ?? '').trim()) fail('validation', 'A Sentinel database needs the name of its primary.')
   if (i.route === 'host' && !i.host_id) fail('validation', 'Pick the host to go through.')
   if (i.route === 'host' && !m.hosts.some(h => h.id === i.host_id)) fail('validation', 'That host is gone. Pick another one.')
 }
 
 export const redis: Pick<Handlers, Keys> = {
+  // S31 "Nodes": a made-up cluster of three shards, or a Sentinel set; nothing for a single server.
+  redisNodes: (a, { m }) => {
+    const c = m.redisConns.get(a.connId)
+    const d = m.redisDbs.find(x => x.id === c?.db)
+    if (d?.kind === 'cluster') {
+      return [
+        { role: 'primary', address: '10.0.2.11:7000', detail: '0–5460', state: 'ok' }, { role: 'replica', address: '10.0.2.14:7000', detail: 'of 10.0.2.11:7000', state: 'ok' },
+        { role: 'primary', address: '10.0.2.12:7000', detail: '5461–10922', state: 'ok' }, { role: 'replica', address: '10.0.2.15:7000', detail: 'of 10.0.2.12:7000', state: 'catching up' },
+        { role: 'primary', address: '10.0.2.13:7000', detail: '10923–16383', state: 'ok' }, { role: 'replica', address: '10.0.2.16:7000', detail: 'of 10.0.2.13:7000', state: 'fail' },
+      ]
+    }
+    if (d?.kind === 'sentinel') {
+      return [
+        { role: 'primary', address: '10.0.2.31:6379', detail: d.sentinel_master ?? '', state: 'ok' }, { role: 'replica', address: '10.0.2.32:6379', detail: 'of 10.0.2.31:6379', state: 'ok' },
+        { role: 'sentinel', address: '10.0.2.21:26379', detail: 'watches the primary', state: 'ok' }, { role: 'sentinel', address: '10.0.2.22:26379', detail: 'watches the primary', state: 'ok' },
+      ]
+    }
+    return []
+  },
   redisDbList: (_a, { m }) => [...m.redisDbs].sort((a, b) => a.name.localeCompare(b.name)).map(d => summary(m, d)),
   redisDbSave: (a, { m, id }) => {
     const i = a.input
@@ -99,7 +120,8 @@ export const redis: Pick<Handlers, Keys> = {
       const host = m.hosts.find(h => h.id === d.host_id)
       const steps = [
         ...(host ? [{ label: `Sign in to ${host.label}`, detail: null }] : []),
-        { label: `Reach Redis at ${d.address}:${d.port}`, detail: d.tls ? 'with TLS' : null },
+        ...(d.kind === 'sentinel' ? [{ label: `Ask the sentinels for ${d.sentinel_master}`, detail: null }] : []),
+        { label: d.kind === 'sentinel' ? 'Reach the primary' : `Reach Redis at ${d.address}:${d.port}`, detail: d.tls ? 'with TLS' : null },
         { label: d.username ? `Sign in as ${d.username}` : 'Sign in to Redis', detail: null },
       ]
       queueMicrotask(() => {
@@ -108,7 +130,9 @@ export const redis: Pick<Handlers, Keys> = {
           send(events, { type: 'step', index, state: 'active', detail: null })
           send(events, { type: 'step', index, state: 'done', detail: null })
         })
-        send(events, { type: 'ready', info: { version: '7.2.4', mode: 'standalone', replica: false, resp3: true, db_count: 16, databases: [{ index: 0, keys: keysInDb0 }, { index: 3, keys: 2 }], selected: d.default_db, latency_ms: 3 } })
+        // A cluster has one logical database and no picker.
+        const cluster = d.kind === 'cluster'
+        send(events, { type: 'ready', info: { version: '7.2.4', mode: cluster ? 'cluster' : 'standalone', replica: false, resp3: true, db_count: cluster ? 1 : 16, databases: cluster ? [{ index: 0, keys: keysInDb0 }] : [{ index: 0, keys: keysInDb0 }, { index: 3, keys: 2 }], selected: cluster ? 0 : d.default_db, latency_ms: 3 } })
       })
     }
     return { conn_id: connId }

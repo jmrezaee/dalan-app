@@ -50,6 +50,21 @@ const route = computed({
     else if (!form.address) form.address = '127.0.0.1'
   },
 })
+// Switching the kind moves the port to that kind's usual one, unless it was changed by hand.
+const USUAL_PORT = { single: 6379, cluster: 6379, sentinel: 26379 } as const
+const kind = computed({
+  get: () => form.kind as string,
+  set: (v: string) => {
+    const next = v as DatabaseForm['kind']
+    if (Number(form.port) === USUAL_PORT[form.kind]) form.port = USUAL_PORT[next]
+    form.kind = next
+    if (next !== 'sentinel') form.sentinel_master = null
+  },
+})
+const addressLabel = computed(() => {
+  const seen = form.route === 'host' ? ', as seen from the host' : ''
+  return form.kind === 'sentinel' ? `Sentinels${seen}` : form.kind === 'cluster' ? `Address of any node${seen}` : `Address${seen}`
+})
 const environment = computed({ get: () => form.environment as string, set: (v: string) => { form.environment = v as DatabaseForm['environment'] } })
 const savedPassword = computed(() => hadPassword.value && !form.clear_password)
 // A saved production database can't be loosened here: that goes through the tab's mode button, which asks for the
@@ -106,18 +121,21 @@ async function submit() {
           <p v-else class="text-xs text-muted">Dalan signs in to {{ hostLabel }} and talks to Redis from there. Nothing to forward by hand.</p>
         </div>
 
-        <div class="grid grid-cols-[minmax(0,1fr)_96px] gap-2.5">
-          <div class="flex flex-col gap-1.5"><Label for="rdb-address">{{ form.route === 'host' ? 'Address, as seen from the host' : 'Address' }}</Label><Input id="rdb-address" v-model="form.address" class="font-mono text-xs" :placeholder="form.route === 'host' ? '127.0.0.1' : 'redis.example.com'" autocomplete="off" spellcheck="false" /></div>
-          <div class="flex flex-col gap-1.5"><Label for="rdb-port">Port</Label><Input id="rdb-port" v-model="form.port" class="font-mono text-xs" inputmode="numeric" autocomplete="off" /></div>
+        <div class="flex flex-col gap-1.5">
+          <Label id="rdb-kind">Kind</Label>
+          <Segmented v-model="kind" label="Kind" :options="[{ value: 'single', label: 'Single server' }, { value: 'cluster', label: 'Cluster' }, { value: 'sentinel', label: 'Sentinel' }]" />
+          <p v-if="form.kind === 'cluster'" class="text-xs text-muted">Give the address of any node. Dalan asks it where the others are and reaches each one the same way.</p>
+          <p v-else-if="form.kind === 'sentinel'" class="text-xs text-muted">List the sentinels. Dalan asks them where the primary is, and asks again if it moves.</p>
         </div>
 
-        <div class="flex flex-col gap-1.5">
-          <Label>Kind</Label>
-          <!-- Cluster and Sentinel arrive with their own phase; until then only a single server can be opened. -->
-          <div role="radiogroup" aria-label="Kind" class="flex gap-0.5 rounded-md border border-border bg-bg p-0.5">
-            <button type="button" role="radio" aria-checked="true" class="grid h-7 flex-1 place-items-center rounded bg-surface-hover px-2 text-xs text-text">Single server</button>
-            <button v-for="k in ['Cluster', 'Sentinel']" :key="k" type="button" role="radio" aria-checked="false" disabled title="Not built yet" class="grid h-7 flex-1 place-items-center rounded px-2 text-xs text-muted opacity-60">{{ k }}</button>
-          </div>
+        <div class="grid grid-cols-[minmax(0,1fr)_96px] gap-2.5">
+          <div class="flex flex-col gap-1.5"><Label for="rdb-address">{{ addressLabel }}</Label><Input id="rdb-address" v-model="form.address" class="font-mono text-xs" :placeholder="form.kind === 'sentinel' ? '10.0.2.21:26379, 10.0.2.22:26379' : form.route === 'host' ? '127.0.0.1' : 'redis.example.com'" autocomplete="off" spellcheck="false" /></div>
+          <div class="flex flex-col gap-1.5"><Label for="rdb-port">{{ form.kind === 'sentinel' ? 'Default port' : 'Port' }}</Label><Input id="rdb-port" v-model="form.port" class="font-mono text-xs" inputmode="numeric" autocomplete="off" /></div>
+        </div>
+        <div v-if="form.kind === 'sentinel'" class="flex flex-col gap-1.5">
+          <Label for="rdb-master">Primary's name</Label>
+          <Input id="rdb-master" :model-value="form.sentinel_master ?? ''" class="font-mono text-xs" placeholder="mymaster" autocomplete="off" spellcheck="false" @update:model-value="(v: string | number) => { form.sentinel_master = String(v) || null }" />
+          <p class="text-xs text-muted">The name the sentinels know the primary by.</p>
         </div>
 
         <div class="grid grid-cols-2 gap-2.5">

@@ -47,6 +47,8 @@ pub struct Flags {
     pub readonly: bool,
     /// How many arguments it takes, counting its own name; negative means "at least".
     pub arity: i64,
+    /// Which argument is its first key (1 = right after the name); 0 means it has no key, or not at a fixed place.
+    pub first_key: i64,
 }
 
 /// The server's command table, read once after sign-in. Keys are upper-case: `SET`, and `CONFIG|GET` for a
@@ -83,6 +85,9 @@ impl CommandTable {
         if let Some(redis::Value::Int(n)) = parts.get(1) {
             flags.arity = *n;
         }
+        if let Some(redis::Value::Int(n)) = parts.get(3) {
+            flags.first_key = *n;
+        }
         if let Some(redis::Value::Array(list) | redis::Value::Set(list)) = parts.get(2) {
             for f in list.iter().filter_map(text) {
                 match f.to_ascii_lowercase().as_str() {
@@ -102,6 +107,25 @@ impl CommandTable {
         }
     }
 
+    /// A table that only knows where each command's first key is (cluster routing tests).
+    #[cfg(test)]
+    pub fn with_keys(entries: &[(&str, i64)]) -> Self {
+        Self(
+            entries
+                .iter()
+                .map(|(n, first_key)| {
+                    (
+                        n.to_string(),
+                        Flags {
+                            first_key: *first_key,
+                            ..Flags::default()
+                        },
+                    )
+                })
+                .collect(),
+        )
+    }
+
     #[cfg(test)]
     pub fn of(entries: &[(&str, bool, bool)]) -> Self {
         Self(
@@ -114,6 +138,7 @@ impl CommandTable {
                             write: *write,
                             readonly: *readonly,
                             arity: 0,
+                            first_key: 0,
                         },
                     )
                 })
@@ -129,6 +154,11 @@ impl CommandTable {
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    /// Where a command's first key is, for cluster routing. `None`: the server's table doesn't know the command.
+    pub fn first_key(&self, name: &str) -> Option<i64> {
+        self.0.get(name).map(|f| f.first_key)
     }
 
     /// Every top-level command with its flags, by name (subcommands, `CONFIG|GET`, are left out).
@@ -660,7 +690,8 @@ mod tests {
             Some(Flags {
                 write: false,
                 readonly: true,
-                arity: -2
+                arity: -2,
+                first_key: 1
             })
         );
         assert_eq!(
@@ -668,7 +699,8 @@ mod tests {
             Some(Flags {
                 write: true,
                 readonly: false,
-                arity: -2
+                arity: -2,
+                first_key: 1
             })
         );
         assert_eq!(t.get("CONFIG", Some("GET")).map(|f| f.arity), Some(-2));

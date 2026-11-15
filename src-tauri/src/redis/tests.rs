@@ -27,6 +27,7 @@ fn direct(password: Option<&str>, username: Option<&str>) -> Config {
         route: RedisRoute::Direct,
         host_id: None,
         kind: RedisKind::Single,
+        sentinel_master: None,
         target: Target {
             address: "127.0.0.1".into(),
             port: DIRECT_PORT,
@@ -1374,4 +1375,212 @@ async fn l3_redis_listening_uses_its_own_connection_and_delivers_messages_as_byt
         .unwrap();
     assert_eq!(receivers, 0, "nobody listens any more");
     manager.close(&conn_id);
+}
+
+// ---- R6: Cluster and Sentinel, through the host (the only way to reach them, like production)
+
+use super::cluster::{self, Conn};
+use super::sentinel;
+
+/// Answers the new host key the way a person would in the tab.
+fn trusting(prompts: &Arc<Prompts>) -> Emit {
+    let answering = Arc::clone(prompts);
+    Arc::new(move |e| {
+        if let RedisEvent::Host {
+            event: SessionEvent::Prompt { prompt_id, .. },
+        } = e
+        {
+            let _ = answering.answer(
+                &prompt_id,
+                PromptAnswer {
+                    accept: true,
+                    text: None,
+                    remember: true,
+                },
+            );
+        }
+    })
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_redis_cluster_routes_by_slot_scans_every_node_and_deletes_in_bulk() {
+    let h = harness(None).await;
+    host_is_container_a(&h).await;
+    let prompts = Arc::new(Prompts::default());
+    let cfg = Config {
+        route: RedisRoute::Host,
+        host_id: Some(h.host_id.clone()),
+        kind: RedisKind::Cluster,
+        // Any node will do; the cluster says where the others are (addresses on the Docker network).
+        target: Target {
+            address: "rc1".into(),
+            port: 7000,
+            tls: false,
+            tls_server_name: None,
+        },
+        ..direct(Some(PASSWORD), None)
+    };
+    let c = tokio::time::timeout(
+        Duration::from_secs(60),
+        conn::connect(&h.state.store(), &cfg, &prompts, &trusting(&prompts)),
+    )
+    .await
+    .expect("connecting took too long")
+    .expect("the cluster should open through the host");
+    assert_eq!(c.info.mode, "cluster");
+    assert_eq!(c.info.db_count, 1);
+    let Conn::Cluster(inner) = &c.conn else {
+        panic!("a cluster connection routes by slot")
+    };
+    assert_eq!(inner.primaries().len(), 3);
+    let nodes = inner.nodes().await.unwrap();
+    assert_eq!(nodes.iter().filter(|n| n.role == "primary").count(), 3);
+    assert_eq!(nodes.iter().filter(|n| n.role == "replica").count(), 3);
+    assert_eq!(nodes[0].detail, "0–5460");
+
+    // 300 keys land in every slot range; each write finds its node (or follows the server's MOVED).
+    let mut r = c.conn.clone();
+    let p = format!("dalan-test:{}:", uuid::Uuid::now_v7());
+    let pending = PendingStore::default();
+    let open = db(RedisWriteMode::Open);
+    for i in 0..300 {
+        write::prepare(
+            &mut r,
+            &c.table,
+            &pending,
+            &open,
+            RedisWriteOp::Create {
+                key: t(&format!("{p}{i}")),
+                key_type: "string".into(),
+                field: None,
+                value: t("v"),
+                score: None,
+                ttl_ms: Some(600_000),
+            },
+        )
+        .await
+        .unwrap();
+    }
+    let slots: std::collections::HashSet<u16> = (0..300)
+        .map(|i| cluster::slot(format!("{p}{i}").as_bytes()))
+        .collect();
+    assert!(slots.len() > 200, "the keys are spread over many slots");
+    let value: String = redis::cmd("GET")
+        .arg(format!("{p}7"))
+        .query_async(&mut r)
+        .await
+        .unwrap();
+    assert_eq!(value, "v");
+    // A transaction on one key works; keys of two slots get the server's own error, untouched.
+    let cross = redis::cmd("MSET")
+        .arg(format!("{p}a"))
+        .arg(1)
+        .arg(format!("{p}b"))
+        .arg(2)
+        .query_async::<()>(&mut r)
+        .await;
+    assert!(cross.unwrap_err().to_string().contains("CROSSSLOT"));
+
+    // The scan walks all three primaries; the cursor names the node.
+    let mut cursor = String::new();
+    let mut found = 0;
+    let mut node_cursors = std::collections::HashSet::new();
+    loop {
+        let page = browse::scan(&mut r, &cursor, &format!("{p}*"), None, 500)
+            .await
+            .unwrap();
+        found += page.keys.len();
+        if page.cursor == "0" {
+            break;
+        }
+        node_cursors.insert(page.cursor.split(':').next().unwrap().to_string());
+        cursor = page.cursor;
+    }
+    assert_eq!(found, 300);
+    assert!(
+        node_cursors.contains("1") && node_cursors.contains("2"),
+        "{node_cursors:?}"
+    );
+
+    // Bulk delete: one UNLINK per key, each sent to its own node.
+    let state = BulkState::default();
+    let quiet: bulk::BulkEmit = Arc::new(|_| {});
+    let preview = bulk::preview(&mut r, &state, &format!("{p}*"), None, &quiet)
+        .await
+        .unwrap();
+    assert_eq!(preview.count, 300);
+    let done = bulk::run(
+        &mut r,
+        &c.table,
+        &state,
+        &open,
+        &preview.id,
+        RedisBulkAction::Delete,
+        &quiet,
+    )
+    .await
+    .unwrap();
+    assert_eq!((done.processed, done.changed), (300, 300));
+    let left = bulk::preview(&mut r, &state, &format!("{p}*"), None, &quiet)
+        .await
+        .unwrap();
+    assert_eq!(left.count, 0);
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_redis_sentinel_finds_the_primary_and_lists_the_set() {
+    let h = harness(None).await;
+    host_is_container_a(&h).await;
+    let prompts = Arc::new(Prompts::default());
+    let cfg = |master: &str, sentinels: &str| Config {
+        route: RedisRoute::Host,
+        host_id: Some(h.host_id.clone()),
+        kind: RedisKind::Sentinel,
+        sentinel_master: Some(master.into()),
+        target: Target {
+            address: sentinels.into(),
+            port: sentinel::DEFAULT_PORT,
+            tls: false,
+            tls_server_name: None,
+        },
+        ..direct(Some(PASSWORD), None)
+    };
+    let (emit, seen) = recorder();
+    let trust = trusting(&prompts);
+    let both: Emit = Arc::new(move |e: RedisEvent| {
+        trust(e.clone());
+        emit(e);
+    });
+    // The first sentinel in the list does not exist: the next one answers.
+    let c = tokio::time::timeout(
+        Duration::from_secs(60),
+        conn::connect(
+            &h.state.store(),
+            &cfg("mymaster", "rs-nobody:26379, rs-s2, rs-s3:26379"),
+            &prompts,
+            &both,
+        ),
+    )
+    .await
+    .expect("connecting took too long")
+    .expect("the sentinels know mymaster");
+    assert!(!c.info.replica, "the tab is on the primary");
+    let events = seen.lock().unwrap().clone();
+    assert!(
+        matches!(&events[0], RedisEvent::Plan { steps } if steps.iter().any(|s| s.label == "Ask the sentinels for mymaster")),
+        "the plan has a step for the sentinels"
+    );
+    let mut r = c.conn.clone();
+    let role: redis::Value = redis::cmd("ROLE").query_async(&mut r).await.unwrap();
+    assert!(format!("{role:?}").contains("master"));
+
+    // A name the sentinels don't know is said plainly.
+    let err = match conn::connect(&h.state.store(), &cfg("nope", "rs-s1"), &prompts, &both).await {
+        Ok(_) => panic!("no primary is called nope"),
+        Err(e) => e,
+    };
+    assert_eq!(err.code, ErrorCode::RedisRefused);
+    assert!(err.message.contains("nope"));
 }

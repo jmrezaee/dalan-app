@@ -1,11 +1,11 @@
 //! The Server view (S31): what the server says about itself (`INFO`) and its own slow log. Read-only.
 //! Dalan never turns on live command tracing (`MONITOR`).
 
-use redis::aio::MultiplexedConnection;
 use redis::Value;
 use serde::Serialize;
 use specta::Type;
 
+use super::cluster::Conn;
 use super::conn::redis_error;
 use super::gate;
 use crate::error::AppResult;
@@ -102,12 +102,35 @@ pub fn parse_info(info: &str) -> RedisServerStats {
     }
 }
 
-pub async fn info(conn: &mut MultiplexedConnection) -> AppResult<RedisServerStats> {
+pub async fn info(conn: &mut Conn) -> AppResult<RedisServerStats> {
     let text: String = redis::cmd("INFO")
         .query_async(conn)
         .await
         .map_err(|e| redis_error(&e))?;
-    Ok(parse_info(&text))
+    let mut stats = parse_info(&text);
+    if conn.is_cluster() {
+        // The tiles are one node's; the keys are the whole cluster's: every primary's db0, added up.
+        let (mut keys, mut expires) = (0, 0);
+        for mut node in conn.scan_targets().await? {
+            let keyspace: String = redis::cmd("INFO")
+                .arg("keyspace")
+                .query_async(&mut node)
+                .await
+                .unwrap_or_default();
+            if let Some(db0) = parse_info(&keyspace).databases.first() {
+                keys += db0.keys;
+                expires += db0.expires;
+            }
+        }
+        let avg_ttl_ms = stats.databases.first().map_or(0, |d| d.avg_ttl_ms);
+        stats.databases = vec![RedisDbStats {
+            index: 0,
+            keys,
+            expires,
+            avg_ttl_ms,
+        }];
+    }
+    Ok(stats)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Type)]
@@ -172,7 +195,7 @@ pub fn parse_slowlog(v: Value) -> Vec<RedisSlowEntry> {
 }
 
 /// The newest 50 slow commands. A user who may not read the log gets an empty list.
-pub async fn slowlog(conn: &mut MultiplexedConnection) -> AppResult<Vec<RedisSlowEntry>> {
+pub async fn slowlog(conn: &mut Conn) -> AppResult<Vec<RedisSlowEntry>> {
     let reply = redis::cmd("SLOWLOG")
         .arg("GET")
         .arg(50)

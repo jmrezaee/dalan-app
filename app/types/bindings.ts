@@ -95,6 +95,11 @@ export const commands = {
 	redisBulkRun: (connId: string, previewId: string, action: RedisBulkAction, typedName: string | null, progress: Channel<RedisBulkEvent>) => typedError<RedisBulkResult, AppError>(__TAURI_INVOKE("redis_bulk_run", { connId, previewId, action, typedName, progress })),
 	/**  "Stop": the scan or the run ends after its current batch. What is already done stays done. */
 	redisBulkStop: (connId: string) => __TAURI_INVOKE<void>("redis_bulk_stop", { connId }),
+	/**
+	 *  S31 "Nodes": a cluster's primaries and replicas with their slots, or a Sentinel set (primary, replicas,
+	 *  sentinels). Empty for a single server.
+	 */
+	redisNodes: (connId: string) => typedError<RedisNode[], AppError>(__TAURI_INVOKE("redis_nodes", { connId })),
 	/**  First run? Locked? Allowed while locked. */
 	vaultStatus: () => typedError<VaultStatus_Serialize, AppError>(__TAURI_INVOKE("vault_status")),
 	/**  F10: derive the key, write the vault row, and leave the vault unlocked. */
@@ -1451,6 +1456,18 @@ export type RedisMessage_Serialize = {
 	/**  The pattern that matched, when it came through a pattern. */
 	pattern: string | null,
 	payload: RedisBytes,
+};
+
+/**  One node as the Server view lists it. */
+export type RedisNode = {
+	/**  `primary`, `replica` or `sentinel`. */
+	role: string,
+	/**  `10.0.2.11:7000` */
+	address: string,
+	/**  The slots it serves (`0–5460`), or the primary it follows (`of 10.0.2.11:7000`). */
+	detail: string,
+	/**  `ok`, `catching up`, `failed`, or the server's own word. */
+	state: string,
 };
 
 export type RedisOpened = {

@@ -76,6 +76,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::redis::redis_bulk_preview,
             commands::redis::redis_bulk_run,
             commands::redis::redis_bulk_stop,
+            commands::redis::redis_nodes,
             commands::vault::vault_status,
             commands::vault::vault_create,
             commands::vault::vault_unlock,

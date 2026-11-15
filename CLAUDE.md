@@ -111,6 +111,7 @@ cd src-tauri && cargo clippy -- -D warnings && cargo test
 - **R3 (the write gate and the editors) is built** (`[h]`): `redis/gate.rs` decides for every command by the database's mode, writes are prepare → confirm → commit once, and every type has its editor. Its hand check and known gaps are in `replica/progress.md`. 
 - **R4 (Console and Server) is built** (`[h]`): console lines are parsed and printed in Rust and pass the gate; `MULTI` queues in Rust; history is encrypted. Its hand check is in `replica/progress.md`.
 - **R5 (Pub/Sub and bulk actions) is built** (`[h]`): a second connection per tab for listening, messages batched with a drop count; bulk preview, typed name, batches of 500, Stop. Its hand check is in `replica/progress.md`.
+- **R6 (Cluster and Sentinel) is built** (`[h]`): our own slot routing behind `Conn` (one server or a cluster), `MOVED`/`ASK`, a scan across nodes, sentinel lookup, the Nodes panel. Its hand check is in `replica/progress.md`. Next: `go R7` (hardening and hand checks).
 - **Manual checks:** a phase that needs Mehrdad to test something by hand is not done until he has reported back.
 - **M1 is done when F01, F11 and F12 work against a real server:**
   - unlock

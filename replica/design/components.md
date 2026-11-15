@@ -307,6 +307,8 @@ DatabasesView (S26)                                                             
 DatabaseSheet (S27)
   Sheet 440 wide, title "New database" / "Edit database", footer h 56: [Test connection] result text … [Cancel] [Save] (primary)
   fields    Name · Environment (Segmented None / Staging / Production + hint "Production shows an amber bar on the tab, so nobody mistakes it for staging.")
+            Kind (Segmented Single server / Cluster / Sentinel; Cluster: "Give the address of any node. Dalan asks it where the others are and reaches each one the same way.";
+                  Sentinel: the address field becomes "Sentinels" (a comma list), the port "Default port" (26379), plus "Primary's name" with "The name the sentinels know the primary by.") ·
             Reach it (Segmented Directly / Through a host) · Host (select of saved SSH hosts; hint "Dalan signs in to db-primary and talks to Redis from there. Nothing to forward by hand.")
             Address ("Address", or "Address, as seen from the host") + Port (96 wide, mono) · Kind (Segmented Single server / Cluster / Sentinel; the last two disabled until they are built)
             Username (optional) + Password (PasswordInput; "Saved in the vault" + Change when one is saved; "Remove saved password")
@@ -436,7 +438,9 @@ RedisServer (S31)
   panels   Slow commands (When | Took | Command | Client; newest first; [Clear log…] ghost, hidden in Read-only → DangerConfirmDialog;
            footer "Read from the server's own slow log. Dalan never turns on live command tracing."; empty "Nothing slow has been logged.")
            Keys by database (Database | Keys | With expiry | Avg. time left; "—" when none expire; empty "This server holds no keys.")
-           Nodes (Cluster and Sentinel only; arrives in R6)
+           Nodes (Cluster and Sentinel only, under Keys by database): Role (primary / replica / sentinel, muted) | Address (mono) |
+           Slots ("0–5460", or "of 10.0.2.11:7000" for a replica; the column is "Follows" for Sentinel) | State (ok success, catching up warning, anything else danger)
+           note beside the title: "the tiles above are one node's; keys are the whole cluster's" / "as the sentinels see them"
   states   loading (skeleton tiles), error (danger line + Try again), a limited user (tiles show what INFO gave; the slow log is empty)
 
 RedisPubSub (S32)

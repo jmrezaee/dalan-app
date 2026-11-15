@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { toast } from 'vue-sonner'
-import type { RedisBytes, RedisDbKeys, RedisKeyInfo_Serialize, RedisKeyRow, RedisPending_Serialize, RedisWriteOp_Deserialize, RedisCommandInfo_Serialize, RedisConsoleReply_Serialize, RedisServerStats, RedisSlowEntry, RedisBulkAction, RedisBulkEvent, RedisMessage_Serialize, RedisSubEvent_Serialize, RedisPlanStep_Serialize, PromptKind, RedisEvent_Serialize, RedisServerInfo, RedisStepState, RedisValuePage_Serialize } from '~/types/bindings'
+import type { RedisBytes, RedisDbKeys, RedisKeyInfo_Serialize, RedisKeyRow, RedisPending_Serialize, RedisWriteOp_Deserialize, RedisCommandInfo_Serialize, RedisConsoleReply_Serialize, RedisNode, RedisServerStats, RedisSlowEntry, RedisBulkAction, RedisBulkEvent, RedisMessage_Serialize, RedisSubEvent_Serialize, RedisPlanStep_Serialize, PromptKind, RedisEvent_Serialize, RedisServerInfo, RedisStepState, RedisValuePage_Serialize } from '~/types/bindings'
 import { bytesId, bytesText, textBytes } from '~/utils/redisBytes'
 import { foldersOf } from '~/utils/redisTree'
 import { useTauri } from '~/composables/useTauri'
@@ -599,6 +599,8 @@ function setup() {
   // ---- Server view (S31): INFO and the slow log, read again while the view shows.
   const stats = ref<RedisServerStats | null>(null)
   const slowlog = ref<RedisSlowEntry[]>([])
+  /** A cluster's nodes or a Sentinel set; empty for a single server. */
+  const nodes = ref<RedisNode[]>([])
   const serverAt = ref<number | null>(null)
   const serverError = ref('')
   const serverLoading = ref(false)
@@ -606,9 +608,10 @@ function setup() {
     if (!connId.value || status.value !== 'ready' || serverLoading.value) return
     serverLoading.value = true
     try {
-      const [info, slow] = await Promise.all([api.redisInfo(connId.value), api.redisSlowlog(connId.value)])
+      const [info, slow, list] = await Promise.all([api.redisInfo(connId.value), api.redisSlowlog(connId.value), api.redisNodes(connId.value).catch(() => [])])
       stats.value = info
       slowlog.value = slow
+      nodes.value = list
       serverAt.value = Date.now()
       serverError.value = ''
       keys.value = Object.fromEntries(info.databases.map(d => [d.index, d.keys ?? 0]))
@@ -640,6 +643,7 @@ function setup() {
     commandList.value = []
     stats.value = null
     slowlog.value = []
+    nodes.value = []
     subs.value = []
     messages.value = []
     heldMessages.value = []
@@ -651,7 +655,7 @@ function setup() {
     setSeparator, scan, scanMore, toggleFolder, openKey, closeKey, loadMore, loadAll, reloadKey,
     pendingWrite, writeBusy, write, confirmWrite, cancelWrite,
     consoleEntries, consoleHistory, commandList, loadConsole, consoleRun, consoleSend, consoleCancel, consoleClear, consoleClearHistory,
-    stats, slowlog, serverAt, serverError, serverLoading, refreshServer,
+    stats, slowlog, nodes, serverAt, serverError, serverLoading, refreshServer,
     subs, messages, heldMessages, received, lost, paused, subError, listen, unlisten, setPaused, clearMessages, publish, bulkPreview, bulkRun, bulkStop }
 }
 

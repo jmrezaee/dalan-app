@@ -303,6 +303,21 @@ Publishing is the `Publish` write op, so it passes the gate.
 exactly those, once: `UNLINK` (or `DEL`) per 500 keys, or one `PEXPIRE` / `PERSIST` per key in a pipeline of 500, with a 20 ms pause
 between batches. Stop is a flag read between batches. A bulk action is `dangerous`: refused in Read-only, typed name otherwise.
 
+**Cluster (R6, `redis/cluster.rs`).** The library's cluster client opens its own sockets, which could not go through the SSH route, so
+the routing is ours. `Conn` is `Single(MultiplexedConnection)` or `Cluster(Arc<Cluster>)` and implements the crate's `ConnectionLike`,
+so every `redis::cmd(...).query_async(&mut conn)` in `browse`, `write`, `console`, `bulk` and `server` works for both. A cluster keeps a
+slot map (`CLUSTER SHARDS`, falling back to `CLUSTER SLOTS`), hashes keys with CRC16 mod 16384 honouring `{hash tags}`, finds a
+command's key from the server's command table (first-key position; `EVAL` and `XREAD` by hand), and keeps one connection per node,
+each opened by the `Opener` through the same route (another `direct-tcpip` channel on the tab's SSH connection). `route` follows
+`MOVED` (and reads the map again) and `ASK` (once, with `ASKING` in the same pipeline), at most five times; any other error, such as
+`CROSSSLOT`, comes back untouched. A transaction goes whole to the node of its first key; a plain pipeline is split per node and its
+replies put back in order. `SCAN` walks the primaries one after another: the UI's cursor is `node:cursor`. Bulk delete sends one
+`UNLINK` per key. A cluster has one logical database; `SELECT` is not offered.
+
+**Sentinel (R6, `redis/sentinel.rs`).** The address is a comma list of sentinels. Each is asked `SENTINEL get-master-addr-by-name`
+through the route until one answers; the tab connects to that address and refuses it if it says it is a replica. A reconnect asks
+again. The plan gets one more step ("Ask the sentinels for mymaster").
+
 | command | does | input | output | flow |
 | --- | --- | --- | --- | --- |
 | `redis_db_list` | saved databases, by name; never a password, only `has_password` | – | `RedisDatabase[]` | F13 |
@@ -330,6 +345,7 @@ between batches. Stop is a flag read between batches. A bulk action is `dangerou
 | `redis_bulk_preview` | walks the keyspace with `SCAN`, keeps the matching keys in Rust, answers with the count and a sample of 20 | `{ conn_id, pattern, key_type?, progress: Channel<RedisBulkEvent> }` | `RedisBulkPreview` | F18 |
 | `redis_bulk_run` | delete, set expiry or remove expiry on the previewed keys, 500 per batch; always `dangerous` for the gate | `{ conn_id, preview_id, action, typed_name?, progress }` | `RedisBulkResult` | F18 |
 | `redis_bulk_stop` | ends the scan or the run after its current batch | `{ conn_id }` | `()` | F18 |
+| `redis_nodes` | a cluster's primaries and replicas with slots and health, or a Sentinel set; empty for one server | `{ conn_id }` | `RedisNode[]` | F19 |
 
 `RedisEvent`: `plan { steps }` (one step per SSH hop, then "reach Redis", then "sign in"), `step { index, state, detail }`,
 `host { event }` (a `SessionEvent` from a hop: its prompts), `ready { info }`, `latency { ms }`, `failed { code, message }`,

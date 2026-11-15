@@ -7,11 +7,11 @@
 //! Nothing here writes. Listing uses `SCAN` (never `KEYS`); values load in pages of 500; a string over 1 MB loads its
 //! first 64 KB until "Load all" is asked for.
 
-use redis::aio::MultiplexedConnection;
 use redis::Value;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use super::cluster::Conn;
 use super::conn::redis_error;
 use crate::error::{AppError, AppResult};
 
@@ -333,15 +333,64 @@ fn is_stream_id(s: &str) -> bool {
 }
 
 async fn run<T: redis::FromRedisValue>(
-    conn: &mut MultiplexedConnection,
+    // One server's handle, or `Conn` (which routes in a cluster): both are the crate's `ConnectionLike`.
+    conn: &mut (impl redis::aio::ConnectionLike + Send),
     cmd: &redis::Cmd,
 ) -> AppResult<T> {
     cmd.query_async(conn).await.map_err(|e| redis_error(&e))
 }
 
+/// Splits the cursor the UI holds into "which node" and "where in it". One server is node 0 and its cursor is
+/// just the server's; a cluster's is `node:cursor`.
+pub fn scan_position(cursor: &str, cluster: bool) -> AppResult<(usize, &str)> {
+    match cursor.split_once(':') {
+        Some((node, rest)) if cluster => node
+            .parse()
+            .map(|n| (n, rest))
+            .map_err(|_| AppError::validation("That isn't a cursor.")),
+        Some(_) => Err(AppError::validation("That isn't a cursor.")),
+        None => Ok((0, cursor)),
+    }
+}
+
+/// The cursor to hand back: the node's own while it has more, then the start of the next node, then `"0"`.
+pub fn next_position(node: usize, nodes: usize, next: String, cluster: bool) -> String {
+    if !cluster {
+        next
+    } else if next != "0" {
+        format!("{node}:{next}")
+    } else if node + 1 < nodes {
+        format!("{}:0", node + 1)
+    } else {
+        "0".to_string()
+    }
+}
+
 /// One `SCAN` page. `pattern` is a glob (`user:*`); empty means everything. Each key comes with its type and expiry.
+/// A cluster is walked one primary after another, so the tree fills node by node.
 pub async fn scan(
-    conn: &mut MultiplexedConnection,
+    conn: &mut Conn,
+    cursor: &str,
+    pattern: &str,
+    type_filter: Option<&str>,
+    count: u32,
+) -> AppResult<RedisScanPage> {
+    let cluster = conn.is_cluster();
+    let targets = conn.scan_targets().await?;
+    let (node, cursor) = scan_position(cursor, cluster)?;
+    // The keys of this page live on this node, so their TYPE and PTTL are asked there too.
+    let Some(mut target) = targets.get(node).cloned() else {
+        return Err(AppError::validation("That isn't a cursor."));
+    };
+    let page = scan_node(&mut target, cursor, pattern, type_filter, count).await?;
+    Ok(RedisScanPage {
+        cursor: next_position(node, targets.len(), page.cursor, cluster),
+        keys: page.keys,
+    })
+}
+
+async fn scan_node(
+    conn: &mut redis::aio::MultiplexedConnection,
     cursor: &str,
     pattern: &str,
     type_filter: Option<&str>,
@@ -398,7 +447,7 @@ pub async fn scan(
     })
 }
 
-async fn key_type(conn: &mut MultiplexedConnection, key: &[u8]) -> AppResult<String> {
+async fn key_type(conn: &mut Conn, key: &[u8]) -> AppResult<String> {
     let t: String = run(conn, redis::cmd("TYPE").arg(key)).await?;
     Ok(type_name(&t))
 }
@@ -416,10 +465,7 @@ fn length_command(key_type: &str) -> Option<&'static str> {
     })
 }
 
-pub async fn key_info(
-    conn: &mut MultiplexedConnection,
-    key: &RedisBytes,
-) -> AppResult<RedisKeyInfo> {
+pub async fn key_info(conn: &mut Conn, key: &RedisBytes) -> AppResult<RedisKeyInfo> {
     let k = key.as_bytes();
     let t = key_type(conn, k).await?;
     let pttl: i64 = run(conn, redis::cmd("PTTL").arg(k)).await?;
@@ -496,7 +542,7 @@ fn stream_groups(v: Value) -> Vec<RedisStreamGroup> {
 /// One page of the key's value. `cursor` is `""` for the first page, then whatever `next` said.
 /// `full` loads a big string whole ("Load all").
 pub async fn value_page(
-    conn: &mut MultiplexedConnection,
+    conn: &mut Conn,
     key: &RedisBytes,
     cursor: &str,
     full: bool,
@@ -630,6 +676,28 @@ pub async fn value_page(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_clusters_cursor_names_the_node_and_moves_on_to_the_next_one() {
+        assert_eq!(scan_position("", false).unwrap(), (0, ""));
+        assert_eq!(scan_position("1792", false).unwrap(), (0, "1792"));
+        assert_eq!(scan_position("", true).unwrap(), (0, ""));
+        assert_eq!(scan_position("2:1792", true).unwrap(), (2, "1792"));
+        assert!(
+            scan_position("2:1792", false).is_err(),
+            "one server has no node cursors"
+        );
+        assert!(scan_position("x:1", true).is_err());
+        // One server: the cursor is the server's.
+        assert_eq!(next_position(0, 1, "1792".into(), false), "1792");
+        assert_eq!(next_position(0, 1, "0".into(), false), "0");
+        // Three primaries: each is walked to its end, then the next starts, and only the last one's end is the end.
+        assert_eq!(next_position(0, 3, "1792".into(), true), "0:1792");
+        assert_eq!(next_position(0, 3, "0".into(), true), "1:0");
+        assert_eq!(next_position(1, 3, "0".into(), true), "2:0");
+        assert_eq!(next_position(2, 3, "88".into(), true), "2:88");
+        assert_eq!(next_position(2, 3, "0".into(), true), "0");
+    }
 
     fn text(s: &str) -> RedisBytes {
         RedisBytes::Text { text: s.into() }

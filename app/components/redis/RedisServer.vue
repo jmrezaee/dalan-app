@@ -95,7 +95,7 @@ const clearLog = () => store.consoleRun('SLOWLOG RESET', 'Clear the slow log?', 
           <p class="shrink-0 border-t border-border px-3 py-2.5 text-xs text-muted">Read from the server's own slow log. Dalan never turns on live command tracing.</p>
         </section>
 
-        <section class="flex min-h-0 flex-col overflow-hidden rounded-[10px] border border-border bg-surface" aria-labelledby="dbs-title">
+        <section class="flex min-h-0 flex-col overflow-hidden rounded-[10px] border border-border bg-surface" aria-label="Keys and nodes">
           <div class="flex h-9 shrink-0 items-center border-b border-border px-3"><h3 id="dbs-title" class="font-medium">Keys by database</h3></div>
           <table v-if="s.databases.length" class="w-full border-collapse text-left text-xs" aria-labelledby="dbs-title">
             <thead><tr class="h-7 text-muted"><th class="px-2.5 font-medium">Database</th><th class="px-2.5 font-medium">Keys</th><th class="px-2.5 font-medium">With expiry</th><th class="px-2.5 font-medium">Avg. time left</th></tr></thead>
@@ -107,6 +107,21 @@ const clearLog = () => store.consoleRun('SLOWLOG RESET', 'Clear the slow log?', 
             </tbody>
           </table>
           <p v-else class="p-3 text-xs text-muted">This server holds no keys.</p>
+
+          <template v-if="store.nodes.length">
+            <div class="flex h-9 shrink-0 items-center gap-2 border-y border-border px-3"><h3 id="nodes-title" class="font-medium">Nodes</h3><span class="text-xs text-muted">{{ s.mode === 'cluster' ? 'the tiles above are one node\'s; keys are the whole cluster\'s' : 'as the sentinels see them' }}</span></div>
+            <div class="min-h-0 flex-1 overflow-auto">
+              <table class="w-full border-collapse text-left text-xs" aria-labelledby="nodes-title">
+                <thead><tr class="h-7 text-muted"><th class="px-2.5 font-medium">Role</th><th class="px-2.5 font-medium">Address</th><th class="px-2.5 font-medium">{{ s.mode === 'cluster' ? 'Slots' : 'Follows' }}</th><th class="px-2.5 font-medium">State</th></tr></thead>
+                <tbody>
+                  <tr v-for="n in store.nodes" :key="`${n.role}:${n.address}`" class="h-[30px] border-t border-surface-raised">
+                    <td class="px-2.5 text-muted">{{ n.role }}</td><td class="whitespace-nowrap px-2.5 font-mono">{{ n.address }}</td><td class="px-2.5 font-mono">{{ n.detail }}</td>
+                    <td :class="['px-2.5 font-mono', n.state === 'ok' ? 'text-success' : n.state === 'catching up' ? 'text-warning' : 'text-danger']">{{ n.state }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </template>
         </section>
       </div>
     </template>

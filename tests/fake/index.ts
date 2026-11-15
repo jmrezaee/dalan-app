@@ -68,6 +68,7 @@ export class Fake {
   redisSubNames = () => this.run<string[]>('redisSubNames')
   redisBulkSlow = (on = true) => this.run<void>('redisBulkSlow', on)
   redisKeyCount = () => this.run<number>('redisKeyCount')
+  redisDb = (name: string) => this.run<Record<string, unknown> | null>('redisDb', name)
   redisMode = (name: string) => this.run<string | null>('redisMode', name)
   redisOpenConnIds = () => this.run<string[]>('redisOpenConnIds')
   redisEvent = (connId: string, e: unknown) => this.run<void>('redisEvent', connId, e)

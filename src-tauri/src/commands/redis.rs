@@ -14,6 +14,7 @@ use crate::redis::browse::{self, RedisBytes, RedisKeyInfo, RedisScanPage, RedisV
 use crate::redis::bulk::{
     self, RedisBulkAction, RedisBulkEvent, RedisBulkPreview, RedisBulkResult,
 };
+use crate::redis::cluster::RedisNode;
 use crate::redis::conn::{self, Config, RedisDbKeys, RedisTestResult};
 use crate::redis::console::{self, RedisCommandInfo, RedisConsoleOutcome, RedisConsoleReply};
 use crate::redis::gate;
@@ -87,6 +88,10 @@ pub async fn redis_db_test(
         route: input.route,
         host_id: input.host_id.clone().filter(|h| !h.is_empty()),
         kind: input.kind,
+        sentinel_master: input
+            .sentinel_master
+            .clone()
+            .filter(|m| !m.trim().is_empty()),
         target: Target {
             address: input.address.trim().to_string(),
             port: input.port,
@@ -510,4 +515,13 @@ pub async fn redis_bulk_run(
 #[specta::specta]
 pub fn redis_bulk_stop(state: State<'_, AppState>, conn_id: String) {
     state.redis.bulk_stop(&conn_id);
+}
+
+/// S31 "Nodes": a cluster's primaries and replicas with their slots, or a Sentinel set (primary, replicas,
+/// sentinels). Empty for a single server.
+#[tauri::command]
+#[specta::specta]
+pub async fn redis_nodes(state: State<'_, AppState>, conn_id: String) -> AppResult<Vec<RedisNode>> {
+    state.require_unlocked()?;
+    state.redis.nodes(&conn_id).await
 }

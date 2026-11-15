@@ -21,9 +21,11 @@ use zeroize::Zeroizing;
 
 use super::browse::RedisBytes;
 use super::bulk::BulkState;
+use super::cluster::{self, Cluster, Conn, RedisNode};
 use super::console::ConsoleState;
 use super::gate::CommandTable;
 use super::pubsub::{Listener, SubEmit};
+use super::sentinel;
 use super::store::{self, RedisKind, RedisRoute};
 use super::transport::{self, BoxStream, Target};
 use super::write::PendingStore;
@@ -123,6 +125,8 @@ pub struct Config {
     pub route: RedisRoute,
     pub host_id: Option<String>,
     pub kind: RedisKind,
+    /// Sentinel only: the name the sentinels know the primary by.
+    pub sentinel_master: Option<String>,
     pub target: Target,
     pub username: Option<String>,
     pub password: Option<Zeroizing<String>>,
@@ -131,23 +135,111 @@ pub struct Config {
 
 /// A signed-in connection, with what keeps it alive.
 pub struct Connection {
-    pub conn: MultiplexedConnection,
+    /// One server, or a cluster (which routes each command to the node that holds its key).
+    pub conn: Conn,
     pub info: RedisServerInfo,
     /// The server's command table, read once after sign-in, for the write gate. Empty when the server would not
     /// show it: the gate then treats every command it does not know by name as a write.
     pub table: Arc<CommandTable>,
-    /// The SSH connection the stream runs through (host route). Dropping it closes the stream.
-    ssh: Option<Connected>,
-    /// How to open another stream to the same server (the Pub/Sub listener's).
-    reach: Reach,
+    /// How to open more connections through the same route (cluster nodes, the Pub/Sub listener, sentinels).
+    /// It holds the SSH connection the streams run through; dropping the last copy closes them.
+    opener: Opener,
+    /// The server this connection signed in to (for Sentinel: the primary the sentinels named).
+    target: Target,
+    /// Sentinel only: the sentinels and the primary's name, for the Nodes panel.
+    sentinels: Option<(Vec<(String, u16)>, String)>,
 }
 
-/// What a second connection to the same server needs. The password stays in zeroized memory.
-struct Reach {
-    target: Target,
+/// Opens signed-in connections to this database's servers through the tab's route: directly, or as another
+/// `direct-tcpip` channel on the same SSH connection. Never a local listener. The password stays zeroized.
+#[derive(Clone)]
+pub struct Opener {
+    /// `Arc`: the cluster's node connections and the listener share the one SSH connection.
+    ssh: Option<Arc<Connected>>,
     username: Option<String>,
     password: Option<Zeroizing<String>>,
     db: u32,
+    tls: bool,
+    /// What the first sign-in found the server speaks.
+    resp3: bool,
+}
+
+impl Opener {
+    pub fn tls(&self) -> bool {
+        self.tls
+    }
+
+    fn target(&self, host: &str, port: u16) -> Target {
+        Target {
+            address: host.to_string(),
+            port,
+            tls: self.tls,
+            // A certificate name set for the database's address does not fit another node: check each by its own.
+            tls_server_name: None,
+        }
+    }
+
+    /// The sign-in on a fresh stream. `auth`: with the database's user, password and logical database.
+    /// `pushes`: a listening connection, which gets no response timeout (it is quiet between messages by design).
+    async fn handshake(
+        &self,
+        stream: BoxStream,
+        protocol: ProtocolVersion,
+        auth: bool,
+        pushes: Option<tokio::sync::mpsc::UnboundedSender<redis::PushInfo>>,
+    ) -> AppResult<MultiplexedConnection> {
+        let mut info = RedisConnectionInfo::default().set_protocol(protocol);
+        if auth {
+            info = info.set_db(i64::from(self.db));
+            if let Some(u) = &self.username {
+                info = info.set_username(u);
+            }
+            if let Some(p) = &self.password {
+                info = info.set_password(p.as_str());
+            }
+        }
+        let config = match pushes {
+            Some(tx) => AsyncConnectionConfig::new().set_push_sender(tx),
+            None => AsyncConnectionConfig::new().set_response_timeout(Some(COMMAND_TIMEOUT)),
+        };
+        let (conn, driver) = tokio::time::timeout(
+            transport::CONNECT_TIMEOUT,
+            MultiplexedConnection::new_with_config(&info, stream, config),
+        )
+        .await
+        .map_err(|_| {
+            AppError::new(
+                ErrorCode::RedisUnreachable,
+                "Redis didn't answer the sign-in in time.",
+            )
+        })?
+        .map_err(|e| redis_error(&e))?;
+        // The driver moves bytes between the stream and the connection handle until the stream ends.
+        tokio::spawn(driver);
+        Ok(conn)
+    }
+
+    fn protocol(&self) -> ProtocolVersion {
+        if self.resp3 {
+            ProtocolVersion::RESP3
+        } else {
+            ProtocolVersion::RESP2
+        }
+    }
+
+    /// A signed-in connection to another node of the same cluster.
+    pub async fn open(&self, host: &str, port: u16) -> AppResult<MultiplexedConnection> {
+        let stream = open_stream(self.ssh.as_deref(), &self.target(host, port)).await?;
+        self.handshake(stream, self.protocol(), true, None).await
+    }
+
+    /// A connection to a sentinel: the older protocol and no sign-in (sentinels have their own, which Dalan
+    /// does not store yet).
+    pub async fn open_plain(&self, host: &str, port: u16) -> AppResult<MultiplexedConnection> {
+        let stream = open_stream(self.ssh.as_deref(), &self.target(host, port)).await?;
+        self.handshake(stream, ProtocolVersion::RESP2, false, None)
+            .await
+    }
 }
 
 impl Connection {
@@ -164,38 +256,31 @@ impl Connection {
                 "Listening needs Redis 6 or newer (this server speaks the older protocol).",
             ));
         }
-        let stream = open_stream(self.ssh.as_ref(), &self.reach.target).await?;
-        let mut info = RedisConnectionInfo::default()
-            .set_protocol(ProtocolVersion::RESP3)
-            .set_db(i64::from(self.reach.db));
-        if let Some(u) = &self.reach.username {
-            info = info.set_username(u);
-        }
-        if let Some(p) = &self.reach.password {
-            info = info.set_password(p.as_str());
-        }
+        let stream = open_stream(self.opener.ssh.as_deref(), &self.target).await?;
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        // No response timeout: a listening connection is quiet between messages by design.
-        let config = AsyncConnectionConfig::new().set_push_sender(tx);
-        let (conn, driver) = tokio::time::timeout(
-            transport::CONNECT_TIMEOUT,
-            MultiplexedConnection::new_with_config(&info, stream, config),
-        )
-        .await
-        .map_err(|_| {
-            AppError::new(
-                ErrorCode::RedisUnreachable,
-                "Redis didn't answer the sign-in in time.",
-            )
-        })?
-        .map_err(|e| redis_error(&e))?;
-        tokio::spawn(driver);
+        let conn = self
+            .opener
+            .handshake(stream, ProtocolVersion::RESP3, true, Some(tx))
+            .await?;
         Ok((conn, rx))
     }
 
+    /// The Server view's Nodes panel: a cluster's primaries and replicas, or a Sentinel set. Empty for one server.
+    async fn nodes(&self) -> AppResult<Vec<RedisNode>> {
+        match (&self.conn, &self.sentinels) {
+            (Conn::Cluster(c), _) => c.nodes().await,
+            (_, Some((sentinels, master))) => {
+                sentinel::nodes(&self.opener, sentinels, master).await
+            }
+            _ => Ok(Vec::new()),
+        }
+    }
+
     async fn shutdown(self) {
+        // The connection handles first (a cluster holds copies of the opener), then the SSH connection under them.
+        let ssh = self.opener.ssh.clone();
         drop(self.conn);
-        if let Some(ssh) = self.ssh {
+        if let Some(ssh) = ssh {
             let _ = ssh
                 .handle
                 .disconnect(russh::Disconnect::ByApplication, "", "en")
@@ -243,8 +328,21 @@ async fn plan(store: &Store, cfg: &Config) -> AppResult<(Vec<RedisPlanStep>, usi
             });
         }
     }
+    if cfg.kind == RedisKind::Sentinel {
+        steps.push(RedisPlanStep {
+            label: format!(
+                "Ask the sentinels for {}",
+                cfg.sentinel_master.as_deref().unwrap_or("the primary")
+            ),
+            detail: None,
+        });
+    }
     steps.push(RedisPlanStep {
-        label: format!("Reach Redis at {}", cfg.target.display()),
+        label: if cfg.kind == RedisKind::Sentinel {
+            "Reach the primary".to_string()
+        } else {
+            format!("Reach Redis at {}", cfg.target.display())
+        },
         detail: cfg.target.tls.then(|| "with TLS".to_string()),
     });
     steps.push(RedisPlanStep {
@@ -350,52 +448,37 @@ async fn open_stream(ssh: Option<&Connected>, target: &Target) -> AppResult<BoxS
 
 /// Signs in on a fresh stream. RESP3 first (`HELLO 3`); a server too old for it gets a second stream and RESP2.
 async fn sign_in(
-    ssh: Option<&Connected>,
-    cfg: &Config,
+    opener: &Opener,
+    target: &Target,
     first: BoxStream,
 ) -> AppResult<(MultiplexedConnection, bool)> {
-    let info = |protocol: ProtocolVersion| {
-        let mut i = RedisConnectionInfo::default()
-            .set_protocol(protocol)
-            .set_db(i64::from(cfg.db));
-        if let Some(u) = &cfg.username {
-            i = i.set_username(u);
-        }
-        if let Some(p) = &cfg.password {
-            i = i.set_password(p.as_str());
-        }
-        i
-    };
-    let config = || AsyncConnectionConfig::new().set_response_timeout(Some(COMMAND_TIMEOUT));
-    let connect = |protocol: ProtocolVersion, stream: BoxStream| {
-        let info = info(protocol);
-        async move {
-            let (conn, driver) = tokio::time::timeout(
-                transport::CONNECT_TIMEOUT,
-                MultiplexedConnection::new_with_config(&info, stream, config()),
-            )
-            .await
-            .map_err(|_| {
-                AppError::new(
-                    ErrorCode::RedisUnreachable,
-                    "Redis didn't answer the sign-in in time.",
-                )
-            })?
-            .map_err(|e| redis_error(&e))?;
-            // The driver moves bytes between the stream and the connection handle until the stream ends.
-            tokio::spawn(driver);
-            Ok::<_, AppError>(conn)
-        }
-    };
-    match connect(ProtocolVersion::RESP3, first).await {
+    match opener
+        .handshake(first, ProtocolVersion::RESP3, true, None)
+        .await
+    {
         Ok(conn) => Ok((conn, true)),
         // Wrong password, nothing there, bad certificate: a second try would say the same.
         Err(e) if e.code != ErrorCode::RedisRefused => Err(e),
         Err(_) => {
-            let second = open_stream(ssh, &cfg.target).await?;
-            Ok((connect(ProtocolVersion::RESP2, second).await?, false))
+            let second = open_stream(opener.ssh.as_deref(), target).await?;
+            let conn = opener
+                .handshake(second, ProtocolVersion::RESP2, true, None)
+                .await?;
+            Ok((conn, false))
         }
     }
+}
+
+/// Keys in a whole cluster: `DBSIZE` of every primary, added up.
+async fn total_keys(conn: &Conn) -> u64 {
+    let mut total = 0u64;
+    for mut node in conn.scan_targets().await.unwrap_or_default() {
+        total += redis::cmd("DBSIZE")
+            .query_async::<u64>(&mut node)
+            .await
+            .unwrap_or(0);
+    }
+    total
 }
 
 fn info_field<'a>(info: &'a str, name: &str) -> Option<&'a str> {
@@ -466,82 +549,135 @@ async fn server_info(
     })
 }
 
-/// One whole attempt: host sign-in (if any), the stream, the Redis sign-in, the server's details.
+/// One whole attempt: host sign-in (if any), the sentinels (if any), the stream, the Redis sign-in, the server's
+/// details, and for a cluster its slot map.
 pub async fn connect(
     store: &Store,
     cfg: &Config,
     prompts: &Arc<Prompts>,
     emit: &Emit,
 ) -> AppResult<Connection> {
-    if cfg.kind != RedisKind::Single {
-        return Err(AppError::validation(
-            "Cluster and Sentinel databases can be saved now and opened in a later version.",
-        ));
-    }
     let (steps, hops) = plan(store, cfg).await?;
     emit(RedisEvent::Plan { steps });
     let ssh = match (&cfg.host_id, cfg.route) {
-        (Some(host_id), RedisRoute::Host) => {
-            Some(sign_in_to_host(store, host_id, hops, prompts, emit).await?)
-        }
+        (Some(host_id), RedisRoute::Host) => Some(Arc::new(
+            sign_in_to_host(store, host_id, hops, prompts, emit).await?,
+        )),
         _ => None,
     };
-    let (reach, auth) = (hops as u32, hops as u32 + 1);
-    let fail = |index: u32, e: AppError| {
+    let mut opener = Opener {
+        ssh,
+        username: cfg.username.clone(),
+        password: cfg.password.clone(),
+        // A cluster has one logical database.
+        db: if cfg.kind == RedisKind::Cluster {
+            0
+        } else {
+            cfg.db
+        },
+        tls: cfg.target.tls,
+        resp3: true,
+    };
+    let step = |index: u32, state: RedisStepState, detail: Option<String>| {
         emit(RedisEvent::Step {
             index,
-            state: RedisStepState::Failed,
-            detail: Some(e.message.clone()),
+            state,
+            detail,
         });
+    };
+    let fail = |index: u32, e: AppError| {
+        step(index, RedisStepState::Failed, Some(e.message.clone()));
         e
     };
 
-    emit(RedisEvent::Step {
-        index: reach,
-        state: RedisStepState::Active,
-        detail: None,
-    });
-    let stream = open_stream(ssh.as_ref(), &cfg.target)
+    // Sentinel: the address is the sentinels'; ask them where the primary is.
+    let mut next = hops as u32;
+    let mut target = cfg.target.clone();
+    let mut sentinels = None;
+    if cfg.kind == RedisKind::Sentinel {
+        let find = next;
+        next += 1;
+        step(find, RedisStepState::Active, None);
+        let list = sentinel::parse_list(&cfg.target.address, cfg.target.port);
+        let master = cfg.sentinel_master.clone().unwrap_or_default();
+        let (host, port) = sentinel::find_primary(&opener, &list, &master)
+            .await
+            .map_err(|e| fail(find, e))?;
+        step(find, RedisStepState::Done, Some(cluster::join(&host, port)));
+        target = Target {
+            address: host,
+            port,
+            ..cfg.target.clone()
+        };
+        sentinels = Some((list, master));
+    }
+    let (reach, auth) = (next, next + 1);
+
+    step(reach, RedisStepState::Active, None);
+    let stream = open_stream(opener.ssh.as_deref(), &target)
         .await
         .map_err(|e| fail(reach, e))?;
-    emit(RedisEvent::Step {
-        index: reach,
-        state: RedisStepState::Done,
-        detail: None,
-    });
+    step(reach, RedisStepState::Done, None);
 
-    emit(RedisEvent::Step {
-        index: auth,
-        state: RedisStepState::Active,
-        detail: None,
-    });
-    let (mut conn, resp3) = sign_in(ssh.as_ref(), cfg, stream)
+    step(auth, RedisStepState::Active, None);
+    let (mut single, resp3) = sign_in(&opener, &target, stream)
         .await
         .map_err(|e| fail(auth, e))?;
-    let info = server_info(&mut conn, resp3, cfg.db)
+    opener.resp3 = resp3;
+    let mut info = server_info(&mut single, resp3, opener.db)
         .await
         .map_err(|e| fail(auth, e))?;
-    let table = redis::cmd("COMMAND")
-        .query_async::<redis::Value>(&mut conn)
-        .await
-        .map(|reply| CommandTable::from_reply(&reply))
-        .unwrap_or_default();
-    emit(RedisEvent::Step {
-        index: auth,
-        state: RedisStepState::Done,
-        detail: None,
-    });
+    if sentinels.is_some() && info.replica {
+        return Err(fail(
+            auth,
+            AppError::new(
+                ErrorCode::RedisUnreachable,
+                format!(
+                    "The sentinels pointed at {}, but it says it is a replica. A failover may be under way; try again in a moment.",
+                    target.display()
+                ),
+            ),
+        ));
+    }
+    let table = Arc::new(
+        redis::cmd("COMMAND")
+            .query_async::<redis::Value>(&mut single)
+            .await
+            .map(|reply| CommandTable::from_reply(&reply))
+            .unwrap_or_default(),
+    );
+    let conn = if info.mode == "cluster" {
+        // The slot map, and from here on one connection per node, each through the same route.
+        let seed = cluster::join(&target.address, target.port);
+        let c = Cluster::new(opener.clone(), Arc::clone(&table), seed, single)
+            .await
+            .map_err(|e| fail(auth, e))?;
+        let conn = Conn::Cluster(c);
+        info.databases = vec![RedisDbKeys {
+            index: 0,
+            keys: total_keys(&conn).await,
+        }];
+        info.db_count = 1;
+        info.selected = 0;
+        conn
+    } else if cfg.kind == RedisKind::Cluster {
+        return Err(fail(
+            auth,
+            AppError::validation(
+                "This server isn't running as a cluster. Edit the database and choose Single server.",
+            ),
+        ));
+    } else {
+        Conn::Single(single)
+    };
+    step(auth, RedisStepState::Done, None);
     Ok(Connection {
         conn,
         info,
-        table: Arc::new(table),
-        ssh,
-        reach: Reach {
-            target: cfg.target.clone(),
-            username: cfg.username.clone(),
-            password: cfg.password.clone(),
-            db: cfg.db,
-        },
+        table,
+        opener,
+        target,
+        sentinels,
     })
 }
 
@@ -600,7 +736,7 @@ struct Live {
 
 /// What a write needs from a live connection.
 pub struct Writer {
-    pub conn: MultiplexedConnection,
+    pub conn: Conn,
     pub table: Arc<CommandTable>,
     pub replica: bool,
     pub db_id: String,
@@ -662,7 +798,7 @@ impl RedisManager {
     }
 
     /// A clone of the connection handle for one command. Errors while the tab is connecting or reconnecting.
-    pub async fn handle(&self, conn_id: &str) -> AppResult<MultiplexedConnection> {
+    pub async fn handle(&self, conn_id: &str) -> AppResult<Conn> {
         let live = self.get(conn_id)?;
         let guard = live.conn.lock().await;
         guard.as_ref().map(|c| c.conn.clone()).ok_or_else(|| {
@@ -750,10 +886,20 @@ impl RedisManager {
         }
     }
 
-    /// Switches the logical database (`SELECT`) and says how many keys it holds.
+    /// Switches the logical database (`SELECT`) and says how many keys it holds. A cluster has only database 0;
+    /// asking for it answers with the keys of every primary together.
     pub async fn select(&self, conn_id: &str, index: u32) -> AppResult<RedisDbKeys> {
         let live = self.get(conn_id)?;
         let mut conn = self.handle(conn_id).await?;
+        if conn.is_cluster() {
+            if index != 0 {
+                return Err(AppError::validation("A cluster has one logical database."));
+            }
+            return Ok(RedisDbKeys {
+                index: 0,
+                keys: total_keys(&conn).await,
+            });
+        }
         redis::cmd("SELECT")
             .arg(index)
             .query_async::<()>(&mut conn)
@@ -765,6 +911,19 @@ impl RedisManager {
             .await
             .map_err(|e| redis_error(&e))?;
         Ok(RedisDbKeys { index, keys })
+    }
+
+    /// S31 "Nodes": the cluster's nodes or the Sentinel set, read fresh. Empty for a single server.
+    pub async fn nodes(&self, conn_id: &str) -> AppResult<Vec<RedisNode>> {
+        let live = self.get(conn_id)?;
+        let guard = live.conn.lock().await;
+        match guard.as_ref() {
+            Some(c) => c.nodes().await,
+            None => Err(AppError::new(
+                ErrorCode::RedisUnreachable,
+                "This database isn't connected right now.",
+            )),
+        }
     }
 
     pub fn close(&self, conn_id: &str) {
@@ -806,6 +965,7 @@ pub async fn load(store: &Store, db_id: &str) -> AppResult<Config> {
                 route: d.route,
                 host_id: d.host_id,
                 kind: d.kind,
+                sentinel_master: d.sentinel_master,
                 target: Target {
                     address: d.address,
                     port: d.port,

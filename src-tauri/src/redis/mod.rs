@@ -13,15 +13,17 @@
 //!
 //! - `pubsub`: listening on its own connection, messages batched for the UI.
 //! - `bulk`: preview, typed confirmation, batches of 500, stop.
-//!
-//! Cluster and Sentinel arrive in R6.
+//! - `cluster`: the slot map, key hashing, one connection per node, `MOVED` / `ASK`; `Conn` is one server or a cluster.
+//! - `sentinel`: asking the sentinels where the primary is.
 
 pub mod browse;
 pub mod bulk;
+pub mod cluster;
 pub mod conn;
 pub mod console;
 pub mod gate;
 pub mod pubsub;
+pub mod sentinel;
 pub mod server;
 pub mod store;
 pub mod transport;

@@ -69,6 +69,7 @@ export function useTauri() {
       return unwrap(commands.redisBulkRun(connId, previewId, action, typedName, progress))
     },
     redisBulkStop: (connId: string) => commands.redisBulkStop(connId),
+    redisNodes: (connId: string) => unwrap(commands.redisNodes(connId)),
     systemIntegrationGet: () => unwrap(commands.systemIntegrationGet()),
     systemIntegrationSet: (sshLinks: boolean | null, autostart: boolean | null) => unwrap(commands.systemIntegrationSet(sshLinks, autostart)),
     openDefaultApps: () => unwrap(commands.openDefaultApps()),

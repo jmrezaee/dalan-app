@@ -216,6 +216,8 @@ export function install(opts: Options) {
     /** How many times the Server view asked for INFO (to check it refreshes, and stops when hidden). */
     redisInfoCalls: () => m.redisInfoCalls,
     redisHistory: (dbId: string) => m.redisHistory[dbId] ?? [],
+    /** A saved database as the fake holds it. */
+    redisDb: (name: string) => m.redisDbs.find(d => d.name === name) ?? null,
     /** The saved database's write mode. */
     redisMode: (name: string) => m.redisDbs.find(d => d.name === name)?.write_mode ?? null,
     redisOpenConnIds: () => [...m.redisConns].filter(([, c]) => !c.closed).map(([id]) => id),

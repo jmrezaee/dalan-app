@@ -22,7 +22,7 @@ test.describe('Databases (S26, S27)', () => {
 
   test('S26: the table shows name, environment, address, route, kind and write mode, and filters', async ({ page }) => {
     await openApp(page, { scenario: 'team', unlocked: true })
-    await expect(nav(page).getByRole('link', { name: /Databases/ })).toContainText('4')
+    await expect(nav(page).getByRole('link', { name: /Databases/ })).toContainText('6')
     await openDatabases(page)
     const prod = row(page, 'cache-prod')
     await expect(prod).toContainText('production')
@@ -48,8 +48,8 @@ test.describe('Databases (S26, S27)', () => {
     // New ones start as "Confirm writes", reached directly.
     await expect(s.getByRole('radio', { name: /Confirm writes/ })).toHaveAttribute('aria-checked', 'true')
     await expect(s.getByRole('radio', { name: 'Directly' })).toHaveAttribute('aria-checked', 'true')
-    // Cluster and Sentinel are not built yet: they can't be picked.
-    await expect(s.getByRole('radio', { name: 'Cluster' })).toBeDisabled()
+    // A single server unless told otherwise (Cluster and Sentinel are in redis-cluster.spec.ts).
+    await expect(s.getByRole('radio', { name: 'Single server' })).toHaveAttribute('aria-checked', 'true')
 
     // Saving with nothing filled in says what is missing, in the form.
     await s.getByRole('button', { name: 'Save' }).click()
