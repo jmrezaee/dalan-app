@@ -334,6 +334,18 @@ The artwork is ready in `src-tauri/windows/` and the mockups are in `replica/win
 
 - [h] **L1 Download page rebuild:** built 2026-11-12 (`site/index.html`, `scripts/site-shots.mjs` = `pnpm site:shots`, `tests/site/site.spec.ts` = `--project=site`, part of `pnpm test:e2e`; 10 tests: hero label and href per OS, all-users link, no-JS fallback, anchors, no sideways scroll at 390, alt text, no request to another server, axe). The page's token block is generated from `tokens.css` by `site:shots`; site/ is about 420 KB. Differences from the canvas: macOS minimum version dropped (no `minimumSystemVersion` is set), chip says "SSH keys" (not "and certificates", which isn't built), FAQ on sync says there's no export (there isn't), the Licences link goes to the repository, the vendors' logos are Lucide icons. Left: the hand check below, and re-running `pnpm site:shots` after `pnpm test:visual:update`. Spec: rebuild `site/index.html` from the canvas (https://claude.ai/artifact/VWhMrR9t799hwjzeKda32n): hero with real screenshots, the three feature rows, the security band, six cards, OS-aware download (Windows just-me primary, all-users as a link), FAQ, phone layout. Add `pnpm site:shots` (baselines → `site/img/*.webp`), local fonts, tokens only, and `tests/site/site.spec.ts`. Keep the Pages workflow's `REPO`/`VERSION` sed working. Hand check: open the published page on a Mac, a Windows PC and a phone and check each gets the right button and file.
 
+### Redis (from `replica/redis/spec.md`; read it in full before each of these phases)
+
+Decisions, 2026-11-15: a Databases vault section plus Redis tabs; core + Pub/Sub + Cluster and Sentinel + bulk actions; per-database write modes (Read-only, Confirm writes, Open) behind one gate in Rust. Boards: the "Redis" page of the UI canvas. New crates: `redis`, `tokio-rustls`, `rustls-native-certs`.
+
+- [ ] **R1 Foundations (S26, S27, S33 connecting; F13):** migration, crates, transport (direct and through a host, single server, TLS), database CRUD and Test connection, Databases section, Redis tab shell and connection states, host menu and palette entries, lock. Spec §1 to §3, §7.
+- [ ] **R2 Browser, read side (S28, S29; F14):** scan and tree, key info, every type's viewer with paging, big and binary values, JSON view. Spec §3 "Values are bytes", §5.
+- [ ] **R3 Write gate and editors (S33, S28, S29; F15):** `gate.rs` with its unit table, prepare/commit, modes, both confirmation dialogs, every editor action. Spec §4.
+- [ ] **R4 Console and Server (S30, S31; F16):** parser, completion, reply formatting, encrypted history, heavy and refused classes; tiles, slow commands, keys by database.
+- [ ] **R5 Pub/Sub and bulk actions (S32, S33; F17, F18).**
+- [ ] **R6 Cluster and Sentinel (S27, S31; F19):** slot map, redirects, merged scan, sentinel lookup, Nodes panel, Docker sets.
+- [ ] **R7 Hardening and hand checks:** performance, walk chapter, visual baselines, hand-checks section I, `features.csv`, Settings group. Ends `[h]`.
+
 ## Backlog (not scheduled; Mehrdad picks from here after P29)
 
 - Touch ID / Windows Hello unlock (M4 item 5).

@@ -26,7 +26,7 @@ A personal desktop SSH client for Mehrdad and his team. It is a clean-room rebui
 
 - **UI:** Nuxt 4 with `ssr: false` (SPA served by Tauri), TypeScript strict, Pinia, shadcn-vue (Reka UI), Tailwind, `@xterm/xterm` + addons
 - **Desktop:** Tauri 2. **All SSH, SFTP, tunnels, PTY, filesystem, crypto and DB live in Rust** (`src-tauri/`).
-- **Rust crates:** `russh`, `russh-sftp`, `ssh-key`, `portable-pty`, `rusqlite` (bundled) + `rusqlite_migration`, `argon2`, `chacha20poly1305`, `zeroize`, `notify`, `uuid` (v7), `thiserror`, `serde`, `tokio`
+- **Rust crates:** `russh`, `russh-sftp`, `ssh-key`, `portable-pty`, `rusqlite` (bundled) + `rusqlite_migration`, `argon2`, `chacha20poly1305`, `zeroize`, `notify`, `uuid` (v7), `thiserror`, `serde`, `tokio`; for Redis (R1 onward): `redis`, `tokio-rustls`, `rustls-native-certs`
 - **Database:** SQLite, one file in the app data dir, opened only by Rust. `PRAGMA foreign_keys=ON; journal_mode=WAL`.
 - **Package manager:** **pnpm** only. Node **24.12.0**: run `nvm use 24.12.0` before any node/pnpm command.
 - **Dev server port:** 4000 (set `devUrl` in `tauri.conf.json` to match)
@@ -105,6 +105,7 @@ cd src-tauri && cargo clippy -- -D warnings && cargo test
 - **P30 is done:** several SFTP tabs (one store per tab; its hand check is section G in `replica/testing/hand-checks.md`).
 - **The Windows installer is built** (W1 to W3 done, released in v0.1.2; W4 waits for the Windows hand checks in section H of `hand-checks.md`).
 - **L1 (the download page rebuild) is built** (`[h]`): `site/index.html`, `pnpm site:shots`, `tests/site/`; its hand check (the right button and file on a Mac, a Windows PC and a phone) is in `replica/progress.md`.
+- **Next: Redis.** A Databases vault section and Redis tabs (browser, console, Pub/Sub, server, bulk actions, Cluster and Sentinel) with per-database write modes behind one gate in Rust. The spec is `replica/redis/spec.md` (screens **S26–S33**, flows **F13–F19**); the boards are the "Redis" page of the UI/UX design canvas; phases R1 to R7 are in `replica/progress.md`. Start with `go R1`. The second reference app is named only in `replica/`.
 - **Manual checks:** a phase that needs Mehrdad to test something by hand is not done until he has reported back.
 - **M1 is done when F01, F11 and F12 work against a real server:**
   - unlock
