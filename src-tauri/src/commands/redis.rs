@@ -11,9 +11,13 @@ use zeroize::Zeroizing;
 
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::redis::browse::{self, RedisBytes, RedisKeyInfo, RedisScanPage, RedisValuePage};
+use crate::redis::bulk::{
+    self, RedisBulkAction, RedisBulkEvent, RedisBulkPreview, RedisBulkResult,
+};
 use crate::redis::conn::{self, Config, RedisDbKeys, RedisTestResult};
 use crate::redis::console::{self, RedisCommandInfo, RedisConsoleOutcome, RedisConsoleReply};
 use crate::redis::gate;
+use crate::redis::pubsub::{RedisSubEvent, SubEmit};
 use crate::redis::server::{self, RedisServerStats, RedisSlowEntry};
 use crate::redis::store::{
     self, RedisDatabase, RedisDatabaseInput, RedisEnvironment, RedisWriteMode,
@@ -412,4 +416,98 @@ pub async fn redis_slowlog(
     state.require_unlocked()?;
     let mut conn = state.redis.handle(&conn_id).await?;
     server::slowlog(&mut conn).await
+}
+
+/// F17: listens to a channel, or to a pattern such as `orders.*`. Listening uses its own connection through the
+/// same route; messages arrive on `messages` in batches. Reading is allowed in every write mode.
+#[tauri::command]
+#[specta::specta]
+pub async fn redis_sub_start(
+    state: State<'_, AppState>,
+    conn_id: String,
+    name: RedisBytes,
+    pattern: bool,
+    messages: Channel<RedisSubEvent>,
+) -> AppResult<()> {
+    state.require_unlocked()?;
+    let emit: SubEmit = Arc::new(move |e| {
+        let _ = messages.send(e);
+    });
+    state.redis.sub_start(&conn_id, &name, pattern, emit).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn redis_sub_stop(
+    state: State<'_, AppState>,
+    conn_id: String,
+    name: RedisBytes,
+    pattern: bool,
+) -> AppResult<()> {
+    state.redis.sub_stop(&conn_id, &name, pattern).await
+}
+
+/// F18, step one: walks the whole keyspace (`SCAN`) and answers with how many keys match and a sample of 20.
+/// The matching keys stay in Rust for `redis_bulk_run`. `redis_bulk_stop` ends the walk.
+#[tauri::command]
+#[specta::specta]
+pub async fn redis_bulk_preview(
+    state: State<'_, AppState>,
+    conn_id: String,
+    pattern: String,
+    key_type: Option<String>,
+    progress: Channel<RedisBulkEvent>,
+) -> AppResult<RedisBulkPreview> {
+    state.require_unlocked()?;
+    let mut w = state.redis.writer(&conn_id).await?;
+    let emit: bulk::BulkEmit = Arc::new(move |e| {
+        let _ = progress.send(e);
+    });
+    bulk::preview(
+        &mut w.conn,
+        &w.bulk,
+        pattern.trim(),
+        key_type.as_deref(),
+        &emit,
+    )
+    .await
+}
+
+/// F18, step two: runs the action on the previewed keys, 500 at a time. Refused in Read-only; in the other modes
+/// `typed_name` must be the database's name. Runs once per preview.
+#[tauri::command]
+#[specta::specta]
+pub async fn redis_bulk_run(
+    state: State<'_, AppState>,
+    conn_id: String,
+    preview_id: String,
+    action: RedisBulkAction,
+    typed_name: Option<String>,
+    progress: Channel<RedisBulkEvent>,
+) -> AppResult<RedisBulkResult> {
+    state.require_unlocked()?;
+    let mut w = state.redis.writer(&conn_id).await?;
+    let target = write_target(&state, &w).await?;
+    let emit: bulk::BulkEmit = Arc::new(move |e| {
+        let _ = progress.send(e);
+    });
+    // The gate first: refused in Read-only, and the typed name must be the database's.
+    bulk::approve(&target, action, typed_name.as_deref())?;
+    bulk::run(
+        &mut w.conn,
+        &w.table,
+        &w.bulk,
+        &target,
+        &preview_id,
+        action,
+        &emit,
+    )
+    .await
+}
+
+/// "Stop": the scan or the run ends after its current batch. What is already done stays done.
+#[tauri::command]
+#[specta::specta]
+pub fn redis_bulk_stop(state: State<'_, AppState>, conn_id: String) {
+    state.redis.bulk_stop(&conn_id);
 }

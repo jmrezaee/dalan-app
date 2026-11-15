@@ -11,12 +11,17 @@
 //! - `console`: a typed line through the gate, replies printed in Rust, `MULTI` queued here, encrypted history.
 //! - `server`: `INFO` and the slow log for the Server view.
 //!
-//! Pub/Sub, bulk actions, Cluster and Sentinel arrive in R5 and R6.
+//! - `pubsub`: listening on its own connection, messages batched for the UI.
+//! - `bulk`: preview, typed confirmation, batches of 500, stop.
+//!
+//! Cluster and Sentinel arrive in R6.
 
 pub mod browse;
+pub mod bulk;
 pub mod conn;
 pub mod console;
 pub mod gate;
+pub mod pubsub;
 pub mod server;
 pub mod store;
 pub mod transport;

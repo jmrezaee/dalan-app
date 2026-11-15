@@ -77,6 +77,24 @@ export const commands = {
 	redisInfo: (connId: string) => typedError<RedisServerStats, AppError>(__TAURI_INVOKE("redis_info", { connId })),
 	/**  S31: the server's own slow log, newest first. */
 	redisSlowlog: (connId: string) => typedError<RedisSlowEntry[], AppError>(__TAURI_INVOKE("redis_slowlog", { connId })),
+	/**
+	 *  F17: listens to a channel, or to a pattern such as `orders.*`. Listening uses its own connection through the
+	 *  same route; messages arrive on `messages` in batches. Reading is allowed in every write mode.
+	 */
+	redisSubStart: (connId: string, name: RedisBytes, pattern: boolean, messages: Channel<RedisSubEvent_Deserialize>) => typedError<null, AppError>(__TAURI_INVOKE("redis_sub_start", { connId, name, pattern, messages })),
+	redisSubStop: (connId: string, name: RedisBytes, pattern: boolean) => typedError<null, AppError>(__TAURI_INVOKE("redis_sub_stop", { connId, name, pattern })),
+	/**
+	 *  F18, step one: walks the whole keyspace (`SCAN`) and answers with how many keys match and a sample of 20.
+	 *  The matching keys stay in Rust for `redis_bulk_run`. `redis_bulk_stop` ends the walk.
+	 */
+	redisBulkPreview: (connId: string, pattern: string, keyType: string | null, progress: Channel<RedisBulkEvent>) => typedError<RedisBulkPreview, AppError>(__TAURI_INVOKE("redis_bulk_preview", { connId, pattern, keyType, progress })),
+	/**
+	 *  F18, step two: runs the action on the previewed keys, 500 at a time. Refused in Read-only; in the other modes
+	 *  `typed_name` must be the database's name. Runs once per preview.
+	 */
+	redisBulkRun: (connId: string, previewId: string, action: RedisBulkAction, typedName: string | null, progress: Channel<RedisBulkEvent>) => typedError<RedisBulkResult, AppError>(__TAURI_INVOKE("redis_bulk_run", { connId, previewId, action, typedName, progress })),
+	/**  "Stop": the scan or the run ends after its current batch. What is already done stays done. */
+	redisBulkStop: (connId: string) => __TAURI_INVOKE<void>("redis_bulk_stop", { connId }),
 	/**  First run? Locked? Allowed while locked. */
 	vaultStatus: () => typedError<VaultStatus_Serialize, AppError>(__TAURI_INVOKE("vault_status")),
 	/**  F10: derive the key, write the vault row, and leave the vault unlocked. */
@@ -1135,6 +1153,27 @@ export type RecentItem = {
 	connected_at: number | null,
 };
 
+export type RedisBulkAction = { action: "delete" } | { action: "expire"; ttl_ms: number | null } | { action: "persist" };
+
+export type RedisBulkEvent = { type: "scanning"; found: number | null; scanned: number | null } | { type: "running"; done: number | null; total: number | null };
+
+export type RedisBulkPreview = {
+	/**  Pass it to `redis_bulk_run`. Empty when the scan was stopped: a half-scanned preview can't be run. */
+	id: string,
+	count: number | null,
+	sample: RedisBytes[],
+	/**  The whole keyspace was walked. */
+	complete: boolean,
+};
+
+export type RedisBulkResult = {
+	/**  Keys the action was sent for. */
+	processed: number | null,
+	/**  Keys the server says it changed (a key that expired meanwhile is not one). */
+	changed: number | null,
+	stopped: boolean,
+};
+
 /**
  *  A key, a field or a value. `Text` when the bytes are text a person can read and edit; `Binary` otherwise.
  *  A `Text` goes back to Rust as the same bytes (UTF-8 round-trips exactly), so either form addresses a key.
@@ -1394,6 +1433,26 @@ export type RedisKeyRow_Serialize = {
 
 export type RedisKind = "single" | "cluster" | "sentinel";
 
+export type RedisMessage = RedisMessage_Serialize | RedisMessage_Deserialize;
+
+export type RedisMessage_Deserialize = {
+	/**  When Dalan received it (this computer's clock), in milliseconds since 1970. */
+	at_ms: number | null,
+	channel: RedisBytes,
+	/**  The pattern that matched, when it came through a pattern. */
+	pattern?: string | null,
+	payload: RedisBytes,
+};
+
+export type RedisMessage_Serialize = {
+	/**  When Dalan received it (this computer's clock), in milliseconds since 1970. */
+	at_ms: number | null,
+	channel: RedisBytes,
+	/**  The pattern that matched, when it came through a pattern. */
+	pattern: string | null,
+	payload: RedisBytes,
+};
+
 export type RedisOpened = {
 	conn_id: string,
 };
@@ -1520,6 +1579,20 @@ export type RedisStreamGroup = {
 	/**  Entries delivered to the group and not yet acknowledged. */
 	pending: number | null,
 };
+
+export type RedisSubEvent = RedisSubEvent_Serialize | RedisSubEvent_Deserialize;
+
+export type RedisSubEvent_Deserialize = { type: "messages"; messages: RedisMessage_Deserialize[]; 
+/**  Messages left out of this batch because too many arrived at once. */
+dropped: number } | 
+/**  The listening connection ended (the server closed it, or the route dropped). */
+{ type: "ended" };
+
+export type RedisSubEvent_Serialize = { type: "messages"; messages: RedisMessage_Serialize[]; 
+/**  Messages left out of this batch because too many arrived at once. */
+dropped: number } | 
+/**  The listening connection ended (the server closed it, or the route dropped). */
+{ type: "ended" };
 
 /**  What `redis_db_test` answers. */
 export type RedisTestResult = {

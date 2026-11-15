@@ -3,6 +3,7 @@
 import { handlers } from './commands'
 import { MASTER } from './commands/vault'
 import { keyspace } from './commands/redisKeys'
+import { deliver } from './commands/redisPubSub'
 import { createModel, type Seed } from './model'
 import { scenarios, type ScenarioName } from './scenarios'
 import { scripts } from './scripts'
@@ -206,6 +207,12 @@ export function install(opts: Options) {
     },
     /** The fake database's key with this name, as the fake holds it (to check what a write changed). */
     redisKey: (name: string) => m.redisKeys.find(k => k.key.kind === 'text' && k.key.text === name) ?? null,
+    /** Publishes to the fake server, as another client would: `times` messages ("text 1", "text 2", ...). */
+    redisPublish: (channel: string, payload: string, times = 1) => deliver(m, send, channel, payload, times),
+    redisSubNames: () => m.redisSubs.map(s => s.name),
+    /** Bulk scans and runs take a moment per batch, so a test can press Stop. */
+    redisBulkSlow: (on = true) => { m.redisBulkSlow = on },
+    redisKeyCount: () => m.redisKeys.length,
     /** How many times the Server view asked for INFO (to check it refreshes, and stops when hidden). */
     redisInfoCalls: () => m.redisInfoCalls,
     redisHistory: (dbId: string) => m.redisHistory[dbId] ?? [],

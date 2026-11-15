@@ -7,7 +7,7 @@ import { buttonVariants } from '@/components/ui/button'
 import type { RedisWriteMode } from '~/types/bindings'
 import { bytesText, count, parsedJson, textBytes, TYPE_UNIT } from '~/utils/redisBytes'
 
-const props = defineProps<{ tabKey: string, separator: string, mode: RedisWriteMode, readOnly: boolean }>()
+const props = defineProps<{ tabKey: string, separator: string, mode: RedisWriteMode, readOnly: boolean, dbName: string }>()
 const writable = computed(() => !props.readOnly)
 const saveLabel = computed(() => (props.mode === 'open' ? 'Save' : 'Review change'))
 const store = useRedisStore(props.tabKey)
@@ -29,6 +29,7 @@ const jsonMode = ref('tree')
 
 // ---- Changes to the open key itself (F15). Each is one write for Rust's gate.
 const newKeyOpen = ref(false)
+const bulkOpen = ref(false)
 const keyName = computed(() => (store.selectedKey ? bytesText(store.selectedKey) : ''))
 function saveString(text: string) {
   if (store.selectedKey) void store.write({ op: 'set_string', key: store.selectedKey, value: textBytes(text) }, { title: 'Change this value?', action: 'Change' })
@@ -53,7 +54,7 @@ const askDelete = () => (props.mode === 'open' ? (deleteAsk.value = true) : dele
 
 <template>
   <div class="flex min-h-0 flex-1" :data-testid="tid('redis-browser')">
-    <KeyTree :tab-key="tabKey" :separator="separator" :writable="writable" @new-key="newKeyOpen = true" />
+    <KeyTree :tab-key="tabKey" :separator="separator" :writable="writable" @new-key="newKeyOpen = true" @bulk="bulkOpen = true" />
 
     <section v-if="store.selectedKey" :aria-label="`Key ${store.keyInfo ? '' : 'loading'}`" class="flex min-w-0 flex-1 flex-col" :data-testid="tid('redis-value')">
       <KeyHeader v-if="store.keyInfo && store.keyInfo.key_type !== 'none'" :info="store.keyInfo" :writable="writable" :save-label="saveLabel" @reload="store.reloadKey()" @rename="rename" @expire="expire" @delete="askDelete" />
@@ -94,6 +95,7 @@ const askDelete = () => (props.mode === 'open' ? (deleteAsk.value = true) : dele
     <div v-else class="grid min-w-0 flex-1 place-items-center"><EmptyState :icon="Database" title="Pick a key to see its value." text="Keys are listed as they are scanned. Narrow them with a pattern such as user:*." /></div>
 
     <NewKeyDialog v-model:open="newKeyOpen" :tab-key="tabKey" :save-label="saveLabel" />
+    <BulkDialog v-model:open="bulkOpen" :tab-key="tabKey" :db-name="dbName" />
     <AlertDialog v-model:open="deleteAsk">
       <AlertDialogContent :data-testid="tid('redis-delete-open')">
         <AlertDialogHeader>

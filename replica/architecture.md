@@ -270,7 +270,7 @@ Webhooks in or out: **none** (local app).
 
 ### Redis (F13; S26, S27, S33; replica/redis/spec.md)
 
-R1 adds the connection commands, R2 the browser's read side, R3 the write gate with the editors and R4 the console and the Server view; Pub/Sub and bulk actions follow in R5.
+R1 adds the connection commands, R2 the browser's read side, R3 the write gate with the editors, R4 the console and the Server view, and R5 Pub/Sub and bulk actions.
 `RedisBytes` is `{ kind: 'text', text }` or `{ kind: 'binary', bytes }`: keys and values are never forced through a string.
 New error codes: `redis_auth_failed`, `redis_unreachable`, `redis_tls_untrusted`, `redis_refused` (the server's own text is the message),
 `redis_read_only_mode` (the database is Read-only in Dalan, or a replica: the command was not sent) and `redis_confirm_needed`
@@ -292,6 +292,16 @@ in Rust (`(integer) 3`, quoted strings with `\xNN` for bytes, numbered and neste
 shared by the Browser, the keep-alive and the Console, so: `MULTI` is not sent, it opens a queue here, each queued command is classified,
 and `EXEC` sends the queue as one transaction with the strongest class; blocking commands, `HELLO`, `RESET`, `QUIT`, `AUTH`, `WATCH` and
 `CLIENT REPLY` are not sent; `SELECT` is followed by the whole tab. A server's own error is a printed reply, not a failed command.
+
+**Pub/Sub (R5, `redis/pubsub.rs`).** The listener is a second RESP3 connection opened through the same route (a second `direct-tcpip`
+channel on the tab's SSH connection, never a local listener); the server's pushes arrive on a tokio channel and one task batches them
+for the UI (`RedisSubEvent::Messages { messages, dropped }`): flushed after 8 ms or 64 KB, at most 500 messages a batch, the rest of a
+flood counted as dropped. It ends with the tab's connection and the UI listens again after a reconnect. Needs Redis 6 (RESP3).
+Publishing is the `Publish` write op, so it passes the gate.
+
+**Bulk actions (R5, `redis/bulk.rs`).** The preview keeps the matching keys in Rust (up to 5,000,000; ten minutes) and the run acts on
+exactly those, once: `UNLINK` (or `DEL`) per 500 keys, or one `PEXPIRE` / `PERSIST` per key in a pipeline of 500, with a 20 ms pause
+between batches. Stop is a flag read between batches. A bulk action is `dangerous`: refused in Read-only, typed name otherwise.
 
 | command | does | input | output | flow |
 | --- | --- | --- | --- | --- |
@@ -315,6 +325,11 @@ and `EXEC` sends the queue as one transaction with the strongest class; blocking
 | `redis_commands` | the server's commands with syntax and summary (`COMMAND DOCS` on Redis 7, arity otherwise), for completion | `{ conn_id }` | `RedisCommandInfo[]` | F16 |
 | `redis_info` | the Server view's tiles and keys per database, from `INFO` | `{ conn_id }` | `RedisServerStats` | S31 |
 | `redis_slowlog` | the newest 50 entries of the server's slow log | `{ conn_id }` | `RedisSlowEntry[]` | S31 |
+| `redis_sub_start` | listens to a channel or a pattern on the tab's own listening connection (opened on first use, through the same route) | `{ conn_id, name: RedisBytes, pattern, messages: Channel<RedisSubEvent> }` | `()` | F17 |
+| `redis_sub_stop` | stops one name; the listening connection closes with its last one | `{ conn_id, name, pattern }` | `()` | F17 |
+| `redis_bulk_preview` | walks the keyspace with `SCAN`, keeps the matching keys in Rust, answers with the count and a sample of 20 | `{ conn_id, pattern, key_type?, progress: Channel<RedisBulkEvent> }` | `RedisBulkPreview` | F18 |
+| `redis_bulk_run` | delete, set expiry or remove expiry on the previewed keys, 500 per batch; always `dangerous` for the gate | `{ conn_id, preview_id, action, typed_name?, progress }` | `RedisBulkResult` | F18 |
+| `redis_bulk_stop` | ends the scan or the run after its current batch | `{ conn_id }` | `()` | F18 |
 
 `RedisEvent`: `plan { steps }` (one step per SSH hop, then "reach Redis", then "sign in"), `step { index, state, detail }`,
 `host { event }` (a `SessionEvent` from a hop: its prompts), `ready { info }`, `latency { ms }`, `failed { code, message }`,

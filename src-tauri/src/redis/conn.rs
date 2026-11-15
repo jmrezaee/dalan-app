@@ -19,8 +19,11 @@ use specta::Type;
 use tokio::sync::watch;
 use zeroize::Zeroizing;
 
+use super::browse::RedisBytes;
+use super::bulk::BulkState;
 use super::console::ConsoleState;
 use super::gate::CommandTable;
+use super::pubsub::{Listener, SubEmit};
 use super::store::{self, RedisKind, RedisRoute};
 use super::transport::{self, BoxStream, Target};
 use super::write::PendingStore;
@@ -135,9 +138,61 @@ pub struct Connection {
     pub table: Arc<CommandTable>,
     /// The SSH connection the stream runs through (host route). Dropping it closes the stream.
     ssh: Option<Connected>,
+    /// How to open another stream to the same server (the Pub/Sub listener's).
+    reach: Reach,
+}
+
+/// What a second connection to the same server needs. The password stays in zeroized memory.
+struct Reach {
+    target: Target,
+    username: Option<String>,
+    password: Option<Zeroizing<String>>,
+    db: u32,
 }
 
 impl Connection {
+    /// A second connection for listening: its own stream through the same route (never a local listener), RESP3,
+    /// with the server's pushes sent to the returned receiver.
+    async fn listener(
+        &self,
+    ) -> AppResult<(
+        MultiplexedConnection,
+        tokio::sync::mpsc::UnboundedReceiver<redis::PushInfo>,
+    )> {
+        if !self.info.resp3 {
+            return Err(AppError::validation(
+                "Listening needs Redis 6 or newer (this server speaks the older protocol).",
+            ));
+        }
+        let stream = open_stream(self.ssh.as_ref(), &self.reach.target).await?;
+        let mut info = RedisConnectionInfo::default()
+            .set_protocol(ProtocolVersion::RESP3)
+            .set_db(i64::from(self.reach.db));
+        if let Some(u) = &self.reach.username {
+            info = info.set_username(u);
+        }
+        if let Some(p) = &self.reach.password {
+            info = info.set_password(p.as_str());
+        }
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        // No response timeout: a listening connection is quiet between messages by design.
+        let config = AsyncConnectionConfig::new().set_push_sender(tx);
+        let (conn, driver) = tokio::time::timeout(
+            transport::CONNECT_TIMEOUT,
+            MultiplexedConnection::new_with_config(&info, stream, config),
+        )
+        .await
+        .map_err(|_| {
+            AppError::new(
+                ErrorCode::RedisUnreachable,
+                "Redis didn't answer the sign-in in time.",
+            )
+        })?
+        .map_err(|e| redis_error(&e))?;
+        tokio::spawn(driver);
+        Ok((conn, rx))
+    }
+
     async fn shutdown(self) {
         drop(self.conn);
         if let Some(ssh) = self.ssh {
@@ -481,6 +536,12 @@ pub async fn connect(
         info,
         table: Arc::new(table),
         ssh,
+        reach: Reach {
+            target: cfg.target.clone(),
+            username: cfg.username.clone(),
+            password: cfg.password.clone(),
+            db: cfg.db,
+        },
     })
 }
 
@@ -532,6 +593,9 @@ struct Live {
     pending: Arc<PendingStore>,
     /// The console's open `MULTI`, if any.
     console: Arc<ConsoleState>,
+    /// The Pub/Sub listener: its own connection, opened when the tab first listens.
+    sub: tokio::sync::Mutex<Option<Listener>>,
+    bulk: Arc<BulkState>,
 }
 
 /// What a write needs from a live connection.
@@ -542,6 +606,7 @@ pub struct Writer {
     pub db_id: String,
     pub pending: Arc<PendingStore>,
     pub console: Arc<ConsoleState>,
+    pub bulk: Arc<BulkState>,
 }
 
 #[derive(Default)]
@@ -580,6 +645,8 @@ impl RedisManager {
             db_id: db_id.clone(),
             pending: Arc::default(),
             console: Arc::default(),
+            sub: tokio::sync::Mutex::new(None),
+            bulk: Arc::default(),
         });
         self.conns
             .lock()
@@ -623,7 +690,57 @@ impl RedisManager {
             db_id: live.db_id.clone(),
             pending: Arc::clone(&live.pending),
             console: Arc::clone(&live.console),
+            bulk: Arc::clone(&live.bulk),
         })
+    }
+
+    /// F17: starts listening to a channel or a pattern. The first call opens the listening connection.
+    pub async fn sub_start(
+        &self,
+        conn_id: &str,
+        name: &RedisBytes,
+        pattern: bool,
+        emit: SubEmit,
+    ) -> AppResult<()> {
+        let live = self.get(conn_id)?;
+        let mut sub = live.sub.lock().await;
+        if sub.is_none() {
+            let guard = live.conn.lock().await;
+            let c = guard.as_ref().ok_or_else(|| {
+                AppError::new(
+                    ErrorCode::RedisUnreachable,
+                    "This database isn't connected right now.",
+                )
+            })?;
+            let (conn, pushes) = c.listener().await?;
+            *sub = Some(Listener::new(conn, pushes, Arc::clone(&emit)));
+        }
+        // `sub` is `Some` here: it was just filled if it was empty.
+        let Some(listener) = sub.as_mut() else {
+            return Err(AppError::internal("no listener"));
+        };
+        listener.set_emit(emit);
+        listener.start(name, pattern).await
+    }
+
+    /// Stops listening to one name. The listening connection closes with its last name.
+    pub async fn sub_stop(&self, conn_id: &str, name: &RedisBytes, pattern: bool) -> AppResult<()> {
+        let live = self.get(conn_id)?;
+        let mut sub = live.sub.lock().await;
+        if let Some(listener) = sub.as_mut() {
+            listener.stop(name, pattern).await?;
+            if listener.is_idle() {
+                *sub = None;
+            }
+        }
+        Ok(())
+    }
+
+    /// "Stop" in the bulk dialog. Works while the scan or the run holds the connection.
+    pub fn bulk_stop(&self, conn_id: &str) {
+        if let Ok(live) = self.get(conn_id) {
+            live.bulk.stop();
+        }
     }
 
     /// The console ran `SELECT`: remember it, so a reconnect comes back to the same logical database.
@@ -754,6 +871,8 @@ async fn run(
                         _ => break,
                     }
                 }
+                // The listener ran through the same route: it ends with the connection. The tab listens again once it is back.
+                live.sub.lock().await.take();
                 if let Some(c) = live.conn.lock().await.take() {
                     c.shutdown().await;
                 }
@@ -791,6 +910,8 @@ async fn run(
             _ = cancelled(&mut cancel) => break,
         }
     }
+    live.sub.lock().await.take();
+    live.bulk.stop();
     if let Some(c) = live.conn.lock().await.take() {
         c.shutdown().await;
     }

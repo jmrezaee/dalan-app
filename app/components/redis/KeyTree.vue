@@ -9,7 +9,7 @@ import { treeRows } from '~/utils/redisTree'
 import type { TreeRow } from '~/utils/redisTree'
 
 const props = defineProps<{ tabKey: string, separator: string, writable?: boolean }>()
-defineEmits<{ newKey: [] }>()
+defineEmits<{ newKey: [], bulk: [] }>()
 const store = useRedisStore(props.tabKey)
 
 const TYPES = [{ value: 'all', label: 'All types' }, { value: 'string', label: 'String' }, { value: 'hash', label: 'Hash' }, { value: 'list', label: 'List' }, { value: 'set', label: 'Set' }, { value: 'zset', label: 'Sorted set' }, { value: 'stream', label: 'Stream' }, { value: 'json', label: 'JSON' }]
@@ -131,9 +131,12 @@ const ttl = (ms: number | null | undefined) => (ms == null ? 'no expiry' : ttlTe
 
     <div class="flex h-9 shrink-0 items-center gap-2 border-t border-border px-3 text-xs text-muted" aria-live="polite">
       <span v-if="store.scanning" class="flex items-center gap-2"><span class="size-3 animate-spin rounded-full border-2 border-accent border-r-transparent" aria-hidden="true" />Scanning…</span>
-      <span v-else-if="store.scanDone">All {{ count(total) }} keys scanned</span>
-      <span v-else>Scanned {{ count(Math.min(store.scanned, total || store.scanned)) }} of {{ count(total) }} keys</span>
-      <Button v-if="!store.scanDone && !store.scanning" variant="ghost" size="sm" class="ml-auto text-accent" @click="store.scanMore()">Scan more</Button>
+      <span v-else-if="store.scanDone" class="min-w-0 truncate">All {{ count(total) }} keys scanned</span>
+      <span v-else class="min-w-0 truncate">Scanned {{ count(Math.min(store.scanned, total || store.scanned)) }} of {{ count(total) }} keys</span>
+      <span class="ml-auto flex shrink-0 items-center">
+        <Button v-if="!store.scanDone && !store.scanning" variant="ghost" size="sm" class="text-accent" @click="store.scanMore()">Scan more</Button>
+        <Button v-if="writable" variant="ghost" size="sm" @click="$emit('bulk')">Bulk…</Button>
+      </span>
     </div>
   </section>
 </template>

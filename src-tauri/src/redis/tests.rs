@@ -1125,3 +1125,253 @@ async fn l3_redis_console_lines_go_through_the_gate_and_the_server_view_reads_in
     assert!(stats.version.starts_with('7') && stats.clients >= 1 && stats.uptime_secs > 0);
     let _ = server::slowlog(&mut r).await.unwrap();
 }
+
+// ---- R5: Pub/Sub and bulk actions against the real server
+
+use super::bulk::{self, BulkState, RedisBulkAction, RedisBulkEvent};
+use super::conn::RedisManager;
+use super::pubsub::{RedisSubEvent, SubEmit};
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_redis_bulk_previews_runs_in_batches_and_stops() {
+    let h = harness(None).await;
+    let (emit, _) = recorder();
+    let c = conn::connect(
+        &h.state.store(),
+        &direct(Some(PASSWORD), None),
+        &Arc::new(Prompts::default()),
+        &emit,
+    )
+    .await
+    .unwrap();
+    let mut r = c.conn.clone();
+    let p = format!("dalan-test:{}:", uuid::Uuid::now_v7());
+    let mut seed = redis::pipe();
+    for i in 0..1200 {
+        seed.cmd("SET")
+            .arg(format!("{p}session:{i}"))
+            .arg(i)
+            .arg("PX")
+            .arg(600_000);
+    }
+    seed.cmd("SET")
+        .arg(format!("{p}other"))
+        .arg(1)
+        .arg("PX")
+        .arg(600_000);
+    seed.query_async::<()>(&mut r).await.unwrap();
+
+    let state = BulkState::default();
+    let events: Arc<Mutex<Vec<RedisBulkEvent>>> = Arc::default();
+    let sink = Arc::clone(&events);
+    let progress: bulk::BulkEmit = Arc::new(move |e| sink.lock().unwrap().push(e));
+    let pattern = format!("{p}session:*");
+    let preview = bulk::preview(&mut r, &state, &pattern, Some("string"), &progress)
+        .await
+        .unwrap();
+    assert!(preview.complete);
+    assert_eq!(preview.count, 1200);
+    assert_eq!(preview.sample.len(), 20);
+
+    // Read-only refuses; a wrong name refuses; neither uses the preview up.
+    assert_eq!(
+        bulk::approve(
+            &db(RedisWriteMode::ReadOnly),
+            RedisBulkAction::Delete,
+            Some("cache-test")
+        )
+        .unwrap_err()
+        .code,
+        ErrorCode::RedisReadOnlyMode
+    );
+    assert!(bulk::approve(
+        &db(RedisWriteMode::Open),
+        RedisBulkAction::Delete,
+        Some("nope")
+    )
+    .is_err());
+
+    // Set an expiry on all of them, then remove it.
+    let open = db(RedisWriteMode::Open);
+    let done = bulk::run(
+        &mut r,
+        &c.table,
+        &state,
+        &open,
+        &preview.id,
+        RedisBulkAction::Expire { ttl_ms: 300_000 },
+        &progress,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        (done.processed, done.changed, done.stopped),
+        (1200, 1200, false)
+    );
+    let ttl: i64 = redis::cmd("PTTL")
+        .arg(format!("{p}session:7"))
+        .query_async(&mut r)
+        .await
+        .unwrap();
+    assert!(ttl > 0 && ttl <= 300_000);
+    assert!(
+        bulk::run(
+            &mut r,
+            &c.table,
+            &state,
+            &open,
+            &preview.id,
+            RedisBulkAction::Delete,
+            &progress
+        )
+        .await
+        .is_err(),
+        "a preview runs once"
+    );
+
+    // Delete, and the key that did not match is still there.
+    let preview = bulk::preview(&mut r, &state, &pattern, None, &progress)
+        .await
+        .unwrap();
+    let done = bulk::run(
+        &mut r,
+        &c.table,
+        &state,
+        &open,
+        &preview.id,
+        RedisBulkAction::Delete,
+        &progress,
+    )
+    .await
+    .unwrap();
+    assert_eq!((done.processed, done.changed), (1200, 1200));
+    let left: Vec<String> = redis::cmd("KEYS")
+        .arg(format!("{p}*"))
+        .query_async(&mut r)
+        .await
+        .unwrap();
+    assert_eq!(left, [format!("{p}other")]);
+    let batches = events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|e| matches!(e, RedisBulkEvent::Running { .. }))
+        .count();
+    assert_eq!(
+        batches, 6,
+        "1,200 keys are three batches of 500, 500 and 200, twice"
+    );
+    let _: () = redis::cmd("DEL")
+        .arg(format!("{p}other"))
+        .query_async(&mut r)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_redis_listening_uses_its_own_connection_and_delivers_messages_as_bytes() {
+    let h = harness(None).await;
+    let id = h
+        .state
+        .with_db_session(|c, s| {
+            store::save(
+                c,
+                s,
+                RedisDatabaseInput {
+                    id: None,
+                    name: "pubsub-test".into(),
+                    environment: RedisEnvironment::None,
+                    route: RedisRoute::Direct,
+                    host_id: None,
+                    address: "127.0.0.1".into(),
+                    port: DIRECT_PORT,
+                    kind: RedisKind::Single,
+                    sentinel_master: None,
+                    username: None,
+                    password: Some(PASSWORD.into()),
+                    clear_password: false,
+                    tls: false,
+                    tls_server_name: None,
+                    write_mode: RedisWriteMode::Open,
+                    default_db: 0,
+                    key_separator: ":".into(),
+                },
+            )
+        })
+        .await
+        .unwrap()
+        .id;
+    let manager = RedisManager::default();
+    let (emit, seen) = recorder();
+    let conn_id = manager.open(h.state.store(), id, emit).unwrap();
+    for _ in 0..100 {
+        if seen
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, RedisEvent::Ready { .. }))
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let got: Arc<Mutex<Vec<RedisSubEvent>>> = Arc::default();
+    let sink = Arc::clone(&got);
+    let on: SubEmit = Arc::new(move |e| sink.lock().unwrap().push(e));
+    let channel = format!("dalan-test.{}", uuid::Uuid::now_v7());
+    manager
+        .sub_start(&conn_id, &t(&channel), false, Arc::clone(&on))
+        .await
+        .unwrap();
+    manager
+        .sub_start(&conn_id, &t("dalan-test.*"), true, on)
+        .await
+        .unwrap();
+
+    // The tab's own connection still answers while the other one listens.
+    let mut r = manager.handle(&conn_id).await.unwrap();
+    let receivers: i64 = redis::cmd("PUBLISH")
+        .arg(&channel)
+        .arg(&[0xffu8, 0x00, b'A'][..])
+        .query_async(&mut r)
+        .await
+        .unwrap();
+    assert_eq!(receivers, 2, "the channel and the pattern both match");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let messages: Vec<_> = got
+        .lock()
+        .unwrap()
+        .iter()
+        .flat_map(|e| match e {
+            RedisSubEvent::Messages { messages, .. } => messages.clone(),
+            RedisSubEvent::Ended => vec![],
+        })
+        .collect();
+    assert_eq!(messages.len(), 2);
+    assert!(messages.iter().all(|m| m.payload
+        == RedisBytes::Binary {
+            bytes: vec![0xff, 0x00, b'A']
+        }));
+    assert!(messages
+        .iter()
+        .any(|m| m.pattern.as_deref() == Some("dalan-test.*")));
+
+    manager
+        .sub_stop(&conn_id, &t(&channel), false)
+        .await
+        .unwrap();
+    manager
+        .sub_stop(&conn_id, &t("dalan-test.*"), true)
+        .await
+        .unwrap();
+    let receivers: i64 = redis::cmd("PUBLISH")
+        .arg(&channel)
+        .arg("x")
+        .query_async(&mut r)
+        .await
+        .unwrap();
+    assert_eq!(receivers, 0, "nobody listens any more");
+    manager.close(&conn_id);
+}

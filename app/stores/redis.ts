@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { toast } from 'vue-sonner'
-import type { RedisBytes, RedisDbKeys, RedisKeyInfo_Serialize, RedisKeyRow, RedisPending_Serialize, RedisWriteOp_Deserialize, RedisCommandInfo_Serialize, RedisConsoleReply_Serialize, RedisServerStats, RedisSlowEntry, RedisPlanStep_Serialize, PromptKind, RedisEvent_Serialize, RedisServerInfo, RedisStepState, RedisValuePage_Serialize } from '~/types/bindings'
-import { bytesId } from '~/utils/redisBytes'
+import type { RedisBytes, RedisDbKeys, RedisKeyInfo_Serialize, RedisKeyRow, RedisPending_Serialize, RedisWriteOp_Deserialize, RedisCommandInfo_Serialize, RedisConsoleReply_Serialize, RedisServerStats, RedisSlowEntry, RedisBulkAction, RedisBulkEvent, RedisMessage_Serialize, RedisSubEvent_Serialize, RedisPlanStep_Serialize, PromptKind, RedisEvent_Serialize, RedisServerInfo, RedisStepState, RedisValuePage_Serialize } from '~/types/bindings'
+import { bytesId, bytesText, textBytes } from '~/utils/redisBytes'
 import { foldersOf } from '~/utils/redisTree'
 import { useTauri } from '~/composables/useTauri'
 
@@ -23,6 +23,10 @@ export type LoadedValue =
 
 /** What a confirmation asks, in the editor's words: the title, the button's verb, and whether it destroys something. */
 export interface WriteAsk { title: string, action: string, text?: string, danger?: boolean }
+
+/** How many Pub/Sub messages a tab keeps (and how many wait while it is paused). */
+export const KEEP_MESSAGES = 5000
+export interface RedisSub { name: string, pattern: boolean, count: number, live: boolean }
 
 /** One command in the console's output, with what came of it. */
 export interface ConsoleEntry {
@@ -111,6 +115,7 @@ function setup() {
         latencyMs.value = e.info.latency_ms
         status.value = 'ready'
         void scan()
+        void relisten()
         error.value = null
         dropped.value = null
         prompt.value = null
@@ -120,6 +125,7 @@ function setup() {
         break
       case 'dropped':
         status.value = 'dropped'
+        subs.value = subs.value.map(x => ({ ...x, live: false }))
         dropped.value = { attempt: e.attempt, of: e.of, retryInSecs: e.retry_in_secs }
         latencyMs.value = null
         prompt.value = null
@@ -362,6 +368,7 @@ function setup() {
         await openKey(op.key)
         break
       case 'publish':
+        toast('Published.')
         break
       default:
         await refreshKey()
@@ -500,6 +507,95 @@ function setup() {
     consoleHistory.value = []
   }
 
+  // ---- Pub/Sub (F17). Rust listens on its own connection and sends batches; this side keeps the last 5,000.
+  const subs = ref<RedisSub[]>([])
+  // shallowRef: a batch replaces the array, so Vue never walks 5,000 messages to make them reactive.
+  const messages = shallowRef<RedisMessage_Serialize[]>([])
+  const heldMessages = shallowRef<RedisMessage_Serialize[]>([])
+  const received = ref(0)
+  const lost = ref(0)
+  const paused = ref(false)
+  const subError = ref('')
+  const isPattern = (name: string) => /[*?[]/.test(name)
+
+  function onSubEvent(e: RedisSubEvent_Serialize) {
+    if (e.type === 'ended') {
+      subs.value = subs.value.map(x => ({ ...x, live: false }))
+      return
+    }
+    received.value += e.messages.length + e.dropped
+    lost.value += e.dropped
+    const counts = new Map<string, number>()
+    for (const m of e.messages) {
+      const key = m.pattern === null ? `c:${bytesText(m.channel)}` : `p:${m.pattern}`
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+    subs.value = subs.value.map(x => ({ ...x, count: x.count + (counts.get(`${x.pattern ? 'p' : 'c'}:${x.name}`) ?? 0) }))
+    // Newest first. While paused they wait; whatever falls off the end of either list is counted as lost.
+    const target = paused.value ? heldMessages : messages
+    const next = [...e.messages].reverse().concat(target.value)
+    if (next.length > KEEP_MESSAGES) {
+      if (paused.value) lost.value += next.length - KEEP_MESSAGES
+      next.length = KEEP_MESSAGES
+    }
+    target.value = next
+  }
+
+  /** Starts listening to a channel, or to a pattern when the name has `*`, `?` or `[` in it. */
+  async function listen(raw: string) {
+    const name = raw.trim()
+    subError.value = ''
+    if (!name || !connId.value || status.value !== 'ready') return false
+    const pattern = isPattern(name)
+    if (subs.value.some(x => x.name === name && x.pattern === pattern)) return true
+    try {
+      await api.redisSubStart(connId.value, textBytes(name), pattern, onSubEvent)
+      subs.value = [...subs.value, { name, pattern, count: 0, live: true }]
+      return true
+    }
+    catch (e) {
+      subError.value = message(e, 'Couldn\'t start listening.')
+      return false
+    }
+  }
+  async function unlisten(sub: RedisSub) {
+    subs.value = subs.value.filter(x => x !== sub && !(x.name === sub.name && x.pattern === sub.pattern))
+    if (connId.value) await api.redisSubStop(connId.value, textBytes(sub.name), sub.pattern).catch(() => {})
+  }
+  /** After a reconnect the listening connection is new: listen to everything again. */
+  async function relisten() {
+    for (const x of subs.value) {
+      const ok = await api.redisSubStart(connId.value, textBytes(x.name), x.pattern, onSubEvent).then(() => true, () => false)
+      subs.value = subs.value.map(y => (y.name === x.name && y.pattern === x.pattern ? { ...y, live: ok } : y))
+    }
+  }
+  function setPaused(on: boolean) {
+    paused.value = on
+    if (!on && heldMessages.value.length) {
+      messages.value = heldMessages.value.concat(messages.value).slice(0, KEEP_MESSAGES)
+      heldMessages.value = []
+    }
+  }
+  function clearMessages() {
+    messages.value = []
+    heldMessages.value = []
+    received.value = 0
+    lost.value = 0
+  }
+  const publish = (channel: string, text: string) => write({ op: 'publish', channel: textBytes(channel), message: textBytes(text) }, { title: 'Publish this message?', action: 'Publish' })
+
+  // ---- Bulk actions (F18). Rust scans, keeps the matching keys and runs on exactly those; this side shows progress.
+  const bulkPreview = (pattern: string, keyType: string | null, onEvent: (e: RedisBulkEvent) => void) => api.redisBulkPreview(connId.value, pattern, keyType, onEvent)
+  async function bulkRun(previewId: string, action: RedisBulkAction, typedName: string, onEvent: (e: RedisBulkEvent) => void) {
+    const result = await api.redisBulkRun(connId.value, previewId, action, typedName, onEvent)
+    // The tree and the key count show what is left (SELECT on the same database answers with its size).
+    const k = await api.redisSelect(connId.value, selected.value).catch(() => null)
+    if (k) keys.value = { ...keys.value, [k.index]: k.keys ?? 0 }
+    void scan()
+    return result
+  }
+  const bulkStop = () => { if (connId.value) void api.redisBulkStop(connId.value) }
+
   // ---- Server view (S31): INFO and the slow log, read again while the view shows.
   const stats = ref<RedisServerStats | null>(null)
   const slowlog = ref<RedisSlowEntry[]>([])
@@ -544,6 +640,9 @@ function setup() {
     commandList.value = []
     stats.value = null
     slowlog.value = []
+    subs.value = []
+    messages.value = []
+    heldMessages.value = []
     closeKey()
   }
 
@@ -552,7 +651,8 @@ function setup() {
     setSeparator, scan, scanMore, toggleFolder, openKey, closeKey, loadMore, loadAll, reloadKey,
     pendingWrite, writeBusy, write, confirmWrite, cancelWrite,
     consoleEntries, consoleHistory, commandList, loadConsole, consoleRun, consoleSend, consoleCancel, consoleClear, consoleClearHistory,
-    stats, slowlog, serverAt, serverError, serverLoading, refreshServer }
+    stats, slowlog, serverAt, serverError, serverLoading, refreshServer,
+    subs, messages, heldMessages, received, lost, paused, subError, listen, unlisten, setPaused, clearMessages, publish, bulkPreview, bulkRun, bulkStop }
 }
 
 // One store per Redis tab, like the SFTP tabs (P30): each tab has its own connection, steps and view.

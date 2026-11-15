@@ -163,6 +163,7 @@ export const redis: Pick<Handlers, Keys> = {
   redisClose: (a, { m, tag }) => {
     const c = m.redisConns.get(a.connId)
     if (c) c.closed = true
+    m.redisSubs = m.redisSubs.filter(s => s.connId !== a.connId) // the listening connection ends with the tab
     tag(`redis_close:${a.connId}`)
   },
 }

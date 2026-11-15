@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // A Redis tab (replica/redis/spec.md, S28 shell and S33 states): the toolbar, connecting, the host's questions,
 // failures and drops, the Read-only banner, the write-mode dialog and the two write confirmations (R3).
-// Browser, Console and Server are built; Pub/Sub arrives in R5.
+// The four views (Browser, Console, Pub/Sub, Server) switch on a ref, not on a route.
 // The tab stays mounted while another tab shows, so its connection and state carry on.
 import { CircleAlert, Database, Lock, ShieldCheck, Unlock } from '@lucide/vue'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -111,9 +111,10 @@ const promptHost = computed(() => {
     </div>
 
     <!-- Connected: the open view. -->
-    <RedisBrowser v-if="store.status === 'ready' && store.view === 'browser' && !store.prompt" :tab-key="tabKey" :separator="db?.key_separator ?? ':'" :mode="db?.write_mode ?? 'read_only'" :read-only="readOnly" />
+    <RedisBrowser v-if="store.status === 'ready' && store.view === 'browser' && !store.prompt" :tab-key="tabKey" :separator="db?.key_separator ?? ':'" :mode="db?.write_mode ?? 'read_only'" :read-only="readOnly" :db-name="name" />
 
     <RedisConsole v-else-if="store.status === 'ready' && store.view === 'console' && !store.prompt && db" :tab-key="tabKey" :db-name="db.name" :production="db.environment === 'production'" />
+    <RedisPubSub v-else-if="store.status === 'ready' && store.view === 'pubsub' && !store.prompt" :tab-key="tabKey" :read-only="readOnly" :save-label="db?.write_mode === 'open' ? 'Save' : 'Review change'" />
     <RedisServer v-else-if="store.status === 'ready' && store.view === 'server' && !store.prompt" :tab-key="tabKey" :active="active" :read-only="readOnly" />
 
     <main v-else class="grid min-h-0 flex-1 place-items-center overflow-auto p-6">
@@ -132,8 +133,6 @@ const promptHost = computed(() => {
         <Button variant="secondary" size="sm" data-autofocus @click="failure.action.run()">{{ failure.action.label }}</Button>
       </div>
 
-      <!-- Pub/Sub arrives in the next phase. Until then it says so, honestly. -->
-      <EmptyState v-else-if="store.status === 'ready' && store.info" :icon="Database" :title="`Connected to ${name}`" :text="`Redis ${store.info.version}${store.info.resp3 ? '' : ' (older protocol)'}. The ${VIEWS.find(v => v.id === store.view)?.label} view isn't built yet.`" />
     </main>
 
     <template v-if="db">

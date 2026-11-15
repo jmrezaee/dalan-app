@@ -2,7 +2,7 @@
 import { Channel } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { commands } from '~/types/bindings'
-import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, RedisBytes, RedisDatabaseInput_Deserialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
+import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -52,6 +52,23 @@ export function useTauri() {
     redisCommands: (connId: string) => unwrap(commands.redisCommands(connId)),
     redisInfo: (connId: string) => unwrap(commands.redisInfo(connId)),
     redisSlowlog: (connId: string) => unwrap(commands.redisSlowlog(connId)),
+    redisSubStart: (connId: string, name: RedisBytes, pattern: boolean, onEvent: (e: RedisSubEvent_Serialize) => void) => {
+      const messages = new Channel<RedisSubEvent_Serialize>()
+      messages.onmessage = onEvent
+      return unwrap(commands.redisSubStart(connId, name, pattern, messages as never))
+    },
+    redisSubStop: (connId: string, name: RedisBytes, pattern: boolean) => unwrap(commands.redisSubStop(connId, name, pattern)),
+    redisBulkPreview: (connId: string, pattern: string, keyType: string | null, onEvent: (e: RedisBulkEvent) => void) => {
+      const progress = new Channel<RedisBulkEvent>()
+      progress.onmessage = onEvent
+      return unwrap(commands.redisBulkPreview(connId, pattern, keyType, progress))
+    },
+    redisBulkRun: (connId: string, previewId: string, action: RedisBulkAction, typedName: string | null, onEvent: (e: RedisBulkEvent) => void) => {
+      const progress = new Channel<RedisBulkEvent>()
+      progress.onmessage = onEvent
+      return unwrap(commands.redisBulkRun(connId, previewId, action, typedName, progress))
+    },
+    redisBulkStop: (connId: string) => commands.redisBulkStop(connId),
     systemIntegrationGet: () => unwrap(commands.systemIntegrationGet()),
     systemIntegrationSet: (sshLinks: boolean | null, autostart: boolean | null) => unwrap(commands.systemIntegrationSet(sshLinks, autostart)),
     openDefaultApps: () => unwrap(commands.openDefaultApps()),

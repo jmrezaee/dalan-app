@@ -342,7 +342,8 @@ KeyTree (S28, left side, 320 wide, resizable later)
            folder row: chevron, "user:" (mono), count right (muted); a folder with a single key under it is shown as that key
            key row: RedisTypeChip, name (mono, the part after the folder; binary keys escaped as \xNN), time left right ("23h", "12m", "no expiry" muted)
            selected key: bg accent/10; focus ring on the focused row
-  footer   "Scanned 2,000 of 12,408 keys" + [Scan more] (hidden when the whole keyspace was walked: "All 12,408 keys scanned")
+  footer   "Scanned 2,000 of 12,408 keys" + [Scan more] + [Bulk…] (ghost; hidden in Read-only; opens BulkDialog)
+           was: "Scanned 2,000 of 12,408 keys" + [Scan more] (hidden when the whole keyspace was walked: "All 12,408 keys scanned")
   states   scanning (footer spinner "Scanning…"), empty database ("This database has no keys."), no match ("No keys match user:* in what's been scanned so far." + Scan more),
            error (danger line with the server's sentence + Try again)
   keyboard ↑/↓ move, → opens a folder (or moves into it), ← closes it (or moves to its parent), Enter opens a key or toggles a folder, Home/End; one Tab stop
@@ -437,6 +438,34 @@ RedisServer (S31)
            Keys by database (Database | Keys | With expiry | Avg. time left; "—" when none expire; empty "This server holds no keys.")
            Nodes (Cluster and Sentinel only; arrives in R6)
   states   loading (skeleton tiles), error (danger line + Try again), a limited user (tiles show what INFO gave; the slow log is empty)
+
+RedisPubSub (S32)
+  left     "Listening to" aside, 300 wide: Input (mono, "channel or pat*ern") + primary [Listen]; a name with *, ? or [ is a pattern
+           rows h 36: dot (success while listening, border-input when stopped), name (mono), "channel" / "pattern" (xs muted), count right (tabular), × "Stop listening to orders.*"
+           footer "Listening uses its own connection, so the Browser and Console keep working. It stops when you close the tab or lock Dalan."
+           empty "Not listening to anything yet."; error under the input (danger, one line: an old server, 50 names already)
+  right    header h 40: "Messages" + "131 received · keeping the last 5,000" (+ "· 240 dropped" when a flood or a long pause lost some) +
+           filter Input (200, "Filter messages", filters what is kept) + [Pause] (secondary, aria-pressed; "Resume" while paused) + [Clear]
+           table Time (mono muted, 14:02:11.482) | Channel (mono ansi-cyan) | Message (mono; binary as \xNN), newest first, virtualised, rows h 30
+           Pause keeps receiving into a buffer of 5,000 and says "Paused · 312 waiting"; Resume shows them
+           empty "Nothing has arrived yet." (listening) / "Listen to a channel to see its messages here." (not listening)
+  publish  bar on surface, hidden in Read-only: "PUBLISH" caps + channel Input (180, mono) + message Input (mono) +
+           [Review and publish] (Confirm mode → WriteConfirmDialog "Publish this message?") or [Publish] (Open mode); toast "Published."
+  states   the connection dropped (dots go grey; listening starts again by itself once the tab is back)
+  keyboard Enter in the name field listens; Enter in the message field publishes; the table is one Tab stop
+
+BulkDialog (S33 "Bulk action"; KeyTree's [Bulk…], hidden in Read-only)
+  Dialog "Actions on matching keys", 520 wide
+  row      pattern Input (mono, search icon, "session:*") + type Select ("All types" …) + [Preview]
+  action   Segmented Delete / Set expiry / Remove expiry; Set expiry adds an Input ("90s, 15m, 2h, 7d or a date")
+  preview  scanning ("Scanning… 2,400 found" + [Stop]) → panel: "3,940 keys match" + "whole database scanned" (muted) +
+           the first 20 names (mono muted, " · " between) + "… 3,920 more"; none: "No keys match session:*."; stopped: "Stopped before the whole database was scanned. Preview again to run."
+           changing the pattern or the type clears the preview
+  confirm  label "Type cache-prod to confirm" + Input (mono); the action button (danger-solid: "Delete 3,940 keys", "Set expiry on 3,940 keys",
+           "Remove expiry from 3,940 keys") is disabled until there is a whole preview, the name matches exactly and the expiry reads
+  running  progress bar (accent on surface-hover, h 6) + "Deleting 1,655 of 3,940 · in small batches, so the server stays responsive" + [Stop]
+  done     "Deleted 3,940 keys." / "Stopped. 1,500 of 3,940 done; the rest were left alone." + [Close]; the key tree is scanned again
+  footer note "Stop keeps what's already done." Cancel has the focus when the dialog opens. Rust refuses a bulk action in Read-only and checks the name itself.
 
 ConnectSteps (S33 "Connecting")
   card: title "Opening cache-prod"; one row per step h 28: state icon (done = success check, active = spinning accent ring, pending = empty ring, failed = danger ×),

@@ -151,6 +151,11 @@ export interface Model {
   redisConsolePending: Map<string, { connId: string, lines: string[][], typed: boolean, at: number }>
   redisSlowlog: import('../../app/types/bindings').RedisSlowEntry[]
   redisInfoCalls: number
+  /** Pub/Sub and bulk (commands/redisPubSub.ts): who listens to what, the previewed keys, Stop, and a slow mode for tests. */
+  redisSubs: { connId: string, name: string, pattern: boolean, events: number }[]
+  redisBulk: { id: string, connId: string, keys: string[] } | null
+  redisBulkStop: boolean
+  redisBulkSlow: boolean
   /** Writes waiting for their confirmation (see commands/redisWrite.ts). */
   redisPending: Map<string, { connId: string, op: import('../../app/types/bindings').RedisWriteOp_Deserialize, typed: boolean, at: number }>
 }
@@ -203,6 +208,10 @@ export function createModel(seed: Seed): Model {
       { id: 12, at_secs: 1794769267, micros: 71_000, command: 'HGETALL cache:catalog', client: '10.0.1.14' },
     ],
     redisInfoCalls: 0,
+    redisSubs: [],
+    redisBulk: null,
+    redisBulkStop: false,
+    redisBulkSlow: false,
     system: { supported: false, ssh_links: false, autostart: false, other_handler: null, pinned: false, edition: null, install_dir: null },
   }
 }

@@ -6,6 +6,7 @@ import type { Model } from '../model'
 import type { RedisBytes, RedisWriteOp_Deserialize } from '../../../app/types/bindings'
 import { MASTER } from './vault'
 import { keyspace, type FakeKey } from './redisKeys'
+import { deliver } from './redisPubSub'
 
 type Op = RedisWriteOp_Deserialize
 const BIG = 10_000
@@ -75,13 +76,13 @@ function before(keys: FakeKey[], op: Op): RedisBytes | null {
 const wrongType = (): never => fail('redis_refused', 'WRONGTYPE Operation against a key holding the wrong kind of value')
 
 /** Changes the fake keyspace the way the command would. A collection that loses its last item is gone, like in Redis. */
-function apply(keys: FakeKey[], op: Op, m: Model): string | null {
+function apply(keys: FakeKey[], op: Op, m: Model, send: (channel: number, message: unknown) => void): string | null {
   const find = (key: RedisBytes) => keys.find(x => id(x.key) === id(key))
   const drop = (key: RedisBytes) => { const i = keys.findIndex(x => id(x.key) === id(key)); if (i >= 0) keys.splice(i, 1) }
   const need = (key: RedisBytes) => find(key) ?? fail('not_found', 'That key is gone.')
   const emptied = (k: FakeKey) => { if (k.value.type !== 'string' && k.value.type !== 'json' && size(k) === 0) drop(k.key) }
   switch (op.op) {
-    case 'publish': return null
+    case 'publish': deliver(m, send, show(op.channel), show(op.message)); return null
     case 'create': {
       if (find(op.key)) fail('validation', 'A key with that name already exists. Nothing was changed.')
       const v = show(op.value)
@@ -153,7 +154,7 @@ const readOnly = (name: string): never => fail('redis_read_only_mode', `${name} 
 
 type Keys = 'redisWritePrepare' | 'redisWriteCommit' | 'redisSetMode'
 export const redisWrite: Pick<Handlers, Keys> = {
-  redisWritePrepare: (a, { m, id: newId, tag }) => {
+  redisWritePrepare: (a, { m, id: newId, tag, send }) => {
     const op = a.op as Op
     const db = database(m, a.connId)
     const keys = keysOf(m, a.connId)
@@ -166,14 +167,14 @@ export const redisWrite: Pick<Handlers, Keys> = {
     }
     if (db.write_mode === 'open' && !dangerous) {
       tag(`redis_write:${op.op}`)
-      return { status: 'done', reply: apply(keys, op, m) }
+      return { status: 'done', reply: apply(keys, op, m, send) }
     }
     const d = describe(op)
     const pendingId = newId('rpend')
     m.redisPending.set(pendingId, { connId: a.connId, op, typed: dangerous, at: Date.now() })
     return { status: 'pending', pending: { id: pendingId, level: dangerous ? 'typed' : 'confirm', command_preview: d.command, target: d.target, before: before(keys, op), after: d.after, count: k && k.value.type !== 'string' ? size(k) : null } }
   },
-  redisWriteCommit: (a, { m, tag }) => {
+  redisWriteCommit: (a, { m, tag, send }) => {
     const db = database(m, a.connId)
     const p = m.redisPending.get(a.pendingId)
     // Used, unknown, or another tab's: all the same answer. A confirmation is used up when it is asked for.
@@ -183,7 +184,7 @@ export const redisWrite: Pick<Handlers, Keys> = {
     if (db.write_mode === 'read_only') readOnly(db.name)
     if (p.typed && a.typedName !== db.name) fail('redis_confirm_needed', 'The name doesn\'t match the database\'s name. Nothing was sent.')
     tag(`redis_write:${p.op.op}`)
-    return { status: 'done', reply: apply(keysOf(m, a.connId), p.op, m) }
+    return { status: 'done', reply: apply(keysOf(m, a.connId), p.op, m, send) }
   },
   redisSetMode: (a, { m }) => {
     const db = m.redisDbs.find(d => d.id === a.dbId) ?? fail('not_found', 'That database is no longer saved.')
