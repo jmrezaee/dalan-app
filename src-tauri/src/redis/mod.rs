@@ -12,3 +12,6 @@ pub mod store;
 pub mod transport;
 
 pub use conn::{RedisEvent, RedisManager};
+
+#[cfg(test)]
+mod tests;

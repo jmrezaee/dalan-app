@@ -268,6 +268,31 @@ Webhooks in or out: **none** (local app).
 | orphan sweep | on unlock | Deletes `secrets` rows nothing references, and stale `edit-tmp/` files. |
 | connection pool | always | One SSH connection per host, shared by shell, SFTP and tunnels when credentials match. It closes 60 s after the last user leaves. |
 
+### Redis (F13; S26, S27, S33; replica/redis/spec.md)
+
+R1 adds the first commands; the browser, the write gate, the console, Pub/Sub and bulk actions follow in R2 to R5.
+New error codes: `redis_auth_failed`, `redis_unreachable`, `redis_tls_untrusted`, `redis_refused` (the server's own text is the message).
+
+| command | does | input | output | flow |
+| --- | --- | --- | --- | --- |
+| `redis_db_list` | saved databases, by name; never a password, only `has_password` | – | `RedisDatabase[]` | F13 |
+| `redis_db_save` | create or update; the password goes into `secrets` | `RedisDatabaseInput` | `RedisDatabase` | F13 |
+| `redis_db_delete` | removes the row and its secret | `{ id }` | `()` | F13 |
+| `redis_db_test` | connects with the form's values, reads version, mode and latency, closes | `RedisDatabaseInput` | `RedisTestResult` | F13 |
+| `redis_open` | starts a tab's connection and returns at once; progress on the channel | `{ db_id, events: Channel<RedisEvent> }` | `{ conn_id }` | F13 |
+| `redis_respond` | answers a host's question asked while opening (host key, password, passphrase, 2FA) | `{ conn_id, prompt_id, answer }` | `()` | F13 |
+| `redis_select` | `SELECT` a logical database; answers with its key count | `{ conn_id, index }` | `RedisDbKeys` | F13 |
+| `redis_close` | closes the connection, its questions and the SSH connection it ran through | `{ conn_id }` | `()` | F13 |
+
+`RedisEvent`: `plan { steps }` (one step per SSH hop, then "reach Redis", then "sign in"), `step { index, state, detail }`,
+`host { event }` (a `SessionEvent` from a hop: its prompts), `ready { info }`, `latency { ms }`, `failed { code, message }`,
+`dropped { attempt, of, retry_in_secs }`, `closed`.
+
+Transport (the part that bites): a database is reached directly (TCP) or through a saved host (an SSH `direct-tcpip`
+channel on a connection opened like a terminal's, jump chain included). Either way the Redis client gets one stream;
+TLS runs inside it. **No local listener is ever bound.** Each Redis tab has its own SSH connection (not shared with
+terminal tabs). Keep-alive is a `PING` every 30 s; a drop is retried after 1, 2, 4, 8 and 15 s, and nothing is replayed.
+
 ## The parts that bite
 
 - **Terminal throughput and backpressure.** `cat` on a big file or `yes` can flood the IPC. Batch output in Rust (flush every ~8 ms or 64 KB) and send raw bytes. Respect xterm's `write(data, callback)`: when the UI is more than ~1 MB behind, pause reading from the SSH channel so the window stays responsive.

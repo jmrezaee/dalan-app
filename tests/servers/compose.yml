@@ -50,6 +50,16 @@ services:
       USER_NAME: test
       USER_PASSWORD: test
 
+  # redis: one single server for the Redis tests (replica/redis/spec.md, R1). Reachable from the other containers as
+  # redis:6379 (the "through a host" route) and from this computer on 6390 (the direct route).
+  # The default user needs the password; app-ro is a read-only ACL user.
+  redis:
+    image: redis:7
+    container_name: dalan-test-redis
+    networks: { default: { aliases: [redis] } }
+    ports: ["6390:6379"]
+    command: ["redis-server", "--requirepass", "test-redis", "--user", "app-ro", "on", ">ro-pass", "~*", "&*", "+@read", "+@connection", "+info", "+dbsize", "+select", "+config|get"]
+
   # kbd: password, then "Verification code:" (a time-based code; scripts/test-servers.sh otp prints the current one).
   kbd:
     build: ./debian-sshd

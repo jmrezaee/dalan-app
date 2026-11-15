@@ -106,6 +106,7 @@ cd src-tauri && cargo clippy -- -D warnings && cargo test
 - **The Windows installer is built** (W1 to W3 done, released in v0.1.2; W4 waits for the Windows hand checks in section H of `hand-checks.md`).
 - **L1 (the download page rebuild) is built** (`[h]`): `site/index.html`, `pnpm site:shots`, `tests/site/`; its hand check (the right button and file on a Mac, a Windows PC and a phone) is in `replica/progress.md`.
 - **Next: Redis.** A Databases vault section and Redis tabs (browser, console, Pub/Sub, server, bulk actions, Cluster and Sentinel) with per-database write modes behind one gate in Rust. The spec is `replica/redis/spec.md` (screens **S26–S33**, flows **F13–F19**); the boards are the "Redis" page of the UI/UX design canvas; phases R1 to R7 are in `replica/progress.md`. Start with `go R1`. The second reference app is named only in `replica/`.
+- **R1 (Redis foundations) is built** (`[h]`): the Databases section, the database editor, the Redis tab shell and its connection (direct or through a host, TLS). Its hand check and what is left (visual baselines, the real-server tests) are in `replica/progress.md`. Next: `go R2`.
 - **Manual checks:** a phase that needs Mehrdad to test something by hand is not done until he has reported back.
 - **M1 is done when F01, F11 and F12 work against a real server:**
   - unlock
