@@ -37,6 +37,15 @@ export const commands = {
 	redisSelect: (connId: string, index: number) => typedError<RedisDbKeys, AppError>(__TAURI_INVOKE("redis_select", { connId, index })),
 	/**  Closes the tab's connection, its questions and the SSH connection it ran through. */
 	redisClose: (connId: string) => __TAURI_INVOKE<void>("redis_close", { connId }),
+	/**
+	 *  F14: one page of keys (`SCAN`, never `KEYS`), each with its type and time left. `cursor` is `""` to start;
+	 *  the page's own cursor continues, and `"0"` means the whole keyspace has been walked.
+	 */
+	redisScan: (connId: string, cursor: string, pattern: string, keyType: string | null, count: number) => typedError<RedisScanPage_Serialize, AppError>(__TAURI_INVOKE("redis_scan", { connId, cursor, pattern, keyType, count })),
+	/**  The key header: type, time left, size, memory, encoding (and a stream's groups). */
+	redisKeyInfo: (connId: string, key: RedisBytes) => typedError<RedisKeyInfo_Serialize, AppError>(__TAURI_INVOKE("redis_key_info", { connId, key })),
+	/**  One page of the value for its type (500 items, or a string). `full` loads a big string whole. */
+	redisValuePage: (connId: string, key: RedisBytes, cursor: string, full: boolean) => typedError<RedisValuePage_Serialize, AppError>(__TAURI_INVOKE("redis_value_page", { connId, key, cursor, full })),
 	/**  First run? Locked? Allowed while locked. */
 	vaultStatus: () => typedError<VaultStatus_Serialize, AppError>(__TAURI_INVOKE("vault_status")),
 	/**  F10: derive the key, write the vault row, and leave the vault unlocked. */
@@ -1088,6 +1097,12 @@ export type RecentItem = {
 	connected_at: number | null,
 };
 
+/**
+ *  A key, a field or a value. `Text` when the bytes are text a person can read and edit; `Binary` otherwise.
+ *  A `Text` goes back to Rust as the same bytes (UTF-8 round-trips exactly), so either form addresses a key.
+ */
+export type RedisBytes = { kind: "text"; text: string } | { kind: "binary"; bytes: number[] };
+
 /**  One row of the Databases table, as the UI sees it. */
 export type RedisDatabase = RedisDatabase_Serialize | RedisDatabase_Deserialize;
 
@@ -1211,6 +1226,62 @@ export type RedisEvent_Serialize =
 /**  The connection dropped; trying again in `retry_in_secs` (attempt `attempt` of `of`). */
 { type: "dropped"; attempt: number; of: number; retry_in_secs: number } | { type: "closed" };
 
+export type RedisField = {
+	field: RedisBytes,
+	value: RedisBytes,
+};
+
+export type RedisKeyInfo = RedisKeyInfo_Serialize | RedisKeyInfo_Deserialize;
+
+export type RedisKeyInfo_Deserialize = {
+	key: RedisBytes,
+	/**  `none` when the key is gone. */
+	key_type: string,
+	ttl_ms?: number | null,
+	/**  Bytes for a string; fields, items, members or entries for the others. */
+	length: number | null,
+	/**  `MEMORY USAGE`, when the server allows it. */
+	memory_bytes?: number | null,
+	encoding?: string | null,
+	/**  Streams only: the consumer groups (listing only in this version). */
+	stream_groups: RedisStreamGroup[],
+};
+
+export type RedisKeyInfo_Serialize = {
+	key: RedisBytes,
+	/**  `none` when the key is gone. */
+	key_type: string,
+	ttl_ms: number | null,
+	/**  Bytes for a string; fields, items, members or entries for the others. */
+	length: number | null,
+	/**  `MEMORY USAGE`, when the server allows it. */
+	memory_bytes: number | null,
+	encoding: string | null,
+	/**  Streams only: the consumer groups (listing only in this version). */
+	stream_groups: RedisStreamGroup[],
+};
+
+/**  One key in a scanned page. */
+export type RedisKeyRow = RedisKeyRow_Serialize | RedisKeyRow_Deserialize;
+
+/**  One key in a scanned page. */
+export type RedisKeyRow_Deserialize = {
+	key: RedisBytes,
+	/**  `string`, `hash`, `list`, `set`, `zset`, `stream`, `json`, or the server's own word for a module type. */
+	key_type: string,
+	/**  Milliseconds until it expires; `None` = no expiry. */
+	ttl_ms?: number | null,
+};
+
+/**  One key in a scanned page. */
+export type RedisKeyRow_Serialize = {
+	key: RedisBytes,
+	/**  `string`, `hash`, `list`, `set`, `zset`, `stream`, `json`, or the server's own word for a module type. */
+	key_type: string,
+	/**  Milliseconds until it expires; `None` = no expiry. */
+	ttl_ms: number | null,
+};
+
 export type RedisKind = "single" | "cluster" | "sentinel";
 
 export type RedisOpened = {
@@ -1233,6 +1304,25 @@ export type RedisRoute = "direct" |
 /**  Sign in to a saved host (with its jump chain) and talk to Redis from there. */
 "host";
 
+export type RedisScanPage = RedisScanPage_Serialize | RedisScanPage_Deserialize;
+
+export type RedisScanPage_Deserialize = {
+	/**  Pass it back to continue. `"0"` means the whole keyspace has been walked. */
+	cursor: string,
+	keys: RedisKeyRow_Deserialize[],
+};
+
+export type RedisScanPage_Serialize = {
+	/**  Pass it back to continue. `"0"` means the whole keyspace has been walked. */
+	cursor: string,
+	keys: RedisKeyRow_Serialize[],
+};
+
+export type RedisScored = {
+	member: RedisBytes,
+	score: number | null,
+};
+
 /**  What the server said about itself right after sign-in. */
 export type RedisServerInfo = {
 	version: string,
@@ -1251,6 +1341,17 @@ export type RedisServerInfo = {
 
 export type RedisStepState = "active" | "done" | "failed";
 
+export type RedisStreamEntry = {
+	id: string,
+	fields: RedisField[],
+};
+
+export type RedisStreamGroup = {
+	name: string,
+	/**  Entries delivered to the group and not yet acknowledged. */
+	pending: number | null,
+};
+
 /**  What `redis_db_test` answers. */
 export type RedisTestResult = {
 	version: string,
@@ -1258,6 +1359,39 @@ export type RedisTestResult = {
 	replica: boolean,
 	latency_ms: number,
 };
+
+/**  One page of a value. `next` is the cursor for the following page; `None` means that was the last one. */
+export type RedisValuePage = RedisValuePage_Serialize | RedisValuePage_Deserialize;
+
+/**  One page of a value. `next` is the cursor for the following page; `None` means that was the last one. */
+export type RedisValuePage_Deserialize = { type: "string"; value: RedisBytes; total_bytes: number | null; 
+/**  Only the first 64 KB were loaded (the string is over 1 MB). "Load all" asks again with `full`. */
+truncated: boolean } | 
+/**  A key of the JSON module, read with `JSON.GET`. */
+{ type: "json"; text: string } | { type: "hash"; fields: RedisField[]; next?: string | null } | { type: "list"; 
+/**  The position of the first item in this page. */
+start: number | null; items: RedisBytes[]; next?: string | null } | { type: "set"; members: RedisBytes[]; next?: string | null } | 
+/**  Highest score first. */
+{ type: "zset"; members: RedisScored[]; next?: string | null } | 
+/**  Newest first. */
+{ type: "stream"; entries: RedisStreamEntry[]; next?: string | null } | 
+/**  A module type this version has no viewer for. */
+{ type: "unsupported"; key_type: string };
+
+/**  One page of a value. `next` is the cursor for the following page; `None` means that was the last one. */
+export type RedisValuePage_Serialize = { type: "string"; value: RedisBytes; total_bytes: number | null; 
+/**  Only the first 64 KB were loaded (the string is over 1 MB). "Load all" asks again with `full`. */
+truncated: boolean } | 
+/**  A key of the JSON module, read with `JSON.GET`. */
+{ type: "json"; text: string } | { type: "hash"; fields: RedisField[]; next: string | null } | { type: "list"; 
+/**  The position of the first item in this page. */
+start: number | null; items: RedisBytes[]; next: string | null } | { type: "set"; members: RedisBytes[]; next: string | null } | 
+/**  Highest score first. */
+{ type: "zset"; members: RedisScored[]; next: string | null } | 
+/**  Newest first. */
+{ type: "stream"; entries: RedisStreamEntry[]; next: string | null } | 
+/**  A module type this version has no viewer for. */
+{ type: "unsupported"; key_type: string };
 
 /**  What the write gate allows (spec section 4). New databases start as `Confirm`. */
 export type RedisWriteMode = "read_only" | "confirm" | "open";

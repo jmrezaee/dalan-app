@@ -10,6 +10,7 @@ use tauri::State;
 use zeroize::Zeroizing;
 
 use crate::error::AppResult;
+use crate::redis::browse::{self, RedisBytes, RedisKeyInfo, RedisScanPage, RedisValuePage};
 use crate::redis::conn::{self, Config, RedisDbKeys, RedisTestResult};
 use crate::redis::store::{self, RedisDatabase, RedisDatabaseInput};
 use crate::redis::transport::Target;
@@ -139,4 +140,49 @@ pub async fn redis_select(
 #[specta::specta]
 pub fn redis_close(state: State<'_, AppState>, conn_id: String) {
     state.redis.close(&conn_id);
+}
+
+/// F14: one page of keys (`SCAN`, never `KEYS`), each with its type and time left. `cursor` is `""` to start;
+/// the page's own cursor continues, and `"0"` means the whole keyspace has been walked.
+#[tauri::command]
+#[specta::specta]
+pub async fn redis_scan(
+    state: State<'_, AppState>,
+    conn_id: String,
+    cursor: String,
+    pattern: String,
+    key_type: Option<String>,
+    count: u32,
+) -> AppResult<RedisScanPage> {
+    state.require_unlocked()?;
+    let mut conn = state.redis.handle(&conn_id).await?;
+    browse::scan(&mut conn, &cursor, &pattern, key_type.as_deref(), count).await
+}
+
+/// The key header: type, time left, size, memory, encoding (and a stream's groups).
+#[tauri::command]
+#[specta::specta]
+pub async fn redis_key_info(
+    state: State<'_, AppState>,
+    conn_id: String,
+    key: RedisBytes,
+) -> AppResult<RedisKeyInfo> {
+    state.require_unlocked()?;
+    let mut conn = state.redis.handle(&conn_id).await?;
+    browse::key_info(&mut conn, &key).await
+}
+
+/// One page of the value for its type (500 items, or a string). `full` loads a big string whole.
+#[tauri::command]
+#[specta::specta]
+pub async fn redis_value_page(
+    state: State<'_, AppState>,
+    conn_id: String,
+    key: RedisBytes,
+    cursor: String,
+    full: bool,
+) -> AppResult<RedisValuePage> {
+    state.require_unlocked()?;
+    let mut conn = state.redis.handle(&conn_id).await?;
+    browse::value_page(&mut conn, &key, &cursor, full).await
 }

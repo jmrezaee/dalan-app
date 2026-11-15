@@ -4,9 +4,11 @@
 //! - `store`: the saved databases (S26, S27).
 //! - `transport`: how a connection reaches its server, directly or through a saved host, with TLS inside.
 //! - `conn`: one live connection per Redis tab: sign-in, server info, keep-alive, reconnect.
+//! - `browse`: the browser's read side: `SCAN`, key details and values in pages, as bytes.
 //!
-//! The browser, the write gate, the console, Pub/Sub, bulk actions, Cluster and Sentinel arrive in R2 to R6.
+//! The write gate, the console, Pub/Sub, bulk actions, Cluster and Sentinel arrive in R2 to R6.
 
+pub mod browse;
 pub mod conn;
 pub mod store;
 pub mod transport;

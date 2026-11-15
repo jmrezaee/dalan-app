@@ -287,3 +287,308 @@ async fn l3_redis_a_saved_database_opens_selects_and_closes() {
         .unwrap();
     assert!(again.last_opened_at.is_some());
 }
+
+// ---- R2: the browser's read side against the real server
+
+use super::browse::{self, RedisBytes, RedisValuePage};
+
+fn t(s: &str) -> RedisBytes {
+    RedisBytes::Text { text: s.into() }
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_redis_scan_key_info_and_every_types_value_in_pages() {
+    let h = harness(None).await;
+    let (emit, _) = recorder();
+    let c = conn::connect(
+        &h.state.store(),
+        &direct(Some(PASSWORD), None),
+        &Arc::new(Prompts::default()),
+        &emit,
+    )
+    .await
+    .unwrap();
+    let mut r = c.conn.clone();
+    // Our own corner of the keyspace, so the test never touches anything else and can run twice.
+    let p = format!("dalan-test:{}:", uuid::Uuid::now_v7());
+    let k = |name: &str| format!("{p}{name}");
+    let binary_key: Vec<u8> = [p.as_bytes(), &[0xff, 0x00, 0x41]].concat();
+    let mut seed = redis::pipe();
+    seed.cmd("SET")
+        .arg(k("str"))
+        .arg("Back at 14:30 UTC.")
+        .arg("PX")
+        .arg(600_000);
+    seed.cmd("HSET")
+        .arg(k("hash"))
+        .arg("name")
+        .arg("Sara Moradi")
+        .arg("seats")
+        .arg(12);
+    seed.cmd("RPUSH")
+        .arg(k("list"))
+        .arg("sku-8841")
+        .arg("sku-1207")
+        .arg("sku-5530");
+    seed.cmd("SADD")
+        .arg(k("set"))
+        .arg("billing")
+        .arg("editor")
+        .arg("owner");
+    let mut zadd = redis::cmd("ZADD");
+    zadd.arg(k("zset"));
+    for i in 0..600 {
+        zadd.arg(i).arg(format!("team:{i:04}"));
+    }
+    seed.add_command(zadd);
+    for i in 0..3 {
+        seed.cmd("XADD")
+            .arg(k("stream"))
+            .arg("*")
+            .arg("order")
+            .arg(5500 + i)
+            .arg("status")
+            .arg("paid");
+    }
+    seed.cmd("SET")
+        .arg(binary_key.as_slice())
+        .arg(&[0x00u8, 0x9f, 0x92, 0x96][..]);
+    seed.cmd("SET").arg(k("big")).arg(vec![b'x'; 1_100_000]);
+    seed.query_async::<()>(&mut r).await.unwrap();
+
+    // SCAN in small pages until the cursor comes back to "0": every key of ours shows up once, with its type.
+    let pattern = format!("{p}*");
+    let mut cursor = String::new();
+    let mut found = std::collections::BTreeMap::new();
+    for _ in 0..10_000 {
+        let page = browse::scan(&mut r, &cursor, &pattern, None, 10)
+            .await
+            .unwrap();
+        for row in page.keys {
+            found.insert(row.key.as_bytes().to_vec(), (row.key_type, row.ttl_ms));
+        }
+        cursor = page.cursor;
+        if cursor == "0" {
+            break;
+        }
+    }
+    assert_eq!(found.len(), 8, "{found:?}");
+    let type_of = |name: &str| found[k(name).as_bytes()].0.clone();
+    for (name, ty) in [
+        ("str", "string"),
+        ("hash", "hash"),
+        ("list", "list"),
+        ("set", "set"),
+        ("zset", "zset"),
+        ("stream", "stream"),
+    ] {
+        assert_eq!(type_of(name), ty);
+    }
+    assert!(
+        found[k("str").as_bytes()]
+            .1
+            .is_some_and(|ms| ms > 0 && ms <= 600_000),
+        "the string expires"
+    );
+    assert_eq!(
+        found[k("hash").as_bytes()].1,
+        None,
+        "the hash has no expiry"
+    );
+    assert!(
+        found.contains_key(&binary_key),
+        "a binary key is listed by its bytes"
+    );
+
+    // The type filter is applied by the server.
+    let mut hashes = Vec::new();
+    let mut cursor = String::new();
+    loop {
+        let page = browse::scan(&mut r, &cursor, &pattern, Some("hash"), 500)
+            .await
+            .unwrap();
+        hashes.extend(page.keys);
+        cursor = page.cursor;
+        if cursor == "0" {
+            break;
+        }
+    }
+    assert_eq!(hashes.len(), 1);
+    assert_eq!(hashes[0].key, t(&k("hash")));
+
+    // Key info: the size is in the type's own unit.
+    assert_eq!(
+        browse::key_info(&mut r, &t(&k("hash")))
+            .await
+            .unwrap()
+            .length,
+        2
+    );
+    assert_eq!(
+        browse::key_info(&mut r, &t(&k("zset")))
+            .await
+            .unwrap()
+            .length,
+        600
+    );
+    assert_eq!(
+        browse::key_info(&mut r, &t(&k("big")))
+            .await
+            .unwrap()
+            .length,
+        1_100_000
+    );
+    assert_eq!(
+        browse::key_info(&mut r, &t(&k("gone")))
+            .await
+            .unwrap()
+            .key_type,
+        "none"
+    );
+
+    // Values, one type at a time.
+    match browse::value_page(&mut r, &t(&k("str")), "", false)
+        .await
+        .unwrap()
+    {
+        RedisValuePage::String {
+            value,
+            total_bytes,
+            truncated,
+        } => {
+            assert_eq!(value, t("Back at 14:30 UTC."));
+            assert_eq!(total_bytes, 18);
+            assert!(!truncated);
+        }
+        other => panic!("{other:?}"),
+    }
+    match browse::value_page(&mut r, &t(&k("hash")), "", false)
+        .await
+        .unwrap()
+    {
+        RedisValuePage::Hash { fields, next } => {
+            assert_eq!(fields.len(), 2);
+            assert!(fields
+                .iter()
+                .any(|f| f.field == t("seats") && f.value == t("12")));
+            assert_eq!(next, None);
+        }
+        other => panic!("{other:?}"),
+    }
+    match browse::value_page(&mut r, &t(&k("list")), "", false)
+        .await
+        .unwrap()
+    {
+        RedisValuePage::List { start, items, next } => {
+            assert_eq!(start, 0);
+            assert_eq!(items, vec![t("sku-8841"), t("sku-1207"), t("sku-5530")]);
+            assert_eq!(next, None);
+        }
+        other => panic!("{other:?}"),
+    }
+    match browse::value_page(&mut r, &t(&k("set")), "", false)
+        .await
+        .unwrap()
+    {
+        RedisValuePage::Set { members, .. } => assert_eq!(members.len(), 3),
+        other => panic!("{other:?}"),
+    }
+    // The sorted set has 600 members: 500 highest first, then the last 100.
+    let next = match browse::value_page(&mut r, &t(&k("zset")), "", false)
+        .await
+        .unwrap()
+    {
+        RedisValuePage::Zset { members, next } => {
+            assert_eq!(members.len(), 500);
+            assert_eq!(members[0].score, 599.0);
+            assert_eq!(members[0].member, t("team:0599"));
+            next.expect("there is a second page")
+        }
+        other => panic!("{other:?}"),
+    };
+    match browse::value_page(&mut r, &t(&k("zset")), &next, false)
+        .await
+        .unwrap()
+    {
+        RedisValuePage::Zset { members, next } => {
+            assert_eq!(members.len(), 100);
+            assert_eq!(members[99].score, 0.0);
+            assert_eq!(next, None);
+        }
+        other => panic!("{other:?}"),
+    }
+    match browse::value_page(&mut r, &t(&k("stream")), "", false)
+        .await
+        .unwrap()
+    {
+        RedisValuePage::Stream { entries, next } => {
+            assert_eq!(entries.len(), 3);
+            assert_eq!(entries[0].fields[0].value, t("5502"), "newest first");
+            assert_eq!(next, None);
+        }
+        other => panic!("{other:?}"),
+    }
+    // A binary key and its binary value come through as bytes, untouched.
+    match browse::value_page(
+        &mut r,
+        &RedisBytes::Binary {
+            bytes: binary_key.clone(),
+        },
+        "",
+        false,
+    )
+    .await
+    .unwrap()
+    {
+        RedisValuePage::String { value, .. } => assert_eq!(
+            value,
+            RedisBytes::Binary {
+                bytes: vec![0x00, 0x9f, 0x92, 0x96]
+            }
+        ),
+        other => panic!("{other:?}"),
+    }
+    // Over 1 MB: the first 64 KB, flagged; "Load all" brings the rest.
+    match browse::value_page(&mut r, &t(&k("big")), "", false)
+        .await
+        .unwrap()
+    {
+        RedisValuePage::String {
+            value,
+            total_bytes,
+            truncated,
+        } => {
+            assert!(truncated);
+            assert_eq!(total_bytes, 1_100_000);
+            assert_eq!(value.as_bytes().len(), 64 * 1024);
+        }
+        other => panic!("{other:?}"),
+    }
+    match browse::value_page(&mut r, &t(&k("big")), "", true)
+        .await
+        .unwrap()
+    {
+        RedisValuePage::String {
+            value, truncated, ..
+        } => {
+            assert!(!truncated);
+            assert_eq!(value.as_bytes().len(), 1_100_000);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        browse::value_page(&mut r, &t(&k("gone")), "", false)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::NotFound
+    );
+
+    // Tidy up our corner.
+    let mut del = redis::cmd("DEL");
+    for key in found.keys() {
+        del.arg(key.as_slice());
+    }
+    del.query_async::<()>(&mut r).await.unwrap();
+}

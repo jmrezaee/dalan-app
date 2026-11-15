@@ -143,7 +143,7 @@ impl Connection {
     }
 }
 
-fn redis_error(e: &RedisError) -> AppError {
+pub(super) fn redis_error(e: &RedisError) -> AppError {
     let text = e.to_string();
     let code = e.code().unwrap_or("");
     if e.kind() == redis::ErrorKind::AuthenticationFailed
