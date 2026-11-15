@@ -270,7 +270,8 @@ Webhooks in or out: **none** (local app).
 
 ### Redis (F13; S26, S27, S33; replica/redis/spec.md)
 
-R1 adds the first commands; the browser, the write gate, the console, Pub/Sub and bulk actions follow in R2 to R5.
+R1 adds the connection commands and R2 the browser's read side; the write gate, the console, Pub/Sub and bulk actions follow in R3 to R5.
+`RedisBytes` is `{ kind: 'text', text }` or `{ kind: 'binary', bytes }`: keys and values are never forced through a string.
 New error codes: `redis_auth_failed`, `redis_unreachable`, `redis_tls_untrusted`, `redis_refused` (the server's own text is the message).
 
 | command | does | input | output | flow |
@@ -283,6 +284,9 @@ New error codes: `redis_auth_failed`, `redis_unreachable`, `redis_tls_untrusted`
 | `redis_respond` | answers a host's question asked while opening (host key, password, passphrase, 2FA) | `{ conn_id, prompt_id, answer }` | `()` | F13 |
 | `redis_select` | `SELECT` a logical database; answers with its key count | `{ conn_id, index }` | `RedisDbKeys` | F13 |
 | `redis_close` | closes the connection, its questions and the SSH connection it ran through | `{ conn_id }` | `()` | F13 |
+| `redis_scan` | one `SCAN` page (never `KEYS`), each key with its type and time left | `{ conn_id, cursor, pattern, key_type?, count }` | `RedisScanPage` | F14 |
+| `redis_key_info` | type, time left, length, memory, encoding, a stream's groups | `{ conn_id, key: RedisBytes }` | `RedisKeyInfo` | F14 |
+| `redis_value_page` | one page of the value for its type (500 items; big strings as a 64 KB preview unless `full`) | `{ conn_id, key: RedisBytes, cursor, full }` | `RedisValuePage` | F14 |
 
 `RedisEvent`: `plan { steps }` (one step per SSH hop, then "reach Redis", then "sign in"), `step { index, state, detail }`,
 `host { event }` (a `SessionEvent` from a hop: its prompts), `ready { info }`, `latency { ms }`, `failed { code, message }`,

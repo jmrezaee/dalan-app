@@ -110,7 +110,8 @@ pub struct RedisField {
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct RedisScored {
     pub member: RedisBytes,
-    pub score: f64,
+    /// The score as the server would print it (`9812`, `9640.5`, `inf`, `-inf`). Text, because JSON has no infinity.
+    pub score: String,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -229,6 +230,19 @@ fn score_of(v: &Value) -> Option<f64> {
     }
 }
 
+/// A score for people: whole numbers without `.0`, infinities as Redis writes them.
+fn score_text(d: f64) -> String {
+    if d == f64::INFINITY {
+        "inf".to_string()
+    } else if d == f64::NEG_INFINITY {
+        "-inf".to_string()
+    } else if d.fract() == 0.0 && d.abs() < 1e15 {
+        format!("{d:.0}")
+    } else {
+        d.to_string()
+    }
+}
+
 /// `field value field value ...` (RESP2) or a map (RESP3) as pairs.
 fn pairs(v: Value) -> Vec<(Value, Value)> {
     match v {
@@ -281,7 +295,7 @@ fn scored(v: Value) -> Vec<RedisScored> {
         .into_iter()
         .filter_map(|(m, s)| {
             Some(RedisScored {
-                score: score_of(&s)?,
+                score: score_text(score_of(&s)?),
                 member: RedisBytes::from_bytes(bytes_of(m)?),
             })
         })
@@ -768,8 +782,8 @@ mod tests {
             let m = scored(v);
             assert_eq!(m.len(), 2);
             assert_eq!(m[0].member, text("team:aurora"));
-            assert_eq!(m[0].score, 9812.0);
-            assert_eq!(m[1].score, 9640.5);
+            assert_eq!(m[0].score, "9812");
+            assert_eq!(m[1].score, "9640.5");
         }
         assert!(scored(Value::Array(vec![])).is_empty());
         // Infinite scores are valid in Redis.
@@ -779,7 +793,12 @@ mod tests {
             bulk("b"),
             bulk("-inf"),
         ]));
-        assert!(inf[0].score.is_infinite() && inf[1].score.is_infinite());
+        assert_eq!(
+            (inf[0].score.as_str(), inf[1].score.as_str()),
+            ("inf", "-inf")
+        );
+        assert_eq!(score_text(-0.5), "-0.5");
+        assert_eq!(score_text(1e20), "100000000000000000000");
     }
 
     #[test]

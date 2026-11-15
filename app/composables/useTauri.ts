@@ -2,7 +2,7 @@
 import { Channel } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { commands } from '~/types/bindings'
-import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, RedisDatabaseInput_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
+import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, RedisBytes, RedisDatabaseInput_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -39,6 +39,9 @@ export function useTauri() {
     redisRespond: (connId: string, promptId: string, answer: PromptAnswer) => unwrap(commands.redisRespond(connId, promptId, answer)),
     redisSelect: (connId: string, index: number) => unwrap(commands.redisSelect(connId, index)),
     redisClose: (connId: string) => commands.redisClose(connId),
+    redisScan: (connId: string, cursor: string, pattern: string, keyType: string | null, count: number) => unwrap(commands.redisScan(connId, cursor, pattern, keyType, count)),
+    redisKeyInfo: (connId: string, key: RedisBytes) => unwrap(commands.redisKeyInfo(connId, key)),
+    redisValuePage: (connId: string, key: RedisBytes, cursor: string, full: boolean) => unwrap(commands.redisValuePage(connId, key, cursor, full)),
     systemIntegrationGet: () => unwrap(commands.systemIntegrationGet()),
     systemIntegrationSet: (sshLinks: boolean | null, autostart: boolean | null) => unwrap(commands.systemIntegrationSet(sshLinks, autostart)),
     openDefaultApps: () => unwrap(commands.openDefaultApps()),

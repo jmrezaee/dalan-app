@@ -1320,7 +1320,8 @@ export type RedisScanPage_Serialize = {
 
 export type RedisScored = {
 	member: RedisBytes,
-	score: number | null,
+	/**  The score as the server would print it (`9812`, `9640.5`, `inf`, `-inf`). Text, because JSON has no infinity. */
+	score: string,
 };
 
 /**  What the server said about itself right after sign-in. */

@@ -328,6 +328,40 @@ RedisTab (S28 shell; the views arrive in R2 to R5)
             ready (the open view; until R2 an EmptyState "Connected to cache-prod" with the server's version)
   keyboard  the views are a tablist (←/→ move, Enter opens); the tab stays mounted while another tab shows
 
+RedisTypeChip
+  mono 10px semibold uppercase, 1px border in its own colour, min-width 44, centred: str (ansi-blue), hash (ansi-magenta), list (ansi-green),
+  set (ansi-yellow), zset (ansi-red), stream (ansi-cyan), json (ansi-white); any other type shows the server's word in muted.
+  The chip always carries the text, so colour is never the only signal.
+
+KeyTree (S28, left side, 320 wide, resizable later)
+  toolbar: pattern Input (mono, placeholder "user:*", Enter scans; empty = every key), type Select ("All types", then the seven), Refresh (IconButton)
+  tree     role="tree", rows h 28, virtualised; built from the scanned keys by the database's separator
+           folder row: chevron, "user:" (mono), count right (muted); a folder with a single key under it is shown as that key
+           key row: RedisTypeChip, name (mono, the part after the folder; binary keys escaped as \xNN), time left right ("23h", "12m", "no expiry" muted)
+           selected key: bg accent/10; focus ring on the focused row
+  footer   "Scanned 2,000 of 12,408 keys" + [Scan more] (hidden when the whole keyspace was walked: "All 12,408 keys scanned")
+  states   scanning (footer spinner "Scanning…"), empty database ("This database has no keys."), no match ("No keys match user:* in what's been scanned so far." + Scan more),
+           error (danger line with the server's sentence + Try again)
+  keyboard ↑/↓ move, → opens a folder (or moves into it), ← closes it (or moves to its parent), Enter opens a key or toggles a folder, Home/End; one Tab stop
+
+KeyHeader (S28, right side top)
+  RedisTypeChip, key name (mono semibold, truncates, full name in title), Copy name (IconButton, toast "Key name copied"),
+  expiry text ("Expires in 23h 14m" / "No expiry"), size ("8 fields · 412 B", "48,210 members", "39 bytes"), Reload (IconButton)
+  R2 has no Rename, Delete or expiry editing: those arrive with the write gate (R3)
+
+Value viewers (S28 hash, S29 the rest): the right side under the header. Each loads 500 items at a time.
+  shared   footer "Showing 500 of 48,210" + [Load more]; loading (skeleton rows); empty ("This hash has no fields." etc.); key gone ("This key is gone. It expired or was deleted." + Close);
+           error (danger line + Try again); binary cells are shown as hex in muted with a "binary" tag; long cells truncate with the full value in a title
+  ValueHash    filter Input ("Filter fields", filters what is loaded) · table Field | Value (mono), virtualised
+  ValueString  Segmented Text / JSON / Hex (JSON only when the text parses; binary opens as Hex and the other two are disabled) · mono pre, wraps ·
+               footer "39 bytes · text" · over 1 MB: "Showing the first 64 KB of 2.0 MB." + [Load all]
+  ValueJson    for JSON-module keys and for strings that parse: Segmented Tree / Text; Tree is the value pretty-printed with keys, strings and numbers coloured (ansi-blue, ansi-green, ansi-yellow)
+  ValueList    table # | Value, positions from 0
+  ValueSet     table Member
+  ValueZset    table Score ↓ | Member, highest first
+  ValueStream  table ID | Fields ("order=5512 status=paid"), newest first · footer "Groups: billing (0 waiting), emails (3 waiting)." when there are any
+  keyboard     the table is one Tab stop; ↑/↓ move the focused row
+
 ConnectSteps (S33 "Connecting")
   card: title "Opening cache-prod"; one row per step h 28: state icon (done = success check, active = spinning accent ring, pending = empty ring, failed = danger ×),
         label ("Sign in to bastion", "Reach Redis at 127.0.0.1:6379", "Sign in as app-ro"), detail (xs muted: "through bastion", the SSH client's progress line, or why it failed)

@@ -145,7 +145,7 @@ test.describe('Redis tab (S28 shell, S33 states)', () => {
     await expect(steps.getByRole('listitem').nth(3)).toHaveAttribute('data-state', 'pending')
 
     await fake.redisEvent(conn, { type: 'ready', info: { version: '7.2.4', mode: 'standalone', replica: false, resp3: true, db_count: 16, databases: [{ index: 0, keys: 12408 }], selected: 0, latency_ms: 3 } })
-    await expect(tab.getByRole('heading', { name: 'Connected to cache-prod' })).toBeVisible()
+    await expect(tab.getByRole('heading', { name: 'Pick a key to see its value.' })).toBeVisible()
     // The toolbar: name, the production chip, the route, the database picker, the four views, latency, the mode.
     const bar = tab.getByRole('banner')
     await expect(bar.getByRole('heading', { name: 'cache-prod' })).toBeVisible()
@@ -201,14 +201,14 @@ test.describe('Redis tab (S28 shell, S33 states)', () => {
   test('S33: a dropped connection says when it tries again, and "Reconnect now" starts over', async ({ page }) => {
     const fake = await openApp(page, { scenario: 'team', unlocked: true })
     const tab = await openTab(page, 'local') // connects by itself
-    await expect(tab.getByRole('heading', { name: 'Connected to local' })).toBeVisible()
+    await expect(tab.getByRole('heading', { name: 'Pick a key to see its value.' })).toBeVisible()
     const conn = await lastConn(fake)
     await fake.redisEvent(conn, { type: 'dropped', attempt: 2, of: 5, retry_in_secs: 4 })
     const dropped = tab.getByTestId('redis-dropped')
     await expect(dropped).toContainText('The connection dropped')
     await expect(dropped).toContainText('Trying again in 4 s (2 of 5).')
     await dropped.getByRole('button', { name: 'Reconnect now' }).click()
-    await expect(tab.getByRole('heading', { name: 'Connected to local' })).toBeVisible()
+    await expect(tab.getByRole('heading', { name: 'Pick a key to see its value.' })).toBeVisible()
     expect(await lastConn(fake)).not.toBe(conn)
   })
 
@@ -231,7 +231,7 @@ test.describe('Redis tab (S28 shell, S33 states)', () => {
     await row(page, 'cache-prod').dblclick() // again: the same tab comes forward
     await expect(page.getByRole('tab', { name: 'cache-prod' })).toHaveCount(1)
     expect(await fake.redisConnIds()).toHaveLength(1)
-    await expect(page.getByTestId('redis-tab-cache-prod').getByRole('heading', { name: 'Connected to cache-prod' })).toBeVisible()
+    await expect(page.getByTestId('redis-tab-cache-prod').getByRole('heading', { name: 'Pick a key to see its value.' })).toBeVisible()
 
     // The Redis tab is still mounted while another tab shows (its connection carries on).
     await page.getByRole('tab', { name: 'Vault' }).click()
@@ -246,7 +246,7 @@ test.describe('Redis tab (S28 shell, S33 states)', () => {
   test('F10: locking the vault closes every Redis tab', async ({ page }) => {
     const fake = await openApp(page, { scenario: 'team', unlocked: true })
     await openTab(page, 'local')
-    await expect(page.getByTestId('redis-tab-local').getByRole('heading', { name: 'Connected to local' })).toBeVisible()
+    await expect(page.getByTestId('redis-tab-local').getByRole('heading', { name: 'Pick a key to see its value.' })).toBeVisible()
     await page.getByRole('tab', { name: 'Vault' }).click()
     await page.getByRole('button', { name: 'Lock', exact: true }).click()
     await expect(page.getByLabel('Master password')).toBeVisible()

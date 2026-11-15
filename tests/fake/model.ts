@@ -140,7 +140,9 @@ export interface Model {
   /** Saved Redis databases. */
   redisDbs: RedisDb[]
   /** Open Redis connections, with the channel their events go to. */
-  redisConns: Map<string, { events: number, db: string, closed: boolean }>
+  redisConns: Map<string, { events: number, db: string, closed: boolean, index: number }>
+  /** The keys of logical database 0 (see commands/redisKeys.ts). */
+  redisKeys: import('./commands/redisKeys').FakeKey[]
   /** A test sends a connection's events itself (`fake.redisManual()`); otherwise opening one just works. */
   redisManual: boolean
 }
@@ -181,6 +183,7 @@ export function createModel(seed: Seed): Model {
     links: [],
     redisDbs: (seed.redisDbs ?? []).map((d): RedisDb => ({ environment: 'none', route: d.host_id ? 'host' : 'direct', host_id: null, port: 6379, kind: 'single', sentinel_master: null, username: null, password: false, tls: false, tls_server_name: null, write_mode: 'confirm', default_db: 0, key_separator: ':', last_opened_at: null, ...d })),
     redisConns: new Map(),
+    redisKeys: [],
     redisManual: false,
     system: { supported: false, ssh_links: false, autostart: false, other_handler: null, pinned: false, edition: null, install_dir: null },
   }

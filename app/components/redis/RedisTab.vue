@@ -103,7 +103,10 @@ const promptHost = computed(() => {
       <Button variant="secondary" size="sm" @click="store.retry()">Reconnect now</Button>
     </div>
 
-    <main class="grid min-h-0 flex-1 place-items-center overflow-auto p-6">
+    <!-- Connected: the open view. The Browser is built; the other three arrive in R4 and R5. -->
+    <RedisBrowser v-if="store.status === 'ready' && store.view === 'browser' && !store.prompt" :tab-key="tabKey" :separator="db?.key_separator ?? ':'" />
+
+    <main v-else class="grid min-h-0 flex-1 place-items-center overflow-auto p-6">
       <!-- A hop's question (host key, password, passphrase, 2FA): the same prompts a terminal shows. -->
       <div v-if="store.prompt" class="w-[420px] max-w-full rounded-lg border border-border bg-surface p-4" role="alertdialog" :aria-label="`${promptHost} needs an answer`">
         <h2 class="mb-1 text-base font-semibold">Opening {{ name }}</h2>
@@ -119,7 +122,7 @@ const promptHost = computed(() => {
         <Button variant="secondary" size="sm" data-autofocus @click="failure.action.run()">{{ failure.action.label }}</Button>
       </div>
 
-      <!-- The views arrive in the next phases. Until then a connected tab says so, honestly. -->
+      <!-- Console, Pub/Sub and Server arrive in the next phases. Until then they say so, honestly. -->
       <EmptyState v-else-if="store.status === 'ready' && store.info" :icon="Database" :title="`Connected to ${name}`" :text="`Redis ${store.info.version}${store.info.resp3 ? '' : ' (older protocol)'}. The ${VIEWS.find(v => v.id === store.view)?.label} view isn't built yet.`" />
     </main>
   </div>

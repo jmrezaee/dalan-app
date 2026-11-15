@@ -501,7 +501,7 @@ async fn l3_redis_scan_key_info_and_every_types_value_in_pages() {
     {
         RedisValuePage::Zset { members, next } => {
             assert_eq!(members.len(), 500);
-            assert_eq!(members[0].score, 599.0);
+            assert_eq!(members[0].score, "599");
             assert_eq!(members[0].member, t("team:0599"));
             next.expect("there is a second page")
         }
@@ -513,7 +513,7 @@ async fn l3_redis_scan_key_info_and_every_types_value_in_pages() {
     {
         RedisValuePage::Zset { members, next } => {
             assert_eq!(members.len(), 100);
-            assert_eq!(members[99].score, 0.0);
+            assert_eq!(members[99].score, "0");
             assert_eq!(next, None);
         }
         other => panic!("{other:?}"),

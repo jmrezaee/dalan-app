@@ -59,6 +59,7 @@ export class Fake {
   /** Redis: take over a connection's events (see tests/fake/commands/redis.ts). */
   redisManual = (on = true) => this.run<void>('redisManual', on)
   redisConnIds = () => this.run<string[]>('redisConnIds')
+  redisDropKey = (name: string) => this.run<void>('redisDropKey', name)
   redisOpenConnIds = () => this.run<string[]>('redisOpenConnIds')
   redisEvent = (connId: string, e: unknown) => this.run<void>('redisEvent', connId, e)
 

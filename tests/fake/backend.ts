@@ -196,6 +196,8 @@ export function install(opts: Options) {
     /** Redis: opening a database no longer connects by itself; the test sends the events (`redisEvent`). */
     redisManual: (on = true) => { m.redisManual = on },
     redisConnIds: () => [...m.redisConns.keys()],
+    /** Removes a key from the fake database, as if it expired while the app was looking at it. */
+    redisDropKey: (name: string) => { m.redisKeys = m.redisKeys.filter(k => !(k.key.kind === 'text' && k.key.text === name)) },
     redisOpenConnIds: () => [...m.redisConns].filter(([, c]) => !c.closed).map(([id]) => id),
     /** One event of a Redis connection, as Rust would send it (plan, step, host, ready, failed, dropped, ...). */
     redisEvent: (connId: string, e: unknown) => {
