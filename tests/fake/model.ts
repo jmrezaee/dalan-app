@@ -145,6 +145,12 @@ export interface Model {
   redisKeys: import('./commands/redisKeys').FakeKey[]
   /** A test sends a connection's events itself (`fake.redisManual()`); otherwise opening one just works. */
   redisManual: boolean
+  /** Console (commands/redisConsole.ts): history per database, an open MULTI per connection, held lines, the slow log. */
+  redisHistory: Record<string, string[]>
+  redisMulti: Map<string, string[][]>
+  redisConsolePending: Map<string, { connId: string, lines: string[][], typed: boolean, at: number }>
+  redisSlowlog: import('../../app/types/bindings').RedisSlowEntry[]
+  redisInfoCalls: number
   /** Writes waiting for their confirmation (see commands/redisWrite.ts). */
   redisPending: Map<string, { connId: string, op: import('../../app/types/bindings').RedisWriteOp_Deserialize, typed: boolean, at: number }>
 }
@@ -188,6 +194,15 @@ export function createModel(seed: Seed): Model {
     redisKeys: [],
     redisManual: false,
     redisPending: new Map(),
+    redisHistory: {},
+    redisMulti: new Map(),
+    redisConsolePending: new Map(),
+    redisSlowlog: [
+      { id: 14, at_secs: 1794770531, micros: 184_000, command: 'ZRANGEBYSCORE leaderboard:weekly -inf +inf', client: '10.0.1.14' },
+      { id: 13, at_secs: 1794770320, micros: 96_000, command: 'SMEMBERS audit:ids', client: '10.0.1.12' },
+      { id: 12, at_secs: 1794769267, micros: 71_000, command: 'HGETALL cache:catalog', client: '10.0.1.14' },
+    ],
+    redisInfoCalls: 0,
     system: { supported: false, ssh_links: false, autostart: false, other_handler: null, pinned: false, edition: null, install_dir: null },
   }
 }

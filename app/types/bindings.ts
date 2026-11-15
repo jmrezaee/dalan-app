@@ -61,6 +61,22 @@ export const commands = {
 	 *  checked here (five wrong tries start the same cooldown as unlocking).
 	 */
 	redisSetMode: (dbId: string, mode: RedisWriteMode, masterPassword: string | null) => typedError<RedisDatabase_Serialize, AppError>(__TAURI_INVOKE("redis_set_mode", { dbId, mode, masterPassword })),
+	/**
+	 *  F16: one console line. It is parsed, shown to the write gate, then run, refused, or held for "Send" / "Run
+	 *  anyway" / the typed-name dialog. Lines that carry a password are never saved to history.
+	 */
+	redisConsoleExec: (connId: string, line: string) => typedError<RedisConsoleOutcome_Serialize, AppError>(__TAURI_INVOKE("redis_console_exec", { connId, line })),
+	/**  Runs what `redis_console_exec` held, once. */
+	redisConsoleCommit: (connId: string, pendingId: string, typedName: string | null) => typedError<RedisConsoleReply_Serialize, AppError>(__TAURI_INVOKE("redis_console_commit", { connId, pendingId, typedName })),
+	/**  The database's console history, newest first (kept encrypted). */
+	redisConsoleHistory: (dbId: string) => typedError<string[], AppError>(__TAURI_INVOKE("redis_console_history", { dbId })),
+	redisConsoleHistoryClear: (dbId: string) => typedError<null, AppError>(__TAURI_INVOKE("redis_console_history_clear", { dbId })),
+	/**  The server's commands with their syntax, for Tab completion. */
+	redisCommands: (connId: string) => typedError<RedisCommandInfo_Serialize[], AppError>(__TAURI_INVOKE("redis_commands", { connId })),
+	/**  S31: the tiles and "Keys by database", from `INFO`. */
+	redisInfo: (connId: string) => typedError<RedisServerStats, AppError>(__TAURI_INVOKE("redis_info", { connId })),
+	/**  S31: the server's own slow log, newest first. */
+	redisSlowlog: (connId: string) => typedError<RedisSlowEntry[], AppError>(__TAURI_INVOKE("redis_slowlog", { connId })),
 	/**  First run? Locked? Allowed while locked. */
 	vaultStatus: () => typedError<VaultStatus_Serialize, AppError>(__TAURI_INVOKE("vault_status")),
 	/**  F10: derive the key, write the vault row, and leave the vault unlocked. */
@@ -1125,9 +1141,64 @@ export type RecentItem = {
  */
 export type RedisBytes = { kind: "text"; text: string } | { kind: "binary"; bytes: number[] };
 
+export type RedisCommandInfo = RedisCommandInfo_Serialize | RedisCommandInfo_Deserialize;
+
+export type RedisCommandInfo_Deserialize = {
+	name: string,
+	/**  `key field value [field value ...]`, from the server's own documentation when it has it (Redis 7). */
+	syntax: string,
+	summary?: string | null,
+	write: boolean,
+};
+
+export type RedisCommandInfo_Serialize = {
+	name: string,
+	/**  `key field value [field value ...]`, from the server's own documentation when it has it (Redis 7). */
+	syntax: string,
+	summary: string | null,
+	write: boolean,
+};
+
 export type RedisConfirmLevel = "confirm" | 
 /**  The person must type the database's name. */
 "typed";
+
+export type RedisConsoleOutcome = RedisConsoleOutcome_Serialize | RedisConsoleOutcome_Deserialize;
+
+export type RedisConsoleOutcome_Deserialize = { status: "reply"; reply: RedisConsoleReply_Deserialize } | 
+/**  Not sent yet. `heavy`: it only reads, but a lot; `safer` is the form to offer instead. */
+{ status: "pending"; pending: RedisPending_Deserialize; heavy: boolean; safer?: string | null };
+
+export type RedisConsoleOutcome_Serialize = { status: "reply"; reply: RedisConsoleReply_Serialize } | 
+/**  Not sent yet. `heavy`: it only reads, but a lot; `safer` is the form to offer instead. */
+{ status: "pending"; pending: RedisPending_Serialize; heavy: boolean; safer: string | null };
+
+/**  What the console prints for one command. */
+export type RedisConsoleReply = RedisConsoleReply_Serialize | RedisConsoleReply_Deserialize;
+
+/**  What the console prints for one command. */
+export type RedisConsoleReply_Deserialize = {
+	lines: string[],
+	/**  The reply had more than 10,000 lines; the rest was left out. */
+	truncated: boolean,
+	/**  The server answered with an error of its own (the lines hold it). */
+	error: boolean,
+	elapsed_ms: number | null,
+	/**  `SELECT n` ran: the tab is on this logical database now. */
+	selected?: number | null,
+};
+
+/**  What the console prints for one command. */
+export type RedisConsoleReply_Serialize = {
+	lines: string[],
+	/**  The reply had more than 10,000 lines; the rest was left out. */
+	truncated: boolean,
+	/**  The server answered with an error of its own (the lines hold it). */
+	error: boolean,
+	elapsed_ms: number | null,
+	/**  `SELECT n` ran: the tab is on this logical database now. */
+	selected: number | null,
+};
 
 /**  One row of the Databases table, as the UI sees it. */
 export type RedisDatabase = RedisDatabase_Serialize | RedisDatabase_Deserialize;
@@ -1229,6 +1300,14 @@ export type RedisDatabase_Serialize = {
 export type RedisDbKeys = {
 	index: number,
 	keys: number | null,
+};
+
+export type RedisDbStats = {
+	index: number,
+	keys: number | null,
+	expires: number | null,
+	/**  Average time left of the keys that expire, in milliseconds; 0 when none do. */
+	avg_ttl_ms: number | null,
 };
 
 /**  Stored as lowercase text; `production` adds the amber line and chip to the tab. */
@@ -1400,6 +1479,33 @@ export type RedisServerInfo = {
 	databases: RedisDbKeys[],
 	selected: number,
 	latency_ms: number,
+};
+
+export type RedisServerStats = {
+	version: string,
+	mode: string,
+	role: string,
+	uptime_secs: number | null,
+	memory_used: number | null,
+	/**  0: no limit is set. */
+	memory_max: number | null,
+	clients: number | null,
+	blocked_clients: number | null,
+	ops_per_sec: number | null,
+	hits: number | null,
+	misses: number | null,
+	databases: RedisDbStats[],
+};
+
+export type RedisSlowEntry = {
+	id: number | null,
+	/**  When it ran, in seconds since 1970 (the server's clock). */
+	at_secs: number | null,
+	micros: number | null,
+	/**  The command as text, long arguments shortened. */
+	command: string,
+	/**  The client's address, when the server records it (Redis 4 and newer). */
+	client: string,
 };
 
 export type RedisStepState = "active" | "done" | "failed";

@@ -25,7 +25,7 @@ pub const PENDING_FOR: Duration = Duration::from_secs(120);
 /// "Now" and "After" in a confirmation show values up to this size; bigger ones are left out.
 const SHOWN_BYTES: usize = 64 * 1024;
 
-type Args = Vec<Vec<u8>>;
+pub(super) type Args = Vec<Vec<u8>>;
 
 #[derive(Debug, Deserialize, Type)]
 pub struct RedisFieldInput {
@@ -538,7 +538,7 @@ fn reply_bytes(v: Value) -> Option<Vec<u8>> {
     }
 }
 
-async fn send(conn: &mut MultiplexedConnection, commands: &[Args]) -> AppResult<Value> {
+pub(super) async fn send(conn: &mut MultiplexedConnection, commands: &[Args]) -> AppResult<Value> {
     let build = |a: &Args| {
         let mut c = redis::Cmd::new();
         for part in a {
@@ -626,7 +626,7 @@ pub struct Target {
 }
 
 impl Target {
-    fn mode(&self) -> RedisWriteMode {
+    pub(super) fn mode(&self) -> RedisWriteMode {
         if self.replica {
             RedisWriteMode::ReadOnly
         } else {
@@ -643,7 +643,7 @@ fn command_name(plan: &Plan) -> String {
         .unwrap_or_default()
 }
 
-fn refuse(target: &Target, class: Class, name: &str, code: ErrorCode) -> AppError {
+pub(super) fn refuse(target: &Target, class: Class, name: &str, code: ErrorCode) -> AppError {
     log::warn!("redis: refused on {} ({class:?}): {name}", target.name);
     match code {
         ErrorCode::RedisReadOnlyMode if target.replica => AppError::new(
@@ -718,6 +718,40 @@ async fn execute(
         _ => None,
     };
     Ok(RedisWriteOutcome::Done { reply })
+}
+
+/// For the console and bulk actions: keeps raw commands until they are confirmed, like `prepare` does for an op.
+pub(super) fn hold(
+    pending: &PendingStore,
+    commands: Vec<Args>,
+    class: Class,
+    target: String,
+) -> AppResult<String> {
+    let plan = Plan {
+        commands,
+        check: None,
+        exists_reply: None,
+        target,
+        after: None,
+    };
+    pending.put(plan, class, Instant::now())
+}
+
+/// The other half of `hold`: the kept commands, once, when the mode (asked again) and the typed name allow it.
+pub(super) fn release(
+    pending: &PendingStore,
+    target: &Target,
+    pending_id: &str,
+    typed_name: Option<&str>,
+) -> AppResult<(Vec<Args>, Class)> {
+    let stored = pending.take(pending_id, Instant::now())?;
+    approve(
+        stored.class,
+        target,
+        &command_name(&stored.plan),
+        typed_name,
+    )?;
+    Ok((stored.plan.commands, stored.class))
 }
 
 /// Step one. Runs the write at once when the mode allows it, or answers with what to confirm.

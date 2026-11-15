@@ -45,6 +45,8 @@ pub enum Decision {
 pub struct Flags {
     pub write: bool,
     pub readonly: bool,
+    /// How many arguments it takes, counting its own name; negative means "at least".
+    pub arity: i64,
 }
 
 /// The server's command table, read once after sign-in. Keys are upper-case: `SET`, and `CONFIG|GET` for a
@@ -78,6 +80,9 @@ impl CommandTable {
             return;
         };
         let mut flags = Flags::default();
+        if let Some(redis::Value::Int(n)) = parts.get(1) {
+            flags.arity = *n;
+        }
         if let Some(redis::Value::Array(list) | redis::Value::Set(list)) = parts.get(2) {
             for f in list.iter().filter_map(text) {
                 match f.to_ascii_lowercase().as_str() {
@@ -108,6 +113,7 @@ impl CommandTable {
                         Flags {
                             write: *write,
                             readonly: *readonly,
+                            arity: 0,
                         },
                     )
                 })
@@ -123,6 +129,18 @@ impl CommandTable {
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    /// Every top-level command with its flags, by name (subcommands, `CONFIG|GET`, are left out).
+    pub fn commands(&self) -> Vec<(&str, Flags)> {
+        let mut all: Vec<(&str, Flags)> = self
+            .0
+            .iter()
+            .filter(|(n, _)| !n.contains('|'))
+            .map(|(n, f)| (n.as_str(), *f))
+            .collect();
+        all.sort_by(|a, b| a.0.cmp(b.0));
+        all
     }
 
     /// Whether the server knows this command at all (the JSON module's `JSON.GET`, for example).
@@ -641,18 +659,27 @@ mod tests {
             t.get("GET", None),
             Some(Flags {
                 write: false,
-                readonly: true
+                readonly: true,
+                arity: -2
             })
         );
         assert_eq!(
             t.get("SET", None),
             Some(Flags {
                 write: true,
-                readonly: false
+                readonly: false,
+                arity: -2
             })
         );
-        assert_eq!(t.get("CONFIG", Some("GET")), Some(Flags::default()));
-        assert_eq!(t.get("PING", None), Some(Flags::default()));
+        assert_eq!(t.get("CONFIG", Some("GET")).map(|f| f.arity), Some(-2));
+        assert_eq!(
+            t.get("PING", None).map(|f| (f.write, f.arity)),
+            Some((false, -1))
+        );
+        assert_eq!(
+            t.commands().iter().map(|c| c.0).collect::<Vec<_>>(),
+            ["CONFIG", "GET", "PING", "SET"]
+        );
         assert_eq!(t.get("NOPE", None), None);
         assert!(t.has("get") && !t.has("json.get"));
         assert!(CommandTable::from_reply(&Nil).is_empty());

@@ -62,6 +62,8 @@ export class Fake {
   redisDropKey = (name: string) => this.run<void>('redisDropKey', name)
   redisAddSet = (name: string, members: number) => this.run<void>('redisAddSet', name, members)
   redisKey = (name: string) => this.run<{ ttl_ms: number | null, value: any } | null>('redisKey', name)
+  redisInfoCalls = () => this.run<number>('redisInfoCalls')
+  redisHistory = (dbId: string) => this.run<string[]>('redisHistory', dbId)
   redisMode = (name: string) => this.run<string | null>('redisMode', name)
   redisOpenConnIds = () => this.run<string[]>('redisOpenConnIds')
   redisEvent = (connId: string, e: unknown) => this.run<void>('redisEvent', connId, e)

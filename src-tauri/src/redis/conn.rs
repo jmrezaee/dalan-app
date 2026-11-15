@@ -19,6 +19,7 @@ use specta::Type;
 use tokio::sync::watch;
 use zeroize::Zeroizing;
 
+use super::console::ConsoleState;
 use super::gate::CommandTable;
 use super::store::{self, RedisKind, RedisRoute};
 use super::transport::{self, BoxStream, Target};
@@ -529,6 +530,8 @@ struct Live {
     db_id: String,
     /// Writes waiting for their confirmation. They belong to this connection and end with it.
     pending: Arc<PendingStore>,
+    /// The console's open `MULTI`, if any.
+    console: Arc<ConsoleState>,
 }
 
 /// What a write needs from a live connection.
@@ -538,6 +541,7 @@ pub struct Writer {
     pub replica: bool,
     pub db_id: String,
     pub pending: Arc<PendingStore>,
+    pub console: Arc<ConsoleState>,
 }
 
 #[derive(Default)]
@@ -575,6 +579,7 @@ impl RedisManager {
             selected: AtomicU32::new(u32::MAX),
             db_id: db_id.clone(),
             pending: Arc::default(),
+            console: Arc::default(),
         });
         self.conns
             .lock()
@@ -617,7 +622,15 @@ impl RedisManager {
             replica: c.info.replica,
             db_id: live.db_id.clone(),
             pending: Arc::clone(&live.pending),
+            console: Arc::clone(&live.console),
         })
+    }
+
+    /// The console ran `SELECT`: remember it, so a reconnect comes back to the same logical database.
+    pub fn note_selected(&self, conn_id: &str, index: u32) {
+        if let Ok(live) = self.get(conn_id) {
+            live.selected.store(index, Ordering::Relaxed);
+        }
     }
 
     /// Switches the logical database (`SELECT`) and says how many keys it holds.

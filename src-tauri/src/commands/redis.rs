@@ -12,7 +12,9 @@ use zeroize::Zeroizing;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::redis::browse::{self, RedisBytes, RedisKeyInfo, RedisScanPage, RedisValuePage};
 use crate::redis::conn::{self, Config, RedisDbKeys, RedisTestResult};
+use crate::redis::console::{self, RedisCommandInfo, RedisConsoleOutcome, RedisConsoleReply};
 use crate::redis::gate;
+use crate::redis::server::{self, RedisServerStats, RedisSlowEntry};
 use crate::redis::store::{
     self, RedisDatabase, RedisDatabaseInput, RedisEnvironment, RedisWriteMode,
 };
@@ -286,4 +288,128 @@ pub async fn redis_set_mode(
     state
         .with_db_session(move |c, s| store::set_mode(c, &s.vault_id, &db_id, mode))
         .await
+}
+
+/// F16: one console line. It is parsed, shown to the write gate, then run, refused, or held for "Send" / "Run
+/// anyway" / the typed-name dialog. Lines that carry a password are never saved to history.
+#[tauri::command]
+#[specta::specta]
+pub async fn redis_console_exec(
+    state: State<'_, AppState>,
+    conn_id: String,
+    line: String,
+) -> AppResult<RedisConsoleOutcome> {
+    state.require_unlocked()?;
+    let mut w = state.redis.writer(&conn_id).await?;
+    let target = write_target(&state, &w).await?;
+    let (db_id, kept) = (w.db_id.clone(), line.clone());
+    // History first: a line is worth finding again even when the server refused it. Failing to save is not an error.
+    let _ = state
+        .with_db_session(move |c, s| {
+            if console::history_enabled(c) {
+                console::remember(c, s, &db_id, &kept)?;
+            }
+            Ok(())
+        })
+        .await;
+    let outcome = console::exec(
+        &mut w.conn,
+        &w.table,
+        &w.pending,
+        &w.console,
+        &target,
+        &line,
+    )
+    .await?;
+    if let RedisConsoleOutcome::Reply { reply } = &outcome {
+        if let (Some(index), false) = (reply.selected, reply.error) {
+            state.redis.note_selected(&conn_id, index);
+        }
+    }
+    Ok(outcome)
+}
+
+/// Runs what `redis_console_exec` held, once.
+#[tauri::command]
+#[specta::specta]
+pub async fn redis_console_commit(
+    state: State<'_, AppState>,
+    conn_id: String,
+    pending_id: String,
+    typed_name: Option<String>,
+) -> AppResult<RedisConsoleReply> {
+    state.require_unlocked()?;
+    let mut w = state.redis.writer(&conn_id).await?;
+    let target = write_target(&state, &w).await?;
+    let reply = console::commit(
+        &mut w.conn,
+        &w.pending,
+        &target,
+        &pending_id,
+        typed_name.as_deref(),
+    )
+    .await?;
+    if let (Some(index), false) = (reply.selected, reply.error) {
+        state.redis.note_selected(&conn_id, index);
+    }
+    Ok(reply)
+}
+
+/// The database's console history, newest first (kept encrypted).
+#[tauri::command]
+#[specta::specta]
+pub async fn redis_console_history(
+    state: State<'_, AppState>,
+    db_id: String,
+) -> AppResult<Vec<String>> {
+    state
+        .with_db_session(move |c, s| console::history(c, s, &db_id))
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn redis_console_history_clear(
+    state: State<'_, AppState>,
+    db_id: String,
+) -> AppResult<()> {
+    state
+        .with_db_session(move |c, s| console::clear_history(c, s, &db_id))
+        .await
+}
+
+/// The server's commands with their syntax, for Tab completion.
+#[tauri::command]
+#[specta::specta]
+pub async fn redis_commands(
+    state: State<'_, AppState>,
+    conn_id: String,
+) -> AppResult<Vec<RedisCommandInfo>> {
+    state.require_unlocked()?;
+    let mut w = state.redis.writer(&conn_id).await?;
+    Ok(console::commands(&mut w.conn, &w.table).await)
+}
+
+/// S31: the tiles and "Keys by database", from `INFO`.
+#[tauri::command]
+#[specta::specta]
+pub async fn redis_info(
+    state: State<'_, AppState>,
+    conn_id: String,
+) -> AppResult<RedisServerStats> {
+    state.require_unlocked()?;
+    let mut conn = state.redis.handle(&conn_id).await?;
+    server::info(&mut conn).await
+}
+
+/// S31: the server's own slow log, newest first.
+#[tauri::command]
+#[specta::specta]
+pub async fn redis_slowlog(
+    state: State<'_, AppState>,
+    conn_id: String,
+) -> AppResult<Vec<RedisSlowEntry>> {
+    state.require_unlocked()?;
+    let mut conn = state.redis.handle(&conn_id).await?;
+    server::slowlog(&mut conn).await
 }

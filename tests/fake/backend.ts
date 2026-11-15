@@ -206,6 +206,9 @@ export function install(opts: Options) {
     },
     /** The fake database's key with this name, as the fake holds it (to check what a write changed). */
     redisKey: (name: string) => m.redisKeys.find(k => k.key.kind === 'text' && k.key.text === name) ?? null,
+    /** How many times the Server view asked for INFO (to check it refreshes, and stops when hidden). */
+    redisInfoCalls: () => m.redisInfoCalls,
+    redisHistory: (dbId: string) => m.redisHistory[dbId] ?? [],
     /** The saved database's write mode. */
     redisMode: (name: string) => m.redisDbs.find(d => d.name === name)?.write_mode ?? null,
     redisOpenConnIds: () => [...m.redisConns].filter(([, c]) => !c.closed).map(([id]) => id),

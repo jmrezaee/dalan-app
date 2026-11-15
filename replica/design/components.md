@@ -408,6 +408,36 @@ NewKeyDialog (S28; KeyTree's New key)
   Expiry (optional; same words as the expiry control)
   footer [Cancel] [Create key] (or [Review change] in Confirm mode). Never overwrites: "A key with that name already exists."
 
+RedisConsole (S30)
+  our own input and output (not xterm), on the terminal background: mono 12/20, output selectable
+  output   one block per command: prompt "cache-prod:0>" (accent) + the line as typed, then the reply as Rust printed it:
+           "(integer) 83640", quoted strings, "1) 2) 3)" lists with nested lists indented; list numbers and "(nil)" muted, "(integer)" in ansi-yellow,
+           "(error) ..." in danger; a muted "· 0.4 ms" after the reply. Over 1,000 lines: the first 1,000 + [Show all 4,210 lines]
+  states   running (muted "…"), not sent (danger: "Not sent. cache-prod is read-only in Dalan."),
+           a write in Confirm mode (accent/8 block: "This changes data on production." [Send] [Cancel]),
+           a heavy command in every mode (warning/10 block: "Not sent. KEYS walks every key at once and can stall a busy server."
+           + link "Use SCAN instead" (puts the safe form in the input) + "Run anyway…"),
+           a dangerous command (DangerConfirmDialog), queued inside MULTI ("QUEUED"), cancelled (muted "Cancelled. Nothing was sent.")
+  input    prompt + Input (mono, no border) + hint "↑ history · ⌘L clear" (Ctrl+L off the Mac)
+           completion popup above the input while the first word is typed: up to 6 commands, name (mono semibold) + syntax (mono muted),
+           the first highlighted (accent/15), footer = its summary + "Tab to complete"; after the name, one line with that command's syntax
+  History  aside 300 wide: "History" + "this database" + [Clear]; rows h 26 mono, newest first, click puts the line in the input;
+           footer "History is kept encrypted, like terminal history. Commands that carry a password (AUTH, ACL SETUSER, CONFIG SET requirepass) are never saved."
+           empty: "Nothing yet. Commands you run show up here."
+  keyboard Enter runs, ↑/↓ walk the history, Tab completes, Esc closes the popup, ⌘L / Ctrl+L clears the output; the output is role="log" aria-live="polite"
+
+RedisServer (S31)
+  header   "Server" (14 semibold) + "updated 2 s ago" (xs muted) + [Refresh every 5 s] (secondary, aria-pressed) + Refresh now (IconButton)
+           refreshes only while this view shows, the tab is in front and the window has the focus
+  tiles    six in a row (surface, border, radius 10; label caps xs muted, value 20/28 semibold tabular, note xs muted):
+           Version ("7.2.4" · "standalone") · Uptime ("41 days" · "since Oct 5") · Memory ("1.8 GB" · "of 4.0 GB · 45%" or "no limit set") ·
+           Clients ("212" · "0 blocked") · Commands ("8,420 /s" · "now") · Hit rate ("96.2%" · "of 1,000 lookups" or "—" · "no lookups yet")
+  panels   Slow commands (When | Took | Command | Client; newest first; [Clear log…] ghost, hidden in Read-only → DangerConfirmDialog;
+           footer "Read from the server's own slow log. Dalan never turns on live command tracing."; empty "Nothing slow has been logged.")
+           Keys by database (Database | Keys | With expiry | Avg. time left; "—" when none expire; empty "This server holds no keys.")
+           Nodes (Cluster and Sentinel only; arrives in R6)
+  states   loading (skeleton tiles), error (danger line + Try again), a limited user (tiles show what INFO gave; the slow log is empty)
+
 ConnectSteps (S33 "Connecting")
   card: title "Opening cache-prod"; one row per step h 28: state icon (done = success check, active = spinning accent ring, pending = empty ring, failed = danger ×),
         label ("Sign in to bastion", "Reach Redis at 127.0.0.1:6379", "Sign in as app-ro"), detail (xs muted: "through bastion", the SSH client's progress line, or why it failed)

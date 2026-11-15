@@ -8,11 +8,16 @@
 //! - `gate`: the write gate: one function classifies every command and decides by the database's mode.
 //! - `write`: the editors' changes: prepare, confirm, commit once.
 //!
-//! The console, Pub/Sub, bulk actions, Cluster and Sentinel arrive in R4 to R6.
+//! - `console`: a typed line through the gate, replies printed in Rust, `MULTI` queued here, encrypted history.
+//! - `server`: `INFO` and the slow log for the Server view.
+//!
+//! Pub/Sub, bulk actions, Cluster and Sentinel arrive in R5 and R6.
 
 pub mod browse;
 pub mod conn;
+pub mod console;
 pub mod gate;
+pub mod server;
 pub mod store;
 pub mod transport;
 pub mod write;

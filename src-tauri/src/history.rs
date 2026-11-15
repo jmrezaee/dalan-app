@@ -236,12 +236,12 @@ pub fn looks_secret(line: &str) -> bool {
         && words.any(|w| w.starts_with("-p") && w.len() > 2 && !w.starts_with("--"))
 }
 
-fn seal_command(s: &VaultSession, id: &str, command: &str) -> AppResult<Vec<u8>> {
+pub(crate) fn seal_command(s: &VaultSession, id: &str, command: &str) -> AppResult<Vec<u8>> {
     let (nonce, ct) = crypto::seal(&s.data_key, id.as_bytes(), command.as_bytes())?;
     Ok([nonce, ct].concat())
 }
 
-fn open_command(s: &VaultSession, id: &str, blob: &[u8]) -> Option<String> {
+pub(crate) fn open_command(s: &VaultSession, id: &str, blob: &[u8]) -> Option<String> {
     if blob.len() <= crypto::NONCE_LEN {
         return None;
     }

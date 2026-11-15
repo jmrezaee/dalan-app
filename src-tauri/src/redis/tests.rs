@@ -960,3 +960,168 @@ async fn l3_redis_writes_go_through_the_gate_and_every_editor_op_works() {
         .unwrap();
     assert!(left.is_empty(), "{left:?}");
 }
+
+// ---- R4: the console and the Server view against the real server
+
+use super::console::{self, ConsoleState, RedisConsoleOutcome};
+use super::server;
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_redis_console_lines_go_through_the_gate_and_the_server_view_reads_info() {
+    let h = harness(None).await;
+    let (emit, _) = recorder();
+    let c = conn::connect(
+        &h.state.store(),
+        &direct(Some(PASSWORD), None),
+        &Arc::new(Prompts::default()),
+        &emit,
+    )
+    .await
+    .unwrap();
+    let mut r = c.conn.clone();
+    let (pending, state) = (PendingStore::default(), ConsoleState::default());
+    let key = format!("dalan-test:{}:console", uuid::Uuid::now_v7());
+    let lines = |o: RedisConsoleOutcome| match o {
+        RedisConsoleOutcome::Reply { reply } => reply.lines,
+        RedisConsoleOutcome::Pending { .. } => vec!["<pending>".into()],
+    };
+    let open = db(RedisWriteMode::Open);
+    let run = async |target: &write::Target, line: String| {
+        console::exec(
+            &mut c.conn.clone(),
+            &c.table,
+            &pending,
+            &state,
+            target,
+            &line,
+        )
+        .await
+    };
+
+    assert_eq!(lines(run(&open, "PING".into()).await.unwrap()), ["PONG"]);
+    assert_eq!(
+        lines(
+            run(&open, format!("SET {key} \"hello world\" PX 600000"))
+                .await
+                .unwrap()
+        ),
+        ["OK"]
+    );
+    assert_eq!(
+        lines(run(&open, format!("GET {key}")).await.unwrap()),
+        ["\"hello world\""]
+    );
+    assert_eq!(
+        lines(run(&open, format!("STRLEN {key}")).await.unwrap()),
+        ["(integer) 11"]
+    );
+    // The server's own error is the reply, not a failure.
+    let wrong = run(&open, format!("LPUSH {key} x")).await.unwrap();
+    let RedisConsoleOutcome::Reply { reply } = wrong else {
+        panic!()
+    };
+    assert!(
+        reply.error && reply.lines[0].starts_with("(error) WRONGTYPE"),
+        "{:?}",
+        reply.lines
+    );
+
+    // Read-only refuses a write and lets a read through; refused commands are refused in every mode.
+    let ro = db(RedisWriteMode::ReadOnly);
+    assert_eq!(
+        run(&ro, format!("DEL {key}")).await.unwrap_err().code,
+        ErrorCode::RedisReadOnlyMode
+    );
+    assert_eq!(
+        lines(run(&ro, format!("TTL {key}")).await.unwrap()).len(),
+        1
+    );
+    assert_eq!(
+        run(&open, "MONITOR".into()).await.unwrap_err().code,
+        ErrorCode::RedisRefused
+    );
+    assert_eq!(
+        run(&open, "SUBSCRIBE news".into()).await.unwrap_err().code,
+        ErrorCode::RedisRefused
+    );
+    assert_eq!(
+        run(&open, "BLPOP q 0".into()).await.unwrap_err().code,
+        ErrorCode::RedisRefused
+    );
+
+    // Confirm mode holds a write; KEYS is held in every mode and comes with a safe form.
+    let confirm = db(RedisWriteMode::Confirm);
+    let held = run(&confirm, format!("APPEND {key} !")).await.unwrap();
+    let RedisConsoleOutcome::Pending {
+        pending: p, heavy, ..
+    } = held
+    else {
+        panic!("Confirm mode asks first")
+    };
+    assert!(!heavy);
+    assert_eq!(
+        lines(run(&open, format!("GET {key}")).await.unwrap()),
+        ["\"hello world\""],
+        "not sent yet"
+    );
+    let reply = console::commit(&mut r, &pending, &confirm, &p.id, None)
+        .await
+        .unwrap();
+    assert_eq!(reply.lines, ["(integer) 12"]);
+    assert_eq!(
+        console::commit(&mut r, &pending, &confirm, &p.id, None)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::RedisConfirmNeeded
+    );
+    let keys = run(&open, "KEYS dalan-test:*".into()).await.unwrap();
+    let RedisConsoleOutcome::Pending { heavy, safer, .. } = keys else {
+        panic!("KEYS is never sent without asking")
+    };
+    assert!(heavy);
+    assert_eq!(
+        safer.as_deref(),
+        Some("SCAN 0 MATCH dalan-test:* COUNT 500")
+    );
+    let flush = run(&open, "FLUSHDB".into()).await.unwrap();
+    assert!(
+        matches!(flush, RedisConsoleOutcome::Pending { pending, .. } if pending.level == RedisConfirmLevel::Typed)
+    );
+
+    // MULTI queues here; EXEC sends the queue as one transaction.
+    assert_eq!(lines(run(&open, "MULTI".into()).await.unwrap()), ["OK"]);
+    assert_eq!(
+        lines(run(&open, format!("APPEND {key} ?")).await.unwrap()),
+        ["QUEUED"]
+    );
+    assert_eq!(
+        lines(run(&open, format!("STRLEN {key}")).await.unwrap()),
+        ["QUEUED"]
+    );
+    assert_eq!(
+        lines(run(&open, "EXEC".into()).await.unwrap()),
+        ["1) (integer) 13", "2) (integer) 13"]
+    );
+    assert_eq!(
+        lines(run(&open, "EXEC".into()).await.unwrap()),
+        ["(error) ERR EXEC without MULTI"]
+    );
+    let _ = run(&open, format!("DEL {key}")).await;
+
+    // Completion and the Server view.
+    let commands = console::commands(&mut r, &c.table).await;
+    let hset = commands
+        .iter()
+        .find(|c| c.name == "HSET")
+        .expect("HSET is a command");
+    assert!(
+        hset.write && hset.syntax.starts_with("key field value"),
+        "{}",
+        hset.syntax
+    );
+    let stats = server::info(&mut r).await.unwrap();
+    assert!(stats.version.starts_with('7') && stats.clients >= 1 && stats.uptime_secs > 0);
+    let _ = server::slowlog(&mut r).await.unwrap();
+}

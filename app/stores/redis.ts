@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { toast } from 'vue-sonner'
-import type { RedisBytes, RedisDbKeys, RedisKeyInfo_Serialize, RedisKeyRow, RedisPending_Serialize, RedisWriteOp_Deserialize, RedisPlanStep_Serialize, PromptKind, RedisEvent_Serialize, RedisServerInfo, RedisStepState, RedisValuePage_Serialize } from '~/types/bindings'
+import type { RedisBytes, RedisDbKeys, RedisKeyInfo_Serialize, RedisKeyRow, RedisPending_Serialize, RedisWriteOp_Deserialize, RedisCommandInfo_Serialize, RedisConsoleReply_Serialize, RedisServerStats, RedisSlowEntry, RedisPlanStep_Serialize, PromptKind, RedisEvent_Serialize, RedisServerInfo, RedisStepState, RedisValuePage_Serialize } from '~/types/bindings'
 import { bytesId } from '~/utils/redisBytes'
 import { foldersOf } from '~/utils/redisTree'
 import { useTauri } from '~/composables/useTauri'
@@ -23,6 +23,21 @@ export type LoadedValue =
 
 /** What a confirmation asks, in the editor's words: the title, the button's verb, and whether it destroys something. */
 export interface WriteAsk { title: string, action: string, text?: string, danger?: boolean }
+
+/** One command in the console's output, with what came of it. */
+export interface ConsoleEntry {
+  id: number
+  prompt: string
+  line: string
+  state: 'running' | 'done' | 'refused' | 'pending' | 'cancelled'
+  lines: string[]
+  error: boolean
+  truncated: boolean
+  elapsedMs: number | null
+  showAll: boolean
+  /** Held by the gate until "Send" or "Run anyway": a write in Confirm mode, or a heavy read in any mode. */
+  ask: { pendingId: string, heavy: boolean, safer: string | null } | null
+}
 
 export interface RedisStep { label: string, note: string | null, detail: string | null, state: 'pending' | RedisStepState }
 
@@ -296,7 +311,7 @@ function setup() {
 
   // ---- Writes (F15). Every change goes to Rust's gate; this side only shows what the gate answers.
   /** A write the gate wants confirmed: what Rust says it will do, and the editor's wording for it. */
-  const pendingWrite = ref<{ pending: RedisPending_Serialize, ask: WriteAsk, op: RedisWriteOp_Deserialize } | null>(null)
+  const pendingWrite = ref<{ pending: RedisPending_Serialize, ask: WriteAsk, op: RedisWriteOp_Deserialize | null, entry?: number, after?: () => void } | null>(null)
   const writeBusy = ref(false)
   const sameKey = (a: RedisBytes, b: RedisBytes) => bytesId(a) === bytesId(b)
 
@@ -377,19 +392,138 @@ function setup() {
     if (!p || writeBusy.value) return
     writeBusy.value = true
     try {
-      await api.redisWriteCommit(connId.value, p.pending.id, typedName)
-      pendingWrite.value = null
-      await afterWrite(p.op)
+      if (p.op) {
+        await api.redisWriteCommit(connId.value, p.pending.id, typedName)
+        pendingWrite.value = null
+        await afterWrite(p.op)
+      }
+      else {
+        // A dangerous console command: the reply belongs in the console's output.
+        const reply = await api.redisConsoleCommit(connId.value, p.pending.id, typedName)
+        pendingWrite.value = null
+        const e = consoleEntries.value.find(x => x.id === p.entry)
+        if (e) fill(e, reply)
+        p.after?.()
+      }
     }
     catch (e) {
       pendingWrite.value = null
-      toast.error(message(e, 'Couldn\'t make that change.'))
+      const entry = consoleEntries.value.find(x => x.id === p.entry)
+      if (entry) Object.assign(entry, { state: 'refused', lines: [message(e, 'Not sent.')] })
+      else toast.error(message(e, 'Couldn\'t make that change.'))
     }
     finally {
       writeBusy.value = false
     }
   }
-  const cancelWrite = () => { if (!writeBusy.value) pendingWrite.value = null }
+  function cancelWrite() {
+    if (writeBusy.value) return
+    const e = consoleEntries.value.find(x => x.id === pendingWrite.value?.entry)
+    if (e) Object.assign(e, { state: 'cancelled', lines: ['Cancelled. Nothing was sent.'] })
+    pendingWrite.value = null
+  }
+
+  // ---- Console (F16). Rust parses the line, asks the gate and prints the reply; this side keeps the output.
+  const consoleEntries = ref<ConsoleEntry[]>([])
+  const consoleHistory = ref<string[]>([])
+  const commandList = ref<RedisCommandInfo_Serialize[]>([])
+  let entrySeq = 0
+
+  function fill(e: ConsoleEntry, reply: RedisConsoleReply_Serialize) {
+    Object.assign(e, { state: 'done', lines: reply.lines, error: reply.error, truncated: reply.truncated, elapsedMs: reply.elapsed_ms, ask: null })
+    if (reply.selected !== null && !reply.error) {
+      // SELECT ran in the console: the whole tab is on that logical database now.
+      selected.value = reply.selected
+      void scan()
+    }
+  }
+
+  /** History and the command list, once per connection (the Console view asks when it first shows). */
+  async function loadConsole() {
+    if (!connId.value) return
+    consoleHistory.value = await api.redisConsoleHistory(dbId.value).catch(() => [])
+    if (!commandList.value.length) commandList.value = await api.redisCommands(connId.value).catch(() => [])
+  }
+
+  /** Runs one line. `title` and `after` are for the Server view's "Clear log…", which is a console command too. */
+  async function consoleRun(line: string, dangerTitle?: string, after?: () => void) {
+    const text = line.trim()
+    if (!text || !connId.value || status.value !== 'ready') return
+    consoleEntries.value.push({ id: ++entrySeq, prompt: `${selected.value}>`, line: text, state: 'running', lines: [], error: false, truncated: false, elapsedMs: null, showAll: false, ask: null })
+    const e = consoleEntries.value[consoleEntries.value.length - 1]!
+    if (consoleHistory.value[0] !== text) consoleHistory.value = [text, ...consoleHistory.value.filter(h => h !== text)].slice(0, 500)
+    try {
+      const out = await api.redisConsoleExec(connId.value, text)
+      if (out.status === 'reply') {
+        fill(e, out.reply)
+        after?.()
+      }
+      else if (out.pending.level === 'typed') {
+        e.lines = ['Waiting for you to type the database\'s name.']
+        const name = text.split(/\s+/).slice(0, 2).join(' ').toUpperCase()
+        pendingWrite.value = { pending: out.pending, ask: { title: dangerTitle ?? `Run ${name}?`, action: dangerTitle ? dangerTitle.replace(/\?$/, '') : `Run ${name}`, danger: true, text: dangerText(text) }, op: null, entry: e.id, after }
+      }
+      else Object.assign(e, { state: 'pending', ask: { pendingId: out.pending.id, heavy: out.heavy, safer: out.safer } })
+    }
+    catch (err) {
+      Object.assign(e, { state: 'refused', lines: [message(err, 'Not sent.')] })
+    }
+  }
+  /** What a dangerous console command destroys, in a sentence. */
+  function dangerText(line: string) {
+    const name = line.trim().split(/\s+/)[0]!.toUpperCase()
+    const n = (keys.value[selected.value] ?? 0).toLocaleString('en-US')
+    if (name === 'FLUSHDB') return `This removes all ${n} keys in db${selected.value}. It can't be undone, and everyone using this database is affected.`
+    if (name === 'FLUSHALL') return 'This removes every key in every logical database. It can\'t be undone, and everyone using this server is affected.'
+    return 'This can change how the server runs for everyone using it, and may not be undoable.'
+  }
+  /** "Send" or "Run anyway…" on a held console command. */
+  async function consoleSend(id: number) {
+    const e = consoleEntries.value.find(x => x.id === id)
+    if (!e?.ask) return
+    const pendingId = e.ask.pendingId
+    Object.assign(e, { state: 'running', ask: null })
+    try {
+      fill(e, await api.redisConsoleCommit(connId.value, pendingId, null))
+    }
+    catch (err) {
+      Object.assign(e, { state: 'refused', lines: [message(err, 'Not sent.')] })
+    }
+  }
+  function consoleCancel(id: number) {
+    const e = consoleEntries.value.find(x => x.id === id)
+    if (e) Object.assign(e, { state: 'cancelled', lines: ['Cancelled. Nothing was sent.'], ask: null })
+  }
+  const consoleClear = () => { consoleEntries.value = [] }
+  async function consoleClearHistory() {
+    await api.redisConsoleHistoryClear(dbId.value).catch(() => {})
+    consoleHistory.value = []
+  }
+
+  // ---- Server view (S31): INFO and the slow log, read again while the view shows.
+  const stats = ref<RedisServerStats | null>(null)
+  const slowlog = ref<RedisSlowEntry[]>([])
+  const serverAt = ref<number | null>(null)
+  const serverError = ref('')
+  const serverLoading = ref(false)
+  async function refreshServer() {
+    if (!connId.value || status.value !== 'ready' || serverLoading.value) return
+    serverLoading.value = true
+    try {
+      const [info, slow] = await Promise.all([api.redisInfo(connId.value), api.redisSlowlog(connId.value)])
+      stats.value = info
+      slowlog.value = slow
+      serverAt.value = Date.now()
+      serverError.value = ''
+      keys.value = Object.fromEntries(info.databases.map(d => [d.index, d.keys ?? 0]))
+    }
+    catch (e) {
+      serverError.value = message(e, 'Couldn\'t read the server\'s details.')
+    }
+    finally {
+      serverLoading.value = false
+    }
+  }
 
   /** Closes the connection (tab closed, or the vault locked). */
   function close() {
@@ -406,13 +540,19 @@ function setup() {
     scanCursor.value = ''
     scanned.value = 0
     pendingWrite.value = null
+    consoleEntries.value = []
+    commandList.value = []
+    stats.value = null
+    slowlog.value = []
     closeKey()
   }
 
   return { dbId, connId, status, steps, prompt, info, error, dropped, latencyMs, selected, keys, view, open, retry, respond, select, close,
     pattern, typeFilter, keyRows, scanCursor, scanned, scanning, scanError, scanDone, openFolders, selectedKey, selectedId, keyInfo, value, valueNext, valueLoading, valueError,
     setSeparator, scan, scanMore, toggleFolder, openKey, closeKey, loadMore, loadAll, reloadKey,
-    pendingWrite, writeBusy, write, confirmWrite, cancelWrite }
+    pendingWrite, writeBusy, write, confirmWrite, cancelWrite,
+    consoleEntries, consoleHistory, commandList, loadConsole, consoleRun, consoleSend, consoleCancel, consoleClear, consoleClearHistory,
+    stats, slowlog, serverAt, serverError, serverLoading, refreshServer }
 }
 
 // One store per Redis tab, like the SFTP tabs (P30): each tab has its own connection, steps and view.

@@ -270,7 +270,7 @@ Webhooks in or out: **none** (local app).
 
 ### Redis (F13; S26, S27, S33; replica/redis/spec.md)
 
-R1 adds the connection commands, R2 the browser's read side and R3 the write gate with the editors; the console, Pub/Sub and bulk actions follow in R4 and R5.
+R1 adds the connection commands, R2 the browser's read side, R3 the write gate with the editors and R4 the console and the Server view; Pub/Sub and bulk actions follow in R5.
 `RedisBytes` is `{ kind: 'text', text }` or `{ kind: 'binary', bytes }`: keys and values are never forced through a string.
 New error codes: `redis_auth_failed`, `redis_unreachable`, `redis_tls_untrusted`, `redis_refused` (the server's own text is the message),
 `redis_read_only_mode` (the database is Read-only in Dalan, or a replica: the command was not sent) and `redis_confirm_needed`
@@ -286,6 +286,12 @@ Things that bite: `SET` is sent with `KEEPTTL` (Redis 6.0+) so an edit keeps the
 removing the mark in one `MULTI`, after checking the position still holds the item shown; creating and renaming never overwrite
 (`SET NX`, `EXISTS` first, `RENAMENX`); deleting a key with more than 10,000 items is `dangerous` (typed name) in every mode;
 every committed write and every refusal is logged with the database name, class and command name only.
+
+**The console (R4, `redis/console.rs`).** The line is split in Rust (`"..."` with `\n`, `\t`, `\xNN`; `'...'` literal) and the reply is printed
+in Rust (`(integer) 3`, quoted strings with `\xNN` for bytes, numbered and nested lists), at most 10,000 lines. A tab has one connection
+shared by the Browser, the keep-alive and the Console, so: `MULTI` is not sent, it opens a queue here, each queued command is classified,
+and `EXEC` sends the queue as one transaction with the strongest class; blocking commands, `HELLO`, `RESET`, `QUIT`, `AUTH`, `WATCH` and
+`CLIENT REPLY` are not sent; `SELECT` is followed by the whole tab. A server's own error is a printed reply, not a failed command.
 
 | command | does | input | output | flow |
 | --- | --- | --- | --- | --- |
@@ -303,6 +309,12 @@ every committed write and every refusal is logged with the database name, class 
 | `redis_write_prepare` | an editor's change through the gate: runs (Open), refuses (Read-only), or answers with what to confirm | `{ conn_id, op: RedisWriteOp }` | `RedisWriteOutcome` (`done { reply }` or `pending { pending }`) | F15 |
 | `redis_write_commit` | runs a prepared write once; a typed confirmation carries the database's name, which Rust compares | `{ conn_id, pending_id, typed_name? }` | `RedisWriteOutcome` | F15 |
 | `redis_set_mode` | changes the write mode; loosening a production database needs the master password (same cooldown as unlock) | `{ db_id, mode, master_password? }` | `RedisDatabase` | F15 |
+| `redis_console_exec` | one console line: parsed in Rust, through the gate, then a printed reply or a `pending` to confirm; saved to encrypted history unless it carries a password | `{ conn_id, line }` | `RedisConsoleOutcome` (`reply { reply }` or `pending { pending, heavy, safer }`) | F16 |
+| `redis_console_commit` | runs what the console held ("Send", "Run anyway", the typed name), once | `{ conn_id, pending_id, typed_name? }` | `RedisConsoleReply` | F16 |
+| `redis_console_history`, `redis_console_history_clear` | the database's console history, newest first (500 lines, encrypted with the data key) | `{ db_id }` | `string[]` / `()` | F16 |
+| `redis_commands` | the server's commands with syntax and summary (`COMMAND DOCS` on Redis 7, arity otherwise), for completion | `{ conn_id }` | `RedisCommandInfo[]` | F16 |
+| `redis_info` | the Server view's tiles and keys per database, from `INFO` | `{ conn_id }` | `RedisServerStats` | S31 |
+| `redis_slowlog` | the newest 50 entries of the server's slow log | `{ conn_id }` | `RedisSlowEntry[]` | S31 |
 
 `RedisEvent`: `plan { steps }` (one step per SSH hop, then "reach Redis", then "sign in"), `step { index, state, detail }`,
 `host { event }` (a `SessionEvent` from a hop: its prompts), `ready { info }`, `latency { ms }`, `failed { code, message }`,
