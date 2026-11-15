@@ -14,16 +14,18 @@ const MIGRATION_0002: &str = include_str!("../../migrations/0002_protocol.sql");
 const MIGRATION_0003: &str = include_str!("../../migrations/0003_serial.sql");
 const MIGRATION_0004: &str = include_str!("../../migrations/0004_mosh.sql");
 const MIGRATION_0005: &str = include_str!("../../migrations/0005_data_key.sql");
+const MIGRATION_0006: &str = include_str!("../../migrations/0006_redis.sql");
 
 /// Every migration's SQL, oldest first. The fixtures test builds older schemas from prefixes of this list.
 #[cfg(test)]
-pub(crate) fn migration_sources() -> [&'static str; 5] {
+pub(crate) fn migration_sources() -> [&'static str; 6] {
     [
         MIGRATION_0001,
         MIGRATION_0002,
         MIGRATION_0003,
         MIGRATION_0004,
         MIGRATION_0005,
+        MIGRATION_0006,
     ]
 }
 
@@ -39,6 +41,7 @@ pub(crate) fn migrations() -> Migrations<'static> {
         M::up(MIGRATION_0003),
         M::up(MIGRATION_0004),
         M::up(MIGRATION_0005),
+        M::up(MIGRATION_0006),
     ])
 }
 
@@ -88,7 +91,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(tables, 22); // 21 from 0001 + serial_settings
+        assert_eq!(tables, 24); // 21 from 0001 + serial_settings + redis_databases + redis_history
         let fk: i64 = conn
             .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
             .unwrap();

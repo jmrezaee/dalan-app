@@ -677,7 +677,7 @@ async fn authenticate(
         }
         (io.event)(SessionEvent::AuthMethods { methods });
     }
-    let can = |k: MethodKind| offered.as_ref().map_or(true, |m| m.contains(&k));
+    let can = |k: MethodKind| offered.as_ref().is_none_or(|m| m.contains(&k));
     if forced == Some(AuthMethod::Key) {
         // The key was tried above and refused; nothing else was asked for.
         if let Some(label) = rejected_key {

@@ -98,6 +98,22 @@ fn fill(version: usize, conn: &mut Connection) {
         )
         .unwrap();
     }
+    // v6: Redis. One database reached through a host, with a saved password, and a line of console history.
+    if version >= 6 {
+        let (nonce, ct) = crypto::seal(&key, b"sec2", b"redis-secret").unwrap();
+        conn.execute(
+            "INSERT INTO secrets (id, vault_id, kind, nonce, ciphertext, created_at, updated_at) VALUES ('sec2', 'v1', 'password', ?1, ?2, 1, 1)",
+            params![nonce, ct],
+        )
+        .unwrap();
+        conn.execute_batch(
+            "INSERT INTO redis_databases (id, vault_id, name, environment, route, host_id, address, port, username, password_secret_id, write_mode, created_at, updated_at)
+               VALUES ('r1', 'v1', 'cache-prod', 'production', 'host', 'h1', '127.0.0.1', 6379, 'app-ro', 'sec2', 'confirm', 1, 1);
+             INSERT INTO redis_databases (id, vault_id, name, route, address, created_at, updated_at) VALUES ('r2', 'v1', 'local', 'direct', 'localhost', 1, 1);
+             INSERT INTO redis_history (id, database_id, command_enc, ran_at) VALUES ('rh1', 'r1', x'00', 1);",
+        )
+        .unwrap();
+    }
 }
 
 /// Run by hand when a migration is added (see the top of this file). Writes only the files that are missing, so

@@ -20,6 +20,7 @@ mod perms;
 pub mod proxy;
 pub mod pty;
 pub mod quit;
+pub mod redis;
 pub mod serial;
 pub mod settings;
 pub mod sftp;
@@ -49,6 +50,14 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::app::system_integration_get,
             commands::app::system_integration_set,
             commands::app::open_default_apps,
+            commands::redis::redis_db_list,
+            commands::redis::redis_db_save,
+            commands::redis::redis_db_delete,
+            commands::redis::redis_db_test,
+            commands::redis::redis_open,
+            commands::redis::redis_respond,
+            commands::redis::redis_select,
+            commands::redis::redis_close,
             commands::vault::vault_status,
             commands::vault::vault_create,
             commands::vault::vault_unlock,

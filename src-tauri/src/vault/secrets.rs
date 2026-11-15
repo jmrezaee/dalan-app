@@ -92,7 +92,9 @@ pub fn sweep_orphans(conn: &Connection, vault_id: &str) -> AppResult<usize> {
                AND id NOT IN (SELECT password_secret_id FROM identities WHERE password_secret_id IS NOT NULL)
                AND id NOT IN (SELECT password_secret_id FROM connection_profiles WHERE password_secret_id IS NOT NULL)
                AND id NOT IN (SELECT proxy_secret_id FROM connection_profiles WHERE proxy_secret_id IS NOT NULL)
-               AND id NOT IN (SELECT value_secret_id FROM profile_env_vars WHERE value_secret_id IS NOT NULL)",
+               AND id NOT IN (SELECT value_secret_id FROM profile_env_vars WHERE value_secret_id IS NOT NULL)
+               AND id NOT IN (SELECT password_secret_id FROM redis_databases WHERE password_secret_id IS NOT NULL)
+               AND id NOT IN (SELECT sentinel_password_secret_id FROM redis_databases WHERE sentinel_password_secret_id IS NOT NULL)",
         )?;
         let mapped = st.query_map([vault_id], |r| r.get(0))?;
         mapped.collect::<Result<_, _>>()?

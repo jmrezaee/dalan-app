@@ -19,6 +19,24 @@ export const commands = {
 	systemIntegrationSet: (sshLinks: boolean | null, autostart: boolean | null) => typedError<SystemIntegration_Serialize, AppError>(__TAURI_INVOKE("system_integration_set", { sshLinks, autostart })),
 	/**  Opens Windows Settings > Default apps (opened here, not by the webview). */
 	openDefaultApps: () => typedError<null, AppError>(__TAURI_INVOKE("open_default_apps")),
+	/**  S26: the saved databases, by name. */
+	redisDbList: () => typedError<RedisDatabase_Serialize[], AppError>(__TAURI_INVOKE("redis_db_list")),
+	/**  S27: creates or updates a database. The password, if any, goes straight into the vault. */
+	redisDbSave: (input: RedisDatabaseInput_Deserialize) => typedError<RedisDatabase_Serialize, AppError>(__TAURI_INVOKE("redis_db_save", { input })),
+	redisDbDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("redis_db_delete", { id })),
+	/**
+	 *  S27 "Test connection": connects with the form's values, reads version, mode and latency, then closes.
+	 *  An empty password on a saved database means "the saved one".
+	 */
+	redisDbTest: (input: RedisDatabaseInput_Deserialize) => typedError<TestResult, AppError>(__TAURI_INVOKE("redis_db_test", { input })),
+	/**  Opens a Redis tab's connection. Returns at once; the steps, the host's questions and the result arrive on `events`. */
+	redisOpen: (dbId: string, events: Channel<RedisEvent_Deserialize>) => typedError<RedisOpened, AppError>(__TAURI_INVOKE("redis_open", { dbId, events })),
+	/**  The answer to a host's question asked while a Redis tab opens (host key, password, passphrase, 2FA). */
+	redisRespond: (connId: string, promptId: string, answer: PromptAnswer_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("redis_respond", { connId, promptId, answer })),
+	/**  The logical database picker (`db0`, `db1`, ...): switches and answers with the key count. */
+	redisSelect: (connId: string, index: number) => typedError<DbKeys, AppError>(__TAURI_INVOKE("redis_select", { connId, index })),
+	/**  Closes the tab's connection, its questions and the SSH connection it ran through. */
+	redisClose: (connId: string) => __TAURI_INVOKE<void>("redis_close", { connId }),
 	/**  First run? Locked? Allowed while locked. */
 	vaultStatus: () => typedError<VaultStatus_Serialize, AppError>(__TAURI_INVOKE("vault_status")),
 	/**  F10: derive the key, write the vault row, and leave the vault unlocked. */
@@ -268,6 +286,12 @@ export type AutoLockWarning = {
 
 export type Choice = "replace" | "keep_both" | "skip";
 
+/**  Keys in one logical database (`db0`, `db1`, ...), for the picker in the tab's toolbar. */
+export type DbKeys = {
+	index: number,
+	keys: number | null,
+};
+
 /**  Which app opens the downloaded copy. */
 export type EditApp = 
 /**  The system's default app for the file type. */
@@ -312,6 +336,9 @@ export type EnvVar = {
 	value: string,
 };
 
+/**  Stored as lowercase text; `production` adds the amber line and chip to the tab. */
+export type Environment = "none" | "staging" | "production";
+
 /**  Codes from replica/architecture.md. Add new ones there first. */
 export type ErrorCode = "locked" | "wrong_password" | "too_many_attempts" | 
 /**  Importing an encrypted key without its passphrase. */
@@ -319,7 +346,15 @@ export type ErrorCode = "locked" | "wrong_password" | "too_many_attempts" |
 /**  The text isn't a private key we can read. */
 "invalid_key" | "not_found" | "validation" | "in_use" | "auth_failed" | "host_unreachable" | "host_key_changed" | "kex_failed" | "port_in_use" | "permission_denied" | 
 /**  The server doesn't offer the SFTP subsystem. */
-"sftp_disabled" | "internal";
+"sftp_disabled" | 
+/**  Redis refused the username or password (replica/redis/spec.md section 3). */
+"redis_auth_failed" | 
+/**  Nothing answered at the database's address, or the connection dropped and didn't come back. */
+"redis_unreachable" | 
+/**  TLS: the server's certificate isn't trusted by this computer, or is for another name. */
+"redis_tls_untrusted" | 
+/**  The server answered with an error of its own; its text is the message. */
+"redis_refused" | "internal";
 
 export type ForwardInput = ForwardInput_Serialize | ForwardInput_Deserialize;
 
@@ -892,6 +927,8 @@ export type KeyUpdate_Serialize = {
 	forget_passphrase: boolean,
 };
 
+export type Kind = "single" | "cluster" | "sentinel";
+
 export type KnownHost = KnownHost_Serialize | KnownHost_Deserialize;
 
 export type KnownHost_Deserialize = {
@@ -955,6 +992,18 @@ export type LogSummary_Serialize = {
 export type PackageSummary = {
 	id: string,
 	label: string,
+};
+
+export type PlanStep = PlanStep_Serialize | PlanStep_Deserialize;
+
+export type PlanStep_Deserialize = {
+	label: string,
+	detail?: string | null,
+};
+
+export type PlanStep_Serialize = {
+	label: string,
+	detail: string | null,
 };
 
 export type ProfileTheme = ProfileTheme_Serialize | ProfileTheme_Deserialize;
@@ -1062,6 +1111,128 @@ export type RecentItem = {
 	connected_at: number | null,
 };
 
+/**  One row of the Databases table, as the UI sees it. */
+export type RedisDatabase = RedisDatabase_Serialize | RedisDatabase_Deserialize;
+
+/**  The editor's form (S27). `password: Some` sets a new one; `clear_password` removes the saved one. */
+export type RedisDatabaseInput = RedisDatabaseInput_Serialize | RedisDatabaseInput_Deserialize;
+
+/**  The editor's form (S27). `password: Some` sets a new one; `clear_password` removes the saved one. */
+export type RedisDatabaseInput_Deserialize = {
+	/**  `None` creates a database. */
+	id?: string | null,
+	name: string,
+	environment: Environment,
+	route: Route,
+	host_id?: string | null,
+	address: string,
+	port: number,
+	kind: Kind,
+	sentinel_master?: string | null,
+	username?: string | null,
+	password?: string | null,
+	clear_password: boolean,
+	tls: boolean,
+	tls_server_name?: string | null,
+	write_mode: WriteMode,
+	default_db: number,
+	key_separator: string,
+};
+
+/**  The editor's form (S27). `password: Some` sets a new one; `clear_password` removes the saved one. */
+export type RedisDatabaseInput_Serialize = {
+	/**  `None` creates a database. */
+	id: string | null,
+	name: string,
+	environment: Environment,
+	route: Route,
+	host_id: string | null,
+	address: string,
+	port: number,
+	kind: Kind,
+	sentinel_master: string | null,
+	username: string | null,
+	password: string | null,
+	clear_password: boolean,
+	tls: boolean,
+	tls_server_name: string | null,
+	write_mode: WriteMode,
+	default_db: number,
+	key_separator: string,
+};
+
+/**  One row of the Databases table, as the UI sees it. */
+export type RedisDatabase_Deserialize = {
+	id: string,
+	name: string,
+	environment: Environment,
+	route: Route,
+	host_id?: string | null,
+	/**  The host's label, for "Through db-primary". */
+	host_label?: string | null,
+	address: string,
+	port: number,
+	kind: Kind,
+	sentinel_master?: string | null,
+	username?: string | null,
+	has_password: boolean,
+	tls: boolean,
+	tls_server_name?: string | null,
+	write_mode: WriteMode,
+	default_db: number,
+	key_separator: string,
+	last_opened_at?: number | null,
+};
+
+/**  One row of the Databases table, as the UI sees it. */
+export type RedisDatabase_Serialize = {
+	id: string,
+	name: string,
+	environment: Environment,
+	route: Route,
+	host_id: string | null,
+	/**  The host's label, for "Through db-primary". */
+	host_label: string | null,
+	address: string,
+	port: number,
+	kind: Kind,
+	sentinel_master: string | null,
+	username: string | null,
+	has_password: boolean,
+	tls: boolean,
+	tls_server_name: string | null,
+	write_mode: WriteMode,
+	default_db: number,
+	key_separator: string,
+	last_opened_at: number | null,
+};
+
+export type RedisEvent = RedisEvent_Serialize | RedisEvent_Deserialize;
+
+export type RedisEvent_Deserialize = 
+/**  The steps of this connection attempt, in order. Sent first, and again before each reconnect. */
+{ type: "plan"; steps: PlanStep_Deserialize[] } | { type: "step"; index: number; state: StepState; detail?: string | null } | 
+/**  A question or a note from the SSH sign-in of a hop (the S18 machinery). Answer prompts with `redis_respond`. */
+{ type: "host"; event: SessionEvent_Deserialize } | { type: "ready"; info: ServerInfo } | { type: "latency"; ms: number } | { type: "failed"; code: ErrorCode; message: string } | 
+/**  The connection dropped; trying again in `retry_in_secs` (attempt `attempt` of `of`). */
+{ type: "dropped"; attempt: number; of: number; retry_in_secs: number } | { type: "closed" };
+
+export type RedisEvent_Serialize = 
+/**  The steps of this connection attempt, in order. Sent first, and again before each reconnect. */
+{ type: "plan"; steps: PlanStep_Serialize[] } | { type: "step"; index: number; state: StepState; detail: string | null } | 
+/**  A question or a note from the SSH sign-in of a hop (the S18 machinery). Answer prompts with `redis_respond`. */
+{ type: "host"; event: SessionEvent_Serialize } | { type: "ready"; info: ServerInfo } | { type: "latency"; ms: number } | { type: "failed"; code: ErrorCode; message: string } | 
+/**  The connection dropped; trying again in `retry_in_secs` (attempt `attempt` of `of`). */
+{ type: "dropped"; attempt: number; of: number; retry_in_secs: number } | { type: "closed" };
+
+export type RedisOpened = {
+	conn_id: string,
+};
+
+export type Route = "direct" | 
+/**  Sign in to a saved host (with its jump chain) and talk to Redis from there. */
+"host";
+
 export type SerialConfig = {
 	baud: number,
 	/**  5 to 8. */
@@ -1072,6 +1243,22 @@ export type SerialConfig = {
 	parity: string,
 	/**  `none`, `hardware` (RTS/CTS) or `software` (XON/XOFF). */
 	flow: string,
+};
+
+/**  What the server said about itself right after sign-in. */
+export type ServerInfo = {
+	version: string,
+	/**  `standalone`, `cluster` or `sentinel`, in the server's own word. */
+	mode: string,
+	/**  A replica only accepts reads: the tab opens read-only. */
+	replica: boolean,
+	resp3: boolean,
+	/**  How many logical databases the server has (16 unless configured otherwise). */
+	db_count: number,
+	/**  The databases that hold keys. */
+	databases: DbKeys[],
+	selected: number,
+	latency_ms: number,
 };
 
 export type SessionEvent = SessionEvent_Serialize | SessionEvent_Deserialize;
@@ -1178,6 +1365,8 @@ export type SshTarget_Serialize = {
 	port: number,
 };
 
+export type StepState = "active" | "done" | "failed";
+
 export type Suggestion = {
 	command: string,
 	/**  The model asked a question instead of giving a command (the text after `# `). */
@@ -1253,6 +1442,14 @@ export type TemplateSummary = {
 	layout: string,
 	/**  JSON array: `[{ "host_id": "...", "title": "..." }]`. */
 	panes: string,
+};
+
+/**  What `redis_db_test` answers. */
+export type TestResult = {
+	version: string,
+	mode: string,
+	replica: boolean,
+	latency_ms: number,
 };
 
 export type Themes = Themes_Serialize | Themes_Deserialize;
@@ -1348,6 +1545,9 @@ export type VaultStatus_Serialize = {
 	/**  Set while wrong-password attempts are cooling down. */
 	cooldown_secs: number | null,
 };
+
+/**  What the write gate allows (spec section 4). New databases start as `Confirm`. */
+export type WriteMode = "read_only" | "confirm" | "open";
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

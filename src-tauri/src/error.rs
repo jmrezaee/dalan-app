@@ -26,6 +26,14 @@ pub enum ErrorCode {
     PermissionDenied,
     /// The server doesn't offer the SFTP subsystem.
     SftpDisabled,
+    /// Redis refused the username or password (replica/redis/spec.md section 3).
+    RedisAuthFailed,
+    /// Nothing answered at the database's address, or the connection dropped and didn't come back.
+    RedisUnreachable,
+    /// TLS: the server's certificate isn't trusted by this computer, or is for another name.
+    RedisTlsUntrusted,
+    /// The server answered with an error of its own; its text is the message.
+    RedisRefused,
     Internal,
 }
 
@@ -111,6 +119,10 @@ mod tests {
             PortInUse,
             PermissionDenied,
             SftpDisabled,
+            RedisAuthFailed,
+            RedisUnreachable,
+            RedisTlsUntrusted,
+            RedisRefused,
             Internal,
         ];
         // An exhaustive match: adding a variant is a compile error here until the list above has it.
@@ -118,7 +130,8 @@ mod tests {
             match c {
                 Locked | WrongPassword | TooManyAttempts | NeedsPassphrase | InvalidKey
                 | NotFound | Validation | InUse | AuthFailed | HostUnreachable | HostKeyChanged
-                | KexFailed | PortInUse | PermissionDenied | SftpDisabled | Internal => {}
+                | KexFailed | PortInUse | PermissionDenied | SftpDisabled | RedisAuthFailed
+                | RedisUnreachable | RedisTlsUntrusted | RedisRefused | Internal => {}
             }
             let json = serde_json::to_value(AppError::new(c, "m")).unwrap();
             let obj = json.as_object().unwrap();

@@ -488,6 +488,22 @@ pub fn delete(conn: &mut Connection, s: &VaultSession, id: &str) -> AppResult<()
             ),
         ));
     }
+    // The same for Redis databases reached through this host (RESTRICT in migration 0006).
+    let dbs = crate::redis::store::names_using_host(conn, id)?;
+    if !dbs.is_empty() {
+        return Err(AppError::new(
+            crate::error::ErrorCode::InUse,
+            format!(
+                "This host is the route to {}. Change or delete {} first.",
+                dbs.join(", "),
+                if dbs.len() == 1 {
+                    "that database"
+                } else {
+                    "those databases"
+                }
+            ),
+        ));
+    }
     let tx = conn.transaction()?;
     let (profile_id, secret_id): (String, Option<String>) = tx
         .query_row(

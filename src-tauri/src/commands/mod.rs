@@ -10,6 +10,7 @@ pub mod import;
 pub mod keychain;
 pub mod logs;
 pub mod proxy;
+pub mod redis;
 pub mod release;
 pub mod serial;
 pub mod session;
