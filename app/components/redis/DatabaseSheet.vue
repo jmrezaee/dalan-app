@@ -33,6 +33,7 @@ watch(() => databases.editing, (e) => {
     ? { ...blankDatabase(), id: saved.id, name: saved.name, environment: saved.environment, route: saved.route, host_id: saved.host_id, address: saved.address, port: saved.port, kind: saved.kind, sentinel_master: saved.sentinel_master, username: saved.username, tls: saved.tls, tls_server_name: saved.tls_server_name, write_mode: saved.write_mode, default_db: saved.default_db, key_separator: saved.key_separator }
     : { ...e })
   hadPassword.value = !!saved?.has_password
+  savedMode.value = saved?.environment === 'production' ? saved.write_mode : null
   password.value = ''
   error.value = ''
   tested.value = null
@@ -51,11 +52,11 @@ const route = computed({
 })
 const environment = computed({ get: () => form.environment as string, set: (v: string) => { form.environment = v as DatabaseForm['environment'] } })
 const savedPassword = computed(() => hadPassword.value && !form.clear_password)
-const MODES = [
-  { value: 'read_only', title: 'Read-only', text: 'Look, never change. Write commands are refused before they are sent.' },
-  { value: 'confirm', title: 'Confirm writes', text: 'Every change shows what it will do and asks first.' },
-  { value: 'open', title: 'Open', text: 'Edits go straight through. Dangerous commands still ask.' },
-] as const
+// A saved production database can't be loosened here: that goes through the tab's mode button, which asks for the
+// master password (Rust refuses it from this form either way).
+const RANK = { read_only: 2, confirm: 1, open: 0 } as const
+const savedMode = ref<DatabaseForm['write_mode'] | null>(null)
+const lockedModes = computed(() => (savedMode.value ? (['read_only', 'confirm', 'open'] as const).filter(m => RANK[m] < RANK[savedMode.value!]) : []))
 
 const input = (): DatabaseForm => ({ ...form, port: Number(form.port) || 0, password: password.value || null })
 
@@ -135,20 +136,8 @@ async function submit() {
 
         <div class="flex flex-col gap-1.5">
           <Label id="rdb-writes">Writes</Label>
-          <div role="radiogroup" aria-labelledby="rdb-writes" class="flex flex-col gap-1.5">
-            <button
-              v-for="m in MODES"
-              :key="m.value"
-              type="button"
-              role="radio"
-              :aria-checked="form.write_mode === m.value"
-              :class="cn('flex items-start gap-2.5 rounded-lg border border-border p-2.5 text-left', form.write_mode === m.value && 'border-accent bg-accent/5')"
-              @click="form.write_mode = m.value"
-            >
-              <span :class="cn('mt-[3px] size-3.5 shrink-0 rounded-full border-[1.5px] border-border-input', form.write_mode === m.value && 'border-4 border-accent')" aria-hidden="true" />
-              <span class="text-xs text-muted"><b class="text-sm font-medium text-text">{{ m.title }}</b><br>{{ m.text }}</span>
-            </button>
-          </div>
+          <WriteModePicker v-model="form.write_mode" labelledby="rdb-writes" :locked="lockedModes" />
+          <p v-if="lockedModes.length" class="text-xs text-muted">Loosen this from the mode button in its tab (it asks for your master password).</p>
         </div>
 
         <p v-if="error" role="alert" class="text-sm text-danger">{{ error }}</p>

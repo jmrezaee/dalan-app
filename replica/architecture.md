@@ -270,9 +270,22 @@ Webhooks in or out: **none** (local app).
 
 ### Redis (F13; S26, S27, S33; replica/redis/spec.md)
 
-R1 adds the connection commands and R2 the browser's read side; the write gate, the console, Pub/Sub and bulk actions follow in R3 to R5.
+R1 adds the connection commands, R2 the browser's read side and R3 the write gate with the editors; the console, Pub/Sub and bulk actions follow in R4 and R5.
 `RedisBytes` is `{ kind: 'text', text }` or `{ kind: 'binary', bytes }`: keys and values are never forced through a string.
-New error codes: `redis_auth_failed`, `redis_unreachable`, `redis_tls_untrusted`, `redis_refused` (the server's own text is the message).
+New error codes: `redis_auth_failed`, `redis_unreachable`, `redis_tls_untrusted`, `redis_refused` (the server's own text is the message),
+`redis_read_only_mode` (the database is Read-only in Dalan, or a replica: the command was not sent) and `redis_confirm_needed`
+(a confirmation that is unknown, used, older than two minutes, for another connection, or whose typed name doesn't match).
+
+**The write gate (R3, `redis/gate.rs`).** One function classifies every command (`read`, `write`, `heavy`, `dangerous`, `refused`) from the
+server's own `COMMAND` table, read once after sign-in; a command the table doesn't know is a write, and an unreadable table makes every
+unknown name a write. `decide(mode, class)` is the table of spec section 4. The editors send a typed `RedisWriteOp`; `redis/write.rs` turns it
+into the exact command bytes, asks the gate, and runs, refuses, or keeps the bytes for two minutes per connection and answers with a
+`RedisPending` (level `confirm` or `typed`, the command as text, the target, now and after). The commit runs those bytes once and asks the
+mode again. The mode is read from the database row for every write, so a mode change applies to open tabs; a replica is always read-only.
+Things that bite: `SET` is sent with `KEEPTTL` (Redis 6.0+) so an edit keeps the expiry; a list item is removed by marking its position and
+removing the mark in one `MULTI`, after checking the position still holds the item shown; creating and renaming never overwrite
+(`SET NX`, `EXISTS` first, `RENAMENX`); deleting a key with more than 10,000 items is `dangerous` (typed name) in every mode;
+every committed write and every refusal is logged with the database name, class and command name only.
 
 | command | does | input | output | flow |
 | --- | --- | --- | --- | --- |
@@ -287,6 +300,9 @@ New error codes: `redis_auth_failed`, `redis_unreachable`, `redis_tls_untrusted`
 | `redis_scan` | one `SCAN` page (never `KEYS`), each key with its type and time left | `{ conn_id, cursor, pattern, key_type?, count }` | `RedisScanPage` | F14 |
 | `redis_key_info` | type, time left, length, memory, encoding, a stream's groups | `{ conn_id, key: RedisBytes }` | `RedisKeyInfo` | F14 |
 | `redis_value_page` | one page of the value for its type (500 items; big strings as a 64 KB preview unless `full`) | `{ conn_id, key: RedisBytes, cursor, full }` | `RedisValuePage` | F14 |
+| `redis_write_prepare` | an editor's change through the gate: runs (Open), refuses (Read-only), or answers with what to confirm | `{ conn_id, op: RedisWriteOp }` | `RedisWriteOutcome` (`done { reply }` or `pending { pending }`) | F15 |
+| `redis_write_commit` | runs a prepared write once; a typed confirmation carries the database's name, which Rust compares | `{ conn_id, pending_id, typed_name? }` | `RedisWriteOutcome` | F15 |
+| `redis_set_mode` | changes the write mode; loosening a production database needs the master password (same cooldown as unlock) | `{ db_id, mode, master_password? }` | `RedisDatabase` | F15 |
 
 `RedisEvent`: `plan { steps }` (one step per SSH hop, then "reach Redis", then "sign in"), `step { index, state, detail }`,
 `host { event }` (a `SessionEvent` from a hop: its prompts), `ready { info }`, `latency { ms }`, `failed { code, message }`,

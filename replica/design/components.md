@@ -320,7 +320,9 @@ DatabaseSheet (S27)
 RedisTab (S28 shell; the views arrive in R2 to R5)
   toolbar h 44, border-b: Database icon, name (medium), environment chip ("production" warning / "staging" muted), route text (xs muted: "Direct" or "bastion → db-primary"),
            logical database picker ("db0 · 12,408 keys"; hidden for Cluster), the four views (Browser, Console, Pub/Sub, Server; aria-current on the open one),
-           latency dot + "3 ms" (success under 100 ms, warning under 500, danger above; "…" until the first ping), write-mode button (lock icon + the mode's name)
+           latency dot + "3 ms" (success under 100 ms, warning under 500, danger above; "…" until the first ping),
+           write-mode button (lock icon + the mode's name; opens WriteModeDialog; disabled on a replica)
+  banner   Read-only mode: lock icon + "Read-only. Nothing here can change data." + link "Change…" (opens WriteModeDialog)
   a production database adds a 2px warning line on top of its tab
   states    connecting (ConnectSteps, centred), a host question (PromptPanel in the same card: host key, password, passphrase, 2FA),
             failed (one line of what happened + one useful action: auth → Edit database; unreachable → Try again; certificate → Edit database; host problems → Try again),
@@ -334,7 +336,8 @@ RedisTypeChip
   The chip always carries the text, so colour is never the only signal.
 
 KeyTree (S28, left side, 320 wide, resizable later)
-  toolbar: pattern Input (mono, placeholder "user:*", Enter scans; empty = every key), type Select ("All types", then the seven), Refresh (IconButton)
+  toolbar: pattern Input (mono, placeholder "user:*", Enter scans; empty = every key), type Select ("All types", then the seven), Refresh (IconButton),
+           New key (IconButton, Plus; hidden in Read-only; opens NewKeyDialog)
   tree     role="tree", rows h 28, virtualised; built from the scanned keys by the database's separator
            folder row: chevron, "user:" (mono), count right (muted); a folder with a single key under it is shown as that key
            key row: RedisTypeChip, name (mono, the part after the folder; binary keys escaped as \xNN), time left right ("23h", "12m", "no expiry" muted)
@@ -347,7 +350,11 @@ KeyTree (S28, left side, 320 wide, resizable later)
 KeyHeader (S28, right side top)
   RedisTypeChip, key name (mono semibold, truncates, full name in title), Copy name (IconButton, toast "Key name copied"),
   expiry text ("Expires in 23h 14m" / "No expiry"), size ("8 fields · 412 B", "48,210 members", "39 bytes"), Reload (IconButton)
-  R2 has no Rename, Delete or expiry editing: those arrive with the write gate (R3)
+  Expiry control: the expiry text is a button; it opens an inline Input ("90s, 15m, 2h, 7d or a date") + [Set expiry] + [Remove expiry] (only when it has one) + [Cancel];
+                  a value it can't read shows "Use 90s, 15m, 2h, 7d or a date in the future." in danger; Enter sets, Esc cancels
+  Rename: the name becomes an Input + [Rename] + [Cancel]; never overwrites ("A key with that name already exists."); binary key names can't be renamed here
+  Delete key: ghost button in danger text. Confirm mode: WriteConfirmDialog; over 10,000 items: DangerConfirmDialog; Open mode: an AlertDialog first ("Delete maintenance?")
+  states   Read-only: the expiry is plain text and Rename / Delete key are hidden
 
 Value viewers (S28 hash, S29 the rest): the right side under the header. Each loads 500 items at a time.
   shared   footer "Showing 500 of 48,210" + [Load more]; loading (skeleton rows); empty ("This hash has no fields." etc.); key gone ("This key is gone. It expired or was deleted." + Close);
@@ -360,7 +367,46 @@ Value viewers (S28 hash, S29 the rest): the right side under the header. Each lo
   ValueSet     table Member
   ValueZset    table Score ↓ | Member, highest first
   ValueStream  table ID | Fields ("order=5512 status=paid"), newest first · footer "Groups: billing (0 waiting), emails (3 waiting)." when there are any
-  keyboard     the table is one Tab stop; ↑/↓ move the focused row
+  keyboard     the table is one Tab stop; ↑/↓ move the focused row; Enter edits it, Delete removes it, Esc cancels an edit, Enter in the edit saves
+  editing      (R3; hidden in Read-only) one item at a time. The focused or hovered row shows Edit (Pencil) and Remove (Trash) IconButtons at its right end.
+               Editing turns the row into Inputs for the cells that can change + [Cancel] + primary [Review change] (Confirm mode) or [Save] (Open mode).
+               Adding shows the same row at the top of the table. Binary cells can be removed, not edited.
+    ValueHash    [Add field]; edit changes the value; remove → "Remove this field?"
+    ValueList    [Start] [End] add at either end; edit changes the value; remove is by position, and the item is checked first ("That item changed since you looked.")
+                 hint "Add to the start or the end. Remove by position."
+    ValueSet     [Add member]; remove; no edit · hint "Members are unique; adding one twice changes nothing."
+    ValueZset    [Add member] (score + member); edit changes the score; remove
+    ValueStream  [Add entry] (ID, empty = the server chooses; fields as "order=5512 status=paid"); remove; no edit
+    ValueString  Text view is a textarea; footer [Discard] + [Review change] / [Save], enabled once the text differs; previews (over 1 MB) and binary values are read-only
+    ValueJson    JSON-module keys: the Text view is the editor; invalid text shows "Line 6: this isn't valid JSON yet." in danger and disables the button
+
+WriteConfirmDialog (S33 "Confirm a write"; Confirm mode, and heavy commands in every mode)
+  AlertDialog, 440 wide. Title asks what will happen ("Change this field?", "Remove this member?", "Delete this key?").
+  grid (label xs muted, 64 wide | value): Database ("cache-prod" + warning "· production") · Target (mono: "user:1042:profile › plan") ·
+       Now (mono danger; left out when there was nothing) · After (mono success; left out for removals) · Items ("48 fields go with it", deletes only)
+  the exact command in a mono block (bg, rounded 6, wraps; long arguments are shortened by Rust)
+  footer [Cancel] (focused) [primary: the action's verb, "Change" / "Add field" / "Remove" / "Delete key" (danger-solid for removals and deletes)]
+  states   committing (button loading), refused (the dialog closes and a toast says why: expired after two minutes, already used, the mode changed)
+  keyboard Esc and Cancel close without sending anything; Enter on the focused Cancel cancels
+
+DangerConfirmDialog (S33 "Dangerous command"; every mode that isn't Read-only)
+  AlertDialog with a danger border. Title with a warning icon ("Delete leaderboard:weekly on cache-prod?"), one sentence of what is lost
+  ("This removes the key and its 48,210 members. It can't be undone, and everyone using this database is affected."), the exact command in a mono block,
+  label "Type cache-prod to confirm" + Input (mono, no autocomplete)
+  footer [Cancel] (focused) [danger-solid: the action, disabled until the text is exactly the database's name]. Rust compares the name again.
+
+WriteModeDialog (S33; the toolbar's mode button and the banner's "Change…")
+  Dialog "Writes on cache-prod": WriteModePicker (the three modes as radios: title + one line each; the same picker as the editor)
+  making a production database less protected adds PasswordInput "Master password" + hint "Making a production database less protected needs your master password."
+  footer [Cancel] [Change mode] (disabled while the mode is unchanged)
+  states   wrong password ("That password didn't work." under the field), too many tries (the cooldown sentence), saving
+  In the editor (S27) a saved production database's looser modes are disabled with the hint "Loosen this from the mode button in its tab (it asks for your master password)."
+
+NewKeyDialog (S28; KeyTree's New key)
+  Dialog "New key": Name (mono) · Type (Select: String, Hash, List, Set, Sorted set, Stream, JSON) · the first item for that type
+  (String: Value textarea · Hash and Stream: Field + Value · List: First item · Set: First member · Sorted set: Member + Score · JSON: a textarea, checked) ·
+  Expiry (optional; same words as the expiry control)
+  footer [Cancel] [Create key] (or [Review change] in Confirm mode). Never overwrites: "A key with that name already exists."
 
 ConnectSteps (S33 "Connecting")
   card: title "Opening cache-prod"; one row per step h 28: state icon (done = success check, active = spinning accent ring, pending = empty ring, failed = danger ×),

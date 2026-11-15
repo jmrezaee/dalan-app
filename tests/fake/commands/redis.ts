@@ -68,6 +68,9 @@ export const redis: Pick<Handlers, Keys> = {
       tls: !!i.tls, tls_server_name: i.tls_server_name || null, write_mode: i.write_mode, default_db: i.default_db ?? 0, key_separator: i.key_separator ?? ':',
       last_opened_at: existing?.last_opened_at ?? null,
     }
+    // Like Rust: the editor can't loosen a production database's mode (that needs the master password).
+    const rank = { read_only: 2, confirm: 1, open: 0 } as const
+    if (existing?.environment === 'production' && rank[d.write_mode] < rank[existing.write_mode]) fail('validation', 'A production database\'s write mode changes from the mode button in its tab, with the master password.')
     if (existing) Object.assign(existing, d)
     else m.redisDbs.push(d)
     return summary(m, d)

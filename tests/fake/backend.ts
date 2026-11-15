@@ -2,6 +2,7 @@
 // in a plain browser, answers every command from the typed table in ./commands, and exposes `window.__fake` for tests.
 import { handlers } from './commands'
 import { MASTER } from './commands/vault'
+import { keyspace } from './commands/redisKeys'
 import { createModel, type Seed } from './model'
 import { scenarios, type ScenarioName } from './scenarios'
 import { scripts } from './scripts'
@@ -198,6 +199,15 @@ export function install(opts: Options) {
     redisConnIds: () => [...m.redisConns.keys()],
     /** Removes a key from the fake database, as if it expired while the app was looking at it. */
     redisDropKey: (name: string) => { m.redisKeys = m.redisKeys.filter(k => !(k.key.kind === 'text' && k.key.text === name)) },
+    /** Adds a set with `members` members to the fake database (a key big enough that deleting it is dangerous). */
+    redisAddSet: (name: string, members: number) => {
+      if (!m.redisKeys.length) m.redisKeys = keyspace()
+      m.redisKeys.unshift({ key: { kind: 'text', text: name }, ttl_ms: null, value: { type: 'set', members: Array.from({ length: members }, (_, i) => `m${i}`) } })
+    },
+    /** The fake database's key with this name, as the fake holds it (to check what a write changed). */
+    redisKey: (name: string) => m.redisKeys.find(k => k.key.kind === 'text' && k.key.text === name) ?? null,
+    /** The saved database's write mode. */
+    redisMode: (name: string) => m.redisDbs.find(d => d.name === name)?.write_mode ?? null,
     redisOpenConnIds: () => [...m.redisConns].filter(([, c]) => !c.closed).map(([id]) => id),
     /** One event of a Redis connection, as Rust would send it (plan, step, host, ready, failed, dropped, ...). */
     redisEvent: (connId: string, e: unknown) => {

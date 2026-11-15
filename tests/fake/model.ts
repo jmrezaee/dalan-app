@@ -145,6 +145,8 @@ export interface Model {
   redisKeys: import('./commands/redisKeys').FakeKey[]
   /** A test sends a connection's events itself (`fake.redisManual()`); otherwise opening one just works. */
   redisManual: boolean
+  /** Writes waiting for their confirmation (see commands/redisWrite.ts). */
+  redisPending: Map<string, { connId: string, op: import('../../app/types/bindings').RedisWriteOp_Deserialize, typed: boolean, at: number }>
 }
 
 export function createModel(seed: Seed): Model {
@@ -185,6 +187,7 @@ export function createModel(seed: Seed): Model {
     redisConns: new Map(),
     redisKeys: [],
     redisManual: false,
+    redisPending: new Map(),
     system: { supported: false, ssh_links: false, autostart: false, other_handler: null, pinned: false, edition: null, install_dir: null },
   }
 }

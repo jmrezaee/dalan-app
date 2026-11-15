@@ -104,3 +104,26 @@ describe('redis key tree', () => {
     expect(foldersOf('a:b', '')).toEqual([])
   })
 })
+
+describe('redis editors (R3)', () => {
+  it('reads an expiry the way a person types it', async () => {
+    const { parseExpiry } = await import('~/utils/redisBytes')
+    expect(parseExpiry('90s')).toBe(90_000)
+    expect(parseExpiry('15m')).toBe(900_000)
+    expect(parseExpiry(' 2H ')).toBe(7_200_000)
+    expect(parseExpiry('7d')).toBe(604_800_000)
+    expect(parseExpiry('1.5h')).toBe(5_400_000)
+    const now = Date.parse('2026-11-16T10:00:00Z')
+    expect(parseExpiry('2026-11-16T12:00:00Z', now)).toBe(7_200_000)
+    // Not an expiry: nothing, zero, a bare number, words, a date that has passed.
+    for (const bad of ['', '0s', '90', 'soon', '5 weeks', '-5m', '2020-01-01']) expect(parseExpiry(bad, now), bad).toBeNull()
+  })
+
+  it('says where JSON goes wrong, and nothing when it is valid', async () => {
+    const { jsonProblem } = await import('~/utils/redisBytes')
+    expect(jsonProblem('{"a":1}')).toBe('')
+    expect(jsonProblem('[1, 2]')).toBe('')
+    expect(jsonProblem('{"a":')).toContain('his isn\'t valid JSON yet.')
+    expect(jsonProblem('{\n  "a": 1,\n  nope\n}')).toMatch(/^(Line 3: t|T)his isn't valid JSON yet\.$/)
+  })
+})

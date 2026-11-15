@@ -34,6 +34,11 @@ pub enum ErrorCode {
     RedisTlsUntrusted,
     /// The server answered with an error of its own; its text is the message.
     RedisRefused,
+    /// The database is Read-only in Dalan: the command was not sent.
+    RedisReadOnlyMode,
+    /// A write needs its confirmation: the pending id is unknown, used, expired or for another connection, or the
+    /// typed name does not match.
+    RedisConfirmNeeded,
     Internal,
 }
 
@@ -123,6 +128,8 @@ mod tests {
             RedisUnreachable,
             RedisTlsUntrusted,
             RedisRefused,
+            RedisReadOnlyMode,
+            RedisConfirmNeeded,
             Internal,
         ];
         // An exhaustive match: adding a variant is a compile error here until the list above has it.
@@ -131,7 +138,8 @@ mod tests {
                 Locked | WrongPassword | TooManyAttempts | NeedsPassphrase | InvalidKey
                 | NotFound | Validation | InUse | AuthFailed | HostUnreachable | HostKeyChanged
                 | KexFailed | PortInUse | PermissionDenied | SftpDisabled | RedisAuthFailed
-                | RedisUnreachable | RedisTlsUntrusted | RedisRefused | Internal => {}
+                | RedisUnreachable | RedisTlsUntrusted | RedisRefused | RedisReadOnlyMode
+                | RedisConfirmNeeded | Internal => {}
             }
             let json = serde_json::to_value(AppError::new(c, "m")).unwrap();
             let obj = json.as_object().unwrap();

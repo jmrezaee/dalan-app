@@ -592,3 +592,371 @@ async fn l3_redis_scan_key_info_and_every_types_value_in_pages() {
     }
     del.query_async::<()>(&mut r).await.unwrap();
 }
+
+// ---- R3: the write gate against the real server
+
+use super::gate;
+use super::write::{
+    self, PendingStore, RedisConfirmLevel, RedisFieldInput, RedisWriteOp, RedisWriteOutcome,
+};
+
+fn db(mode: RedisWriteMode) -> write::Target {
+    write::Target {
+        name: "cache-test".into(),
+        mode,
+        replica: false,
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_redis_writes_go_through_the_gate_and_every_editor_op_works() {
+    let h = harness(None).await;
+    let (emit, _) = recorder();
+    let c = conn::connect(
+        &h.state.store(),
+        &direct(Some(PASSWORD), None),
+        &Arc::new(Prompts::default()),
+        &emit,
+    )
+    .await
+    .unwrap();
+    assert!(!c.table.is_empty(), "the command table was read");
+    let mut r = c.conn.clone();
+    let pending = PendingStore::default();
+    let p = format!("dalan-test:{}:", uuid::Uuid::now_v7());
+    let k = |name: &str| t(&format!("{p}{name}"));
+    let raw = |name: &str| format!("{p}{name}");
+    let create = |name: &str, ty: &str, field: Option<&str>, value: &str| RedisWriteOp::Create {
+        key: k(name),
+        key_type: ty.into(),
+        field: field.map(t),
+        value: t(value),
+        score: Some("1".into()),
+        ttl_ms: Some(600_000),
+    };
+
+    // Read-only: refused, and nothing reaches the server.
+    let err = write::prepare(
+        &mut r,
+        &c.table,
+        &pending,
+        &db(RedisWriteMode::ReadOnly),
+        create("str", "string", None, "v"),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.code, ErrorCode::RedisReadOnlyMode);
+    let exists: bool = redis::cmd("EXISTS")
+        .arg(raw("str"))
+        .query_async(&mut r)
+        .await
+        .unwrap();
+    assert!(!exists);
+
+    // Open: every op runs at once.
+    let open = db(RedisWriteMode::Open);
+    let run = async |op: RedisWriteOp| {
+        write::prepare(&mut c.conn.clone(), &c.table, &pending, &open, op).await
+    };
+    for (name, ty, field) in [
+        ("str", "string", None),
+        ("hash", "hash", Some("f")),
+        ("list", "list", None),
+        ("set", "set", None),
+        ("zset", "zset", None),
+        ("stream", "stream", Some("f")),
+    ] {
+        let done = run(create(name, ty, field, "one")).await.unwrap();
+        assert!(matches!(done, RedisWriteOutcome::Done { .. }), "{ty}");
+        let ttl: i64 = redis::cmd("PTTL")
+            .arg(raw(name))
+            .query_async(&mut r)
+            .await
+            .unwrap();
+        assert!(ttl > 0, "{ty} was created with its expiry");
+        // Creating never overwrites.
+        assert_eq!(
+            run(create(name, ty, field, "two")).await.unwrap_err().code,
+            ErrorCode::Validation,
+            "{ty}"
+        );
+    }
+    run(RedisWriteOp::SetString {
+        key: k("str"),
+        value: t("two"),
+    })
+    .await
+    .unwrap();
+    run(RedisWriteOp::HashSet {
+        key: k("hash"),
+        field: t("g"),
+        value: t("2"),
+    })
+    .await
+    .unwrap();
+    run(RedisWriteOp::HashRemove {
+        key: k("hash"),
+        field: t("f"),
+    })
+    .await
+    .unwrap();
+    run(RedisWriteOp::ListPush {
+        key: k("list"),
+        value: t("zero"),
+        start: true,
+    })
+    .await
+    .unwrap();
+    run(RedisWriteOp::ListPush {
+        key: k("list"),
+        value: t("two"),
+        start: false,
+    })
+    .await
+    .unwrap();
+    // The list is zero, one, two. A stale position is refused; the right one works.
+    let stale = run(RedisWriteOp::ListRemove {
+        key: k("list"),
+        index: 1,
+        expect: t("zero"),
+    })
+    .await
+    .unwrap_err();
+    assert_eq!(stale.code, ErrorCode::Validation);
+    run(RedisWriteOp::ListSet {
+        key: k("list"),
+        index: 1,
+        expect: t("one"),
+        value: t("ONE"),
+    })
+    .await
+    .unwrap();
+    run(RedisWriteOp::ListRemove {
+        key: k("list"),
+        index: 0,
+        expect: t("zero"),
+    })
+    .await
+    .unwrap();
+    let list: Vec<String> = redis::cmd("LRANGE")
+        .arg(raw("list"))
+        .arg(0)
+        .arg(-1)
+        .query_async(&mut r)
+        .await
+        .unwrap();
+    assert_eq!(list, ["ONE", "two"]);
+    run(RedisWriteOp::SetAdd {
+        key: k("set"),
+        member: t("b"),
+    })
+    .await
+    .unwrap();
+    run(RedisWriteOp::SetRemove {
+        key: k("set"),
+        member: t("one"),
+    })
+    .await
+    .unwrap();
+    run(RedisWriteOp::ZsetAdd {
+        key: k("zset"),
+        member: t("one"),
+        score: "9.5".into(),
+    })
+    .await
+    .unwrap();
+    let score: f64 = redis::cmd("ZSCORE")
+        .arg(raw("zset"))
+        .arg("one")
+        .query_async(&mut r)
+        .await
+        .unwrap();
+    assert_eq!(score, 9.5);
+    run(RedisWriteOp::ZsetRemove {
+        key: k("zset"),
+        member: t("one"),
+    })
+    .await
+    .unwrap();
+    let added = run(RedisWriteOp::StreamAdd {
+        key: k("stream"),
+        id: None,
+        fields: vec![RedisFieldInput {
+            field: t("a"),
+            value: t("1"),
+        }],
+    })
+    .await
+    .unwrap();
+    let RedisWriteOutcome::Done { reply: Some(id) } = added else {
+        panic!("a new entry answers with its id");
+    };
+    run(RedisWriteOp::StreamDelete {
+        key: k("stream"),
+        id,
+    })
+    .await
+    .unwrap();
+    run(RedisWriteOp::Expire {
+        key: k("str"),
+        ttl_ms: None,
+    })
+    .await
+    .unwrap();
+    let ttl: i64 = redis::cmd("PTTL")
+        .arg(raw("str"))
+        .query_async(&mut r)
+        .await
+        .unwrap();
+    assert_eq!(ttl, -1);
+    run(RedisWriteOp::Expire {
+        key: k("str"),
+        ttl_ms: Some(600_000),
+    })
+    .await
+    .unwrap();
+    // Rename never overwrites.
+    assert_eq!(
+        run(RedisWriteOp::Rename {
+            key: k("str"),
+            to: k("hash")
+        })
+        .await
+        .unwrap_err()
+        .code,
+        ErrorCode::Validation
+    );
+    run(RedisWriteOp::Rename {
+        key: k("str"),
+        to: k("renamed"),
+    })
+    .await
+    .unwrap();
+
+    // Confirm: nothing changes until the commit; the commit works once.
+    let confirm = db(RedisWriteMode::Confirm);
+    let out = write::prepare(
+        &mut r,
+        &c.table,
+        &pending,
+        &confirm,
+        RedisWriteOp::HashSet {
+            key: k("hash"),
+            field: t("g"),
+            value: t("3"),
+        },
+    )
+    .await
+    .unwrap();
+    let RedisWriteOutcome::Pending { pending: shown } = out else {
+        panic!("Confirm mode asks first");
+    };
+    assert_eq!(shown.level, RedisConfirmLevel::Confirm);
+    assert_eq!(shown.command_preview, format!("HSET {} g 3", raw("hash")));
+    assert_eq!(shown.before, Some(t("2")));
+    assert_eq!(shown.after, Some(t("3")));
+    let now: String = redis::cmd("HGET")
+        .arg(raw("hash"))
+        .arg("g")
+        .query_async(&mut r)
+        .await
+        .unwrap();
+    assert_eq!(now, "2", "not sent yet");
+    write::commit(&mut r, &pending, &confirm, &shown.id, None)
+        .await
+        .unwrap();
+    let now: String = redis::cmd("HGET")
+        .arg(raw("hash"))
+        .arg("g")
+        .query_async(&mut r)
+        .await
+        .unwrap();
+    assert_eq!(now, "3");
+    assert_eq!(
+        write::commit(&mut r, &pending, &confirm, &shown.id, None)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::RedisConfirmNeeded
+    );
+
+    // Deleting a key with more than 10,000 items needs the database's name, even in Open mode.
+    let mut seed = redis::pipe();
+    for chunk in 0..11 {
+        let c = seed.cmd("SADD").arg(raw("big"));
+        for i in 0..1000 {
+            c.arg(chunk * 1000 + i);
+        }
+    }
+    seed.cmd("PEXPIRE").arg(raw("big")).arg(600_000);
+    seed.query_async::<()>(&mut r).await.unwrap();
+    let out = write::prepare(
+        &mut r,
+        &c.table,
+        &pending,
+        &open,
+        RedisWriteOp::Delete { key: k("big") },
+    )
+    .await
+    .unwrap();
+    let RedisWriteOutcome::Pending { pending: big } = out else {
+        panic!("a big delete asks, even in Open mode");
+    };
+    assert_eq!(big.level, RedisConfirmLevel::Typed);
+    assert_eq!(big.count, Some(11_000));
+    assert!(big.count.unwrap() > gate::BIG);
+    assert_eq!(
+        write::commit(&mut r, &pending, &open, &big.id, Some("cache-tes"))
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::RedisConfirmNeeded
+    );
+    let exists: bool = redis::cmd("EXISTS")
+        .arg(raw("big"))
+        .query_async(&mut r)
+        .await
+        .unwrap();
+    assert!(exists, "a wrong name deletes nothing");
+    // The wrong name used the confirmation up: ask again, then type it right.
+    let out = write::prepare(
+        &mut r,
+        &c.table,
+        &pending,
+        &open,
+        RedisWriteOp::Delete { key: k("big") },
+    )
+    .await
+    .unwrap();
+    let RedisWriteOutcome::Pending { pending: big } = out else {
+        panic!()
+    };
+    write::commit(&mut r, &pending, &open, &big.id, Some("cache-test"))
+        .await
+        .unwrap();
+    let exists: bool = redis::cmd("EXISTS")
+        .arg(raw("big"))
+        .query_async(&mut r)
+        .await
+        .unwrap();
+    assert!(!exists);
+
+    // A small key deletes without the name.
+    for name in ["renamed", "hash", "list", "set", "zset", "stream"] {
+        let _ = write::prepare(
+            &mut r,
+            &c.table,
+            &pending,
+            &open,
+            RedisWriteOp::Delete { key: k(name) },
+        )
+        .await;
+    }
+    let left: Vec<String> = redis::cmd("KEYS")
+        .arg(format!("{p}*"))
+        .query_async(&mut r)
+        .await
+        .unwrap();
+    assert!(left.is_empty(), "{left:?}");
+}

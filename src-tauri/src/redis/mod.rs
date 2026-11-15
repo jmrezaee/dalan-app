@@ -5,13 +5,17 @@
 //! - `transport`: how a connection reaches its server, directly or through a saved host, with TLS inside.
 //! - `conn`: one live connection per Redis tab: sign-in, server info, keep-alive, reconnect.
 //! - `browse`: the browser's read side: `SCAN`, key details and values in pages, as bytes.
+//! - `gate`: the write gate: one function classifies every command and decides by the database's mode.
+//! - `write`: the editors' changes: prepare, confirm, commit once.
 //!
-//! The write gate, the console, Pub/Sub, bulk actions, Cluster and Sentinel arrive in R2 to R6.
+//! The console, Pub/Sub, bulk actions, Cluster and Sentinel arrive in R4 to R6.
 
 pub mod browse;
 pub mod conn;
+pub mod gate;
 pub mod store;
 pub mod transport;
+pub mod write;
 
 pub use conn::{RedisEvent, RedisManager};
 

@@ -46,6 +46,21 @@ export const commands = {
 	redisKeyInfo: (connId: string, key: RedisBytes) => typedError<RedisKeyInfo_Serialize, AppError>(__TAURI_INVOKE("redis_key_info", { connId, key })),
 	/**  One page of the value for its type (500 items, or a string). `full` loads a big string whole. */
 	redisValuePage: (connId: string, key: RedisBytes, cursor: string, full: boolean) => typedError<RedisValuePage_Serialize, AppError>(__TAURI_INVOKE("redis_value_page", { connId, key, cursor, full })),
+	/**
+	 *  F15, step one: an editor's change. In Open mode it runs; in Read-only it is refused; otherwise the answer says
+	 *  what to confirm, and the exact command waits two minutes for `redis_write_commit`.
+	 */
+	redisWritePrepare: (connId: string, op: RedisWriteOp_Deserialize) => typedError<RedisWriteOutcome_Serialize, AppError>(__TAURI_INVOKE("redis_write_prepare", { connId, op })),
+	/**
+	 *  F15, step two: runs a prepared write, once. `typed_name` is what the person typed in the "type the database's
+	 *  name" dialog; Rust compares it.
+	 */
+	redisWriteCommit: (connId: string, pendingId: string, typedName: string | null) => typedError<RedisWriteOutcome_Serialize, AppError>(__TAURI_INVOKE("redis_write_commit", { connId, pendingId, typedName })),
+	/**
+	 *  Changes a database's write mode. Making a production database less protected needs the master password,
+	 *  checked here (five wrong tries start the same cooldown as unlocking).
+	 */
+	redisSetMode: (dbId: string, mode: RedisWriteMode, masterPassword: string | null) => typedError<RedisDatabase_Serialize, AppError>(__TAURI_INVOKE("redis_set_mode", { dbId, mode, masterPassword })),
 	/**  First run? Locked? Allowed while locked. */
 	vaultStatus: () => typedError<VaultStatus_Serialize, AppError>(__TAURI_INVOKE("vault_status")),
 	/**  F10: derive the key, write the vault row, and leave the vault unlocked. */
@@ -354,7 +369,14 @@ export type ErrorCode = "locked" | "wrong_password" | "too_many_attempts" |
 /**  TLS: the server's certificate isn't trusted by this computer, or is for another name. */
 "redis_tls_untrusted" | 
 /**  The server answered with an error of its own; its text is the message. */
-"redis_refused" | "internal";
+"redis_refused" | 
+/**  The database is Read-only in Dalan: the command was not sent. */
+"redis_read_only_mode" | 
+/**
+ *  A write needs its confirmation: the pending id is unknown, used, expired or for another connection, or the
+ *  typed name does not match.
+ */
+"redis_confirm_needed" | "internal";
 
 export type ForwardInput = ForwardInput_Serialize | ForwardInput_Deserialize;
 
@@ -1103,6 +1125,10 @@ export type RecentItem = {
  */
 export type RedisBytes = { kind: "text"; text: string } | { kind: "binary"; bytes: number[] };
 
+export type RedisConfirmLevel = "confirm" | 
+/**  The person must type the database's name. */
+"typed";
+
 /**  One row of the Databases table, as the UI sees it. */
 export type RedisDatabase = RedisDatabase_Serialize | RedisDatabase_Deserialize;
 
@@ -1231,6 +1257,11 @@ export type RedisField = {
 	value: RedisBytes,
 };
 
+export type RedisFieldInput = {
+	field: RedisBytes,
+	value: RedisBytes,
+};
+
 export type RedisKeyInfo = RedisKeyInfo_Serialize | RedisKeyInfo_Deserialize;
 
 export type RedisKeyInfo_Deserialize = {
@@ -1286,6 +1317,37 @@ export type RedisKind = "single" | "cluster" | "sentinel";
 
 export type RedisOpened = {
 	conn_id: string,
+};
+
+/**  A write that waits for its confirmation: what to show the person. */
+export type RedisPending = RedisPending_Serialize | RedisPending_Deserialize;
+
+/**  A write that waits for its confirmation: what to show the person. */
+export type RedisPending_Deserialize = {
+	id: string,
+	level: RedisConfirmLevel,
+	/**  The exact command, as text, with long arguments shortened. */
+	command_preview: string,
+	/**  What it changes: the key, and the field or position inside it. */
+	target: string,
+	before?: RedisBytes | null,
+	after?: RedisBytes | null,
+	/**  Deleting a key: how many items go with it. */
+	count?: number | null,
+};
+
+/**  A write that waits for its confirmation: what to show the person. */
+export type RedisPending_Serialize = {
+	id: string,
+	level: RedisConfirmLevel,
+	/**  The exact command, as text, with long arguments shortened. */
+	command_preview: string,
+	/**  What it changes: the key, and the field or position inside it. */
+	target: string,
+	before: RedisBytes | null,
+	after: RedisBytes | null,
+	/**  Deleting a key: how many items go with it. */
+	count: number | null,
 };
 
 export type RedisPlanStep = RedisPlanStep_Serialize | RedisPlanStep_Deserialize;
@@ -1396,6 +1458,63 @@ start: number | null; items: RedisBytes[]; next: string | null } | { type: "set"
 
 /**  What the write gate allows (spec section 4). New databases start as `Confirm`. */
 export type RedisWriteMode = "read_only" | "confirm" | "open";
+
+/**  One change, as an editor asks for it. */
+export type RedisWriteOp = RedisWriteOp_Serialize | RedisWriteOp_Deserialize;
+
+/**  One change, as an editor asks for it. */
+export type RedisWriteOp_Deserialize = { op: "set_string"; key: RedisBytes; value: RedisBytes } | 
+/**  A key of the JSON module (`JSON.SET key $ text`). A plain string that holds JSON uses `SetString`. */
+{ op: "set_json"; key: RedisBytes; text: string } | { op: "hash_set"; key: RedisBytes; field: RedisBytes; value: RedisBytes } | { op: "hash_remove"; key: RedisBytes; field: RedisBytes } | 
+/**  `start` adds at the head (`LPUSH`), otherwise at the tail (`RPUSH`). */
+{ op: "list_push"; key: RedisBytes; value: RedisBytes; start: boolean } | 
+/**  Lists are addressed by position, so the item the person saw (`expect`) is checked right before the change. */
+{ op: "list_set"; key: RedisBytes; index: number; expect: RedisBytes; value: RedisBytes } | { op: "list_remove"; key: RedisBytes; index: number; expect: RedisBytes } | { op: "set_add"; key: RedisBytes; member: RedisBytes } | { op: "set_remove"; key: RedisBytes; member: RedisBytes } | 
+/**  Adds the member, or gives it a new score. */
+{ op: "zset_add"; key: RedisBytes; member: RedisBytes; score: string } | { op: "zset_remove"; key: RedisBytes; member: RedisBytes } | 
+/**  `id: None` lets the server choose (`*`). */
+{ op: "stream_add"; key: RedisBytes; id?: string | null; fields: RedisFieldInput[] } | { op: "stream_delete"; key: RedisBytes; id: string } | 
+/**  `ttl_ms: None` removes the expiry. */
+{ op: "expire"; key: RedisBytes; ttl_ms?: number | null } | 
+/**  Never overwrites: refused when `to` exists. */
+{ op: "rename"; key: RedisBytes; to: RedisBytes } | { op: "delete"; key: RedisBytes } | 
+/**
+ *  A new key with its first item. Never overwrites. `field` is for a hash and a stream, `score` for a
+ *  sorted set.
+ */
+{ op: "create"; key: RedisBytes; key_type: string; field?: RedisBytes | null; value: RedisBytes; score?: string | null; ttl_ms?: number | null } | { op: "publish"; channel: RedisBytes; message: RedisBytes };
+
+/**  One change, as an editor asks for it. */
+export type RedisWriteOp_Serialize = { op: "set_string"; key: RedisBytes; value: RedisBytes } | 
+/**  A key of the JSON module (`JSON.SET key $ text`). A plain string that holds JSON uses `SetString`. */
+{ op: "set_json"; key: RedisBytes; text: string } | { op: "hash_set"; key: RedisBytes; field: RedisBytes; value: RedisBytes } | { op: "hash_remove"; key: RedisBytes; field: RedisBytes } | 
+/**  `start` adds at the head (`LPUSH`), otherwise at the tail (`RPUSH`). */
+{ op: "list_push"; key: RedisBytes; value: RedisBytes; start: boolean } | 
+/**  Lists are addressed by position, so the item the person saw (`expect`) is checked right before the change. */
+{ op: "list_set"; key: RedisBytes; index: number; expect: RedisBytes; value: RedisBytes } | { op: "list_remove"; key: RedisBytes; index: number; expect: RedisBytes } | { op: "set_add"; key: RedisBytes; member: RedisBytes } | { op: "set_remove"; key: RedisBytes; member: RedisBytes } | 
+/**  Adds the member, or gives it a new score. */
+{ op: "zset_add"; key: RedisBytes; member: RedisBytes; score: string } | { op: "zset_remove"; key: RedisBytes; member: RedisBytes } | 
+/**  `id: None` lets the server choose (`*`). */
+{ op: "stream_add"; key: RedisBytes; id: string | null; fields: RedisFieldInput[] } | { op: "stream_delete"; key: RedisBytes; id: string } | 
+/**  `ttl_ms: None` removes the expiry. */
+{ op: "expire"; key: RedisBytes; ttl_ms: number | null } | 
+/**  Never overwrites: refused when `to` exists. */
+{ op: "rename"; key: RedisBytes; to: RedisBytes } | { op: "delete"; key: RedisBytes } | 
+/**
+ *  A new key with its first item. Never overwrites. `field` is for a hash and a stream, `score` for a
+ *  sorted set.
+ */
+{ op: "create"; key: RedisBytes; key_type: string; field: RedisBytes | null; value: RedisBytes; score: string | null; ttl_ms: number | null } | { op: "publish"; channel: RedisBytes; message: RedisBytes };
+
+export type RedisWriteOutcome = RedisWriteOutcome_Serialize | RedisWriteOutcome_Deserialize;
+
+export type RedisWriteOutcome_Deserialize = 
+/**  It ran. `reply` is the server's answer when it is worth showing (a new stream entry's id). */
+{ status: "done"; reply?: string | null } | { status: "pending"; pending: RedisPending_Deserialize };
+
+export type RedisWriteOutcome_Serialize = 
+/**  It ran. `reply` is the server's answer when it is worth showing (a new stream entry's id). */
+{ status: "done"; reply: string | null } | { status: "pending"; pending: RedisPending_Serialize };
 
 export type SerialConfig = {
 	baud: number,

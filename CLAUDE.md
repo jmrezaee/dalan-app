@@ -107,7 +107,8 @@ cd src-tauri && cargo clippy -- -D warnings && cargo test
 - **L1 (the download page rebuild) is built** (`[h]`): `site/index.html`, `pnpm site:shots`, `tests/site/`; its hand check (the right button and file on a Mac, a Windows PC and a phone) is in `replica/progress.md`.
 - **Next: Redis.** A Databases vault section and Redis tabs (browser, console, Pub/Sub, server, bulk actions, Cluster and Sentinel) with per-database write modes behind one gate in Rust. The spec is `replica/redis/spec.md` (screens **S26–S33**, flows **F13–F19**); the boards are the "Redis" page of the UI/UX design canvas; phases R1 to R7 are in `replica/progress.md`. Start with `go R1`. The second reference app is named only in `replica/`.
 - **R1 (Redis foundations) is built** (`[h]`): the Databases section, the database editor, the Redis tab shell and its connection (direct or through a host, TLS). Its hand check and what is left (visual baselines, the real-server tests) are in `replica/progress.md`.
-- **R2 (the Redis browser's read side) is built** (`[h]`): scan and key tree, key details, a viewer for every type in pages, binary and big values. Its hand check is in `replica/progress.md`. Next: `go R3` (the write gate and the editors).
+- **R2 (the Redis browser's read side) is built** (`[h]`): scan and key tree, key details, a viewer for every type in pages, binary and big values. Its hand check is in `replica/progress.md`.
+- **R3 (the write gate and the editors) is built** (`[h]`): `redis/gate.rs` decides for every command by the database's mode, writes are prepare → confirm → commit once, and every type has its editor. Its hand check and known gaps are in `replica/progress.md`. Next: `go R4` (Console and Server).
 - **Manual checks:** a phase that needs Mehrdad to test something by hand is not done until he has reported back.
 - **M1 is done when F01, F11 and F12 work against a real server:**
   - unlock

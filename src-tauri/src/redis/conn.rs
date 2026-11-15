@@ -19,8 +19,10 @@ use specta::Type;
 use tokio::sync::watch;
 use zeroize::Zeroizing;
 
+use super::gate::CommandTable;
 use super::store::{self, RedisKind, RedisRoute};
 use super::transport::{self, BoxStream, Target};
+use super::write::PendingStore;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::hosts;
 use crate::ssh::{
@@ -127,6 +129,9 @@ pub struct Config {
 pub struct Connection {
     pub conn: MultiplexedConnection,
     pub info: RedisServerInfo,
+    /// The server's command table, read once after sign-in, for the write gate. Empty when the server would not
+    /// show it: the gate then treats every command it does not know by name as a write.
+    pub table: Arc<CommandTable>,
     /// The SSH connection the stream runs through (host route). Dropping it closes the stream.
     ssh: Option<Connected>,
 }
@@ -460,12 +465,22 @@ pub async fn connect(
     let info = server_info(&mut conn, resp3, cfg.db)
         .await
         .map_err(|e| fail(auth, e))?;
+    let table = redis::cmd("COMMAND")
+        .query_async::<redis::Value>(&mut conn)
+        .await
+        .map(|reply| CommandTable::from_reply(&reply))
+        .unwrap_or_default();
     emit(RedisEvent::Step {
         index: auth,
         state: RedisStepState::Done,
         detail: None,
     });
-    Ok(Connection { conn, info, ssh })
+    Ok(Connection {
+        conn,
+        info,
+        table: Arc::new(table),
+        ssh,
+    })
 }
 
 /// What `redis_db_test` answers.
@@ -511,6 +526,18 @@ struct Live {
     /// `Some` while connected. A tokio mutex, because commands hold it across an `.await`.
     conn: tokio::sync::Mutex<Option<Connection>>,
     selected: AtomicU32,
+    db_id: String,
+    /// Writes waiting for their confirmation. They belong to this connection and end with it.
+    pending: Arc<PendingStore>,
+}
+
+/// What a write needs from a live connection.
+pub struct Writer {
+    pub conn: MultiplexedConnection,
+    pub table: Arc<CommandTable>,
+    pub replica: bool,
+    pub db_id: String,
+    pub pending: Arc<PendingStore>,
 }
 
 #[derive(Default)]
@@ -546,6 +573,8 @@ impl RedisManager {
             cancel,
             conn: tokio::sync::Mutex::new(None),
             selected: AtomicU32::new(u32::MAX),
+            db_id: db_id.clone(),
+            pending: Arc::default(),
         });
         self.conns
             .lock()
@@ -569,6 +598,25 @@ impl RedisManager {
                 ErrorCode::RedisUnreachable,
                 "This database isn't connected right now.",
             )
+        })
+    }
+
+    /// The connection with what the write gate needs. Errors while the tab is connecting or reconnecting.
+    pub async fn writer(&self, conn_id: &str) -> AppResult<Writer> {
+        let live = self.get(conn_id)?;
+        let guard = live.conn.lock().await;
+        let c = guard.as_ref().ok_or_else(|| {
+            AppError::new(
+                ErrorCode::RedisUnreachable,
+                "This database isn't connected right now.",
+            )
+        })?;
+        Ok(Writer {
+            conn: c.conn.clone(),
+            table: Arc::clone(&c.table),
+            replica: c.info.replica,
+            db_id: live.db_id.clone(),
+            pending: Arc::clone(&live.pending),
         })
     }
 

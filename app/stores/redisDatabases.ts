@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { RedisDatabaseInput_Deserialize, RedisDatabase_Serialize, RedisTestResult } from '~/types/bindings'
+import type { RedisDatabaseInput_Deserialize, RedisDatabase_Serialize, RedisTestResult, RedisWriteMode } from '~/types/bindings'
 import { useTauri } from '~/composables/useTauri'
 
 export type SavedDatabase = RedisDatabase_Serialize
@@ -66,6 +66,18 @@ export const useRedisDatabasesStore = defineStore('redisDatabases', () => {
     }
   }
 
+  /** Changes the write mode. Loosening a production database needs the master password, which Rust checks. */
+  async function setMode(id: string, mode: RedisWriteMode, masterPassword: string | null): Promise<{ error: string, code: string }> {
+    try {
+      await api.redisSetMode(id, mode, masterPassword)
+      await refresh()
+      return { error: '', code: '' }
+    }
+    catch (e) {
+      return { error: e instanceof Error ? e.message : 'Couldn\'t change the mode.', code: (e as { code?: string }).code ?? 'internal' }
+    }
+  }
+
   const forHost = (hostId: string) => dbs.value.filter(d => d.host_id === hostId)
   function openNew(hostId: string | null = null) {
     editing.value = blankDatabase(hostId)
@@ -83,5 +95,5 @@ export const useRedisDatabasesStore = defineStore('redisDatabases', () => {
     filter.value = ''
   }
 
-  return { dbs, loaded, editing, filter, showRequests, refresh, save, remove, test, forHost, openNew, show, clear }
+  return { dbs, loaded, editing, filter, showRequests, refresh, save, remove, test, setMode, forHost, openNew, show, clear }
 })

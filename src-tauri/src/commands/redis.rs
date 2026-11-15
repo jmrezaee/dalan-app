@@ -9,11 +9,15 @@ use tauri::ipc::Channel;
 use tauri::State;
 use zeroize::Zeroizing;
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult, ErrorCode};
 use crate::redis::browse::{self, RedisBytes, RedisKeyInfo, RedisScanPage, RedisValuePage};
 use crate::redis::conn::{self, Config, RedisDbKeys, RedisTestResult};
-use crate::redis::store::{self, RedisDatabase, RedisDatabaseInput};
+use crate::redis::gate;
+use crate::redis::store::{
+    self, RedisDatabase, RedisDatabaseInput, RedisEnvironment, RedisWriteMode,
+};
 use crate::redis::transport::Target;
+use crate::redis::write::{self, RedisWriteOp, RedisWriteOutcome};
 use crate::redis::RedisEvent;
 use crate::ssh::PromptAnswer;
 use crate::state::AppState;
@@ -185,4 +189,101 @@ pub async fn redis_value_page(
     state.require_unlocked()?;
     let mut conn = state.redis.handle(&conn_id).await?;
     browse::value_page(&mut conn, &key, &cursor, full).await
+}
+
+/// The database a connection belongs to, as the write gate needs it. Read fresh for every write, so a mode
+/// change applies to tabs that are already open.
+async fn write_target(state: &AppState, w: &conn::Writer) -> AppResult<write::Target> {
+    let id = w.db_id.clone();
+    let db = state
+        .with_db_session(move |c, s| store::get(c, &s.vault_id, &id))
+        .await?;
+    Ok(write::Target {
+        name: db.name,
+        mode: db.write_mode,
+        replica: w.replica,
+    })
+}
+
+/// F15, step one: an editor's change. In Open mode it runs; in Read-only it is refused; otherwise the answer says
+/// what to confirm, and the exact command waits two minutes for `redis_write_commit`.
+#[tauri::command]
+#[specta::specta]
+pub async fn redis_write_prepare(
+    state: State<'_, AppState>,
+    conn_id: String,
+    op: RedisWriteOp,
+) -> AppResult<RedisWriteOutcome> {
+    state.require_unlocked()?;
+    let mut w = state.redis.writer(&conn_id).await?;
+    let target = write_target(&state, &w).await?;
+    write::prepare(&mut w.conn, &w.table, &w.pending, &target, op).await
+}
+
+/// F15, step two: runs a prepared write, once. `typed_name` is what the person typed in the "type the database's
+/// name" dialog; Rust compares it.
+#[tauri::command]
+#[specta::specta]
+pub async fn redis_write_commit(
+    state: State<'_, AppState>,
+    conn_id: String,
+    pending_id: String,
+    typed_name: Option<String>,
+) -> AppResult<RedisWriteOutcome> {
+    state.require_unlocked()?;
+    let mut w = state.redis.writer(&conn_id).await?;
+    let target = write_target(&state, &w).await?;
+    write::commit(
+        &mut w.conn,
+        &w.pending,
+        &target,
+        &pending_id,
+        typed_name.as_deref(),
+    )
+    .await
+}
+
+/// Changes a database's write mode. Making a production database less protected needs the master password,
+/// checked here (five wrong tries start the same cooldown as unlocking).
+#[tauri::command]
+#[specta::specta]
+pub async fn redis_set_mode(
+    state: State<'_, AppState>,
+    db_id: String,
+    mode: RedisWriteMode,
+    master_password: Option<String>,
+) -> AppResult<RedisDatabase> {
+    state.require_unlocked()?;
+    let password = master_password.map(Zeroizing::new);
+    let id = db_id.clone();
+    let db = state
+        .with_db_session(move |c, s| store::get(c, &s.vault_id, &id))
+        .await?;
+    let loosens = gate::protection(mode) < gate::protection(db.write_mode);
+    if loosens && db.environment == RedisEnvironment::Production {
+        state.check_cooldown()?;
+        let Some(pw) = password.filter(|p| !p.is_empty()) else {
+            return Err(AppError::new(
+                ErrorCode::WrongPassword,
+                "Type the master password to make a production database less protected.",
+            ));
+        };
+        // `unlock` derives the key and checks it; the session it builds is dropped (and zeroized) right away.
+        match state
+            .with_db(move |c| crate::vault::unlock(c, &pw).map(|_| ()))
+            .await
+        {
+            Ok(()) => state.reset_failures(),
+            Err(e) => {
+                if e.code == ErrorCode::WrongPassword {
+                    state.record_failure();
+                }
+                return Err(e);
+            }
+        }
+    }
+    log::info!("redis: write mode of {} is now {}", db.name, mode.as_str());
+    state
+        .with_db_session(move |c, s| store::set_mode(c, &s.vault_id, &db_id, mode))
+        .await
 }

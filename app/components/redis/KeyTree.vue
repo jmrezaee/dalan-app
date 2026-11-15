@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // S28, left side: the keys scanned so far, grouped by the database's separator. SCAN only, never KEYS.
-import { ChevronRight, RefreshCw } from '@lucide/vue'
+import { ChevronRight, Plus, RefreshCw } from '@lucide/vue'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
@@ -8,7 +8,8 @@ import { count, ttlText } from '~/utils/redisBytes'
 import { treeRows } from '~/utils/redisTree'
 import type { TreeRow } from '~/utils/redisTree'
 
-const props = defineProps<{ tabKey: string, separator: string }>()
+const props = defineProps<{ tabKey: string, separator: string, writable?: boolean }>()
+defineEmits<{ newKey: [] }>()
 const store = useRedisStore(props.tabKey)
 
 const TYPES = [{ value: 'all', label: 'All types' }, { value: 'string', label: 'String' }, { value: 'hash', label: 'Hash' }, { value: 'list', label: 'List' }, { value: 'set', label: 'Set' }, { value: 'zset', label: 'Sorted set' }, { value: 'stream', label: 'Stream' }, { value: 'json', label: 'JSON' }]
@@ -79,6 +80,7 @@ const ttl = (ms: number | null | undefined) => (ms == null ? 'no expiry' : ttlTe
         <SelectContent><SelectItem v-for="t in TYPES" :key="t.value" :value="t.value" class="text-xs">{{ t.label }}</SelectItem></SelectContent>
       </Select>
       <IconButton label="Refresh keys" @click="store.scan()"><RefreshCw /></IconButton>
+      <IconButton v-if="writable" label="New key" @click="$emit('newKey')"><Plus /></IconButton>
     </form>
 
     <div

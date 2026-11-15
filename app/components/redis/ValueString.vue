@@ -4,8 +4,10 @@
 import type { RedisBytes } from '~/types/bindings'
 import { byteLength, bytesOf, count, hexDump, parsedJson, sizeText } from '~/utils/redisBytes'
 
-const props = defineProps<{ value: RedisBytes, totalBytes: number, truncated: boolean, loading: boolean }>()
-defineEmits<{ loadAll: [] }>()
+const props = defineProps<{ value: RedisBytes, totalBytes: number, truncated: boolean, loading: boolean, writable: boolean, saveLabel: string }>()
+defineEmits<{ loadAll: [], save: [text: string] }>()
+// A preview (over 1 MB) and a binary value are read-only: saving either would lose bytes.
+const editable = computed(() => props.writable && props.value.kind === 'text' && !props.truncated)
 
 const json = computed(() => (props.truncated ? undefined : parsedJson(props.value)))
 const binary = computed(() => props.value.kind === 'binary')
@@ -28,6 +30,7 @@ const loaded = computed(() => byteLength(props.value))
   </div>
   <ValueJson v-if="mode === 'json' && json !== undefined" :text="value.kind === 'text' ? value.text : ''" :value="json" mode="tree" />
   <pre v-else-if="mode === 'hex'" class="min-h-0 flex-1 overflow-auto p-3 font-mono text-xs leading-5" tabindex="0" aria-label="Value as hex">{{ hex }}</pre>
+  <ValueEditor v-else-if="editable && value.kind === 'text'" :text="value.text" :save-label="saveLabel" @save="(t: string) => $emit('save', t)" />
   <pre v-else class="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-all p-3 font-mono text-xs leading-5" tabindex="0" aria-label="Value as text">{{ value.kind === 'text' ? value.text : '' }}</pre>
   <div class="flex min-h-9 shrink-0 items-center gap-2 border-t border-border px-3 text-xs text-muted">
     <template v-if="truncated">

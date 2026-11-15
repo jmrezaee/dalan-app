@@ -3,12 +3,13 @@ import type { Page } from '@playwright/test'
 import { openApp } from './harness'
 
 // R2 of Redis (replica/redis/spec.md): the Browser's read side (S28, S29; F14). Find a key by pattern, type and tree,
-// and read its value in pages. Nothing here can change data. The fake backend holds a small made-up keyspace.
+// and read its value in pages. These run on a Read-only database (sessions-prod), so nothing here can change data
+// and the viewers show values as plain text; the editors are in redis-write.spec.ts. The fake holds a small made-up keyspace.
 async function openBrowser(page: Page, scenario: 'team' = 'team') {
   const fake = await openApp(page, { scenario, unlocked: true })
   await page.getByRole('navigation', { name: 'Vault' }).getByRole('link', { name: /Databases/ }).click()
-  await page.getByRole('row', { name: /local/ }).dblclick()
-  const tab = page.getByTestId('redis-tab-local')
+  await page.getByRole('row', { name: /sessions-prod/ }).dblclick()
+  const tab = page.getByTestId('redis-tab-sessions-prod')
   await expect(tab.getByRole('tree', { name: 'Keys' })).toBeVisible()
   return { fake, tab, tree: tab.getByRole('tree', { name: 'Keys' }), value: tab.getByTestId('redis-value') }
 }

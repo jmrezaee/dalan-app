@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use zeroize::Zeroizing;
 
+use super::gate;
 use crate::db::now_ms;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::vault::secrets::{self, SecretKind};
@@ -266,6 +267,18 @@ pub fn save(
             return Err(AppError::validation("That host is gone. Pick another one."));
         }
     }
+    // The editor cannot loosen a production database's mode: that goes through `set_mode`, which asks for the
+    // master password.
+    if let Some(existing) = &input.id {
+        let old = get(&tx, &s.vault_id, existing)?;
+        if old.environment == RedisEnvironment::Production
+            && gate::protection(input.write_mode) < gate::protection(old.write_mode)
+        {
+            return Err(AppError::validation(
+                "A production database's write mode changes from the mode button in its tab, with the master password.",
+            ));
+        }
+    }
     let now = now_ms();
     let id = match &input.id {
         Some(id) => id.clone(),
@@ -335,6 +348,20 @@ pub fn save(
     let saved = get(&tx, &s.vault_id, &id)?;
     tx.commit()?;
     Ok(saved)
+}
+
+/// Changes only the write mode. The caller has already checked the master password where one is needed.
+pub fn set_mode(
+    conn: &Connection,
+    vault_id: &str,
+    id: &str,
+    mode: RedisWriteMode,
+) -> AppResult<RedisDatabase> {
+    conn.execute(
+        "UPDATE redis_databases SET write_mode = ?3, updated_at = ?4 WHERE id = ?1 AND vault_id = ?2",
+        params![id, vault_id, mode.as_str(), now_ms()],
+    )?;
+    get(conn, vault_id, id)
 }
 
 pub fn delete(conn: &mut Connection, s: &VaultSession, id: &str) -> AppResult<()> {
@@ -650,6 +677,60 @@ mod tests {
         assert_eq!(err.code, ErrorCode::Validation);
         assert_eq!(
             get(&conn, "another-vault", "x").unwrap_err().code,
+            ErrorCode::NotFound
+        );
+    }
+
+    #[test]
+    fn the_editor_cannot_loosen_a_production_databases_mode_but_set_mode_can() {
+        let (mut conn, s) = fresh();
+        let prod = save(
+            &mut conn,
+            &s,
+            RedisDatabaseInput {
+                environment: RedisEnvironment::Production,
+                write_mode: RedisWriteMode::ReadOnly,
+                ..input("cache-prod")
+            },
+        )
+        .unwrap();
+        let edit = |mode| RedisDatabaseInput {
+            id: Some(prod.id.clone()),
+            environment: RedisEnvironment::Production,
+            write_mode: mode,
+            ..input("cache-prod")
+        };
+        for looser in [RedisWriteMode::Confirm, RedisWriteMode::Open] {
+            let err = save(&mut conn, &s, edit(looser)).unwrap_err();
+            assert_eq!(err.code, ErrorCode::Validation);
+        }
+        assert_eq!(
+            get(&conn, &s.vault_id, &prod.id).unwrap().write_mode,
+            RedisWriteMode::ReadOnly
+        );
+        // The same mode, and any other edit, still save.
+        assert!(save(&mut conn, &s, edit(RedisWriteMode::ReadOnly)).is_ok());
+        // `set_mode` is the way (the command checks the master password before it calls this).
+        let after = set_mode(&conn, &s.vault_id, &prod.id, RedisWriteMode::Confirm).unwrap();
+        assert_eq!(after.write_mode, RedisWriteMode::Confirm);
+        // Tightening is always allowed from the editor, and a database that isn't production is free.
+        assert!(save(&mut conn, &s, edit(RedisWriteMode::ReadOnly)).is_ok());
+        let dev = save(&mut conn, &s, input("cache-dev")).unwrap();
+        let open = save(
+            &mut conn,
+            &s,
+            RedisDatabaseInput {
+                id: Some(dev.id),
+                write_mode: RedisWriteMode::Open,
+                ..input("cache-dev")
+            },
+        )
+        .unwrap();
+        assert_eq!(open.write_mode, RedisWriteMode::Open);
+        assert_eq!(
+            set_mode(&conn, &s.vault_id, "nope", RedisWriteMode::Open)
+                .unwrap_err()
+                .code,
             ErrorCode::NotFound
         );
     }

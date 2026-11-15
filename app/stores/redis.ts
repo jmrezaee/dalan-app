@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
-import type { RedisBytes, RedisDbKeys, RedisKeyInfo_Serialize, RedisKeyRow, RedisPlanStep_Serialize, PromptKind, RedisEvent_Serialize, RedisServerInfo, RedisStepState, RedisValuePage_Serialize } from '~/types/bindings'
+import { toast } from 'vue-sonner'
+import type { RedisBytes, RedisDbKeys, RedisKeyInfo_Serialize, RedisKeyRow, RedisPending_Serialize, RedisWriteOp_Deserialize, RedisPlanStep_Serialize, PromptKind, RedisEvent_Serialize, RedisServerInfo, RedisStepState, RedisValuePage_Serialize } from '~/types/bindings'
 import { bytesId } from '~/utils/redisBytes'
 import { foldersOf } from '~/utils/redisTree'
 import { useTauri } from '~/composables/useTauri'
@@ -19,6 +20,9 @@ export type LoadedValue =
   | { type: 'zset', members: { member: RedisBytes, score: string }[] }
   | { type: 'stream', entries: { id: string, fields: { field: RedisBytes, value: RedisBytes }[] }[] }
   | { type: 'unsupported', keyType: string }
+
+/** What a confirmation asks, in the editor's words: the title, the button's verb, and whether it destroys something. */
+export interface WriteAsk { title: string, action: string, text?: string, danger?: boolean }
 
 export interface RedisStep { label: string, note: string | null, detail: string | null, state: 'pending' | RedisStepState }
 
@@ -290,6 +294,103 @@ function setup() {
   /** "Reload": the open key again, from the server. */
   const reloadKey = () => (selectedKey.value ? openKey(selectedKey.value) : Promise.resolve())
 
+  // ---- Writes (F15). Every change goes to Rust's gate; this side only shows what the gate answers.
+  /** A write the gate wants confirmed: what Rust says it will do, and the editor's wording for it. */
+  const pendingWrite = ref<{ pending: RedisPending_Serialize, ask: WriteAsk, op: RedisWriteOp_Deserialize } | null>(null)
+  const writeBusy = ref(false)
+  const sameKey = (a: RedisBytes, b: RedisBytes) => bytesId(a) === bytesId(b)
+
+  /** The open key again, without clearing what is shown (after a change). A key whose last item went is gone. */
+  async function refreshKey() {
+    const key = selectedKey.value
+    if (!key || !connId.value) return
+    const run = ++valueRun
+    try {
+      const info = await api.redisKeyInfo(connId.value, key)
+      if (run !== valueRun) return
+      if (info.key_type === 'none') {
+        keyRows.value = keyRows.value.filter(r => !sameKey(r.key, key))
+        closeKey()
+        toast('That was its last item, so the key is gone.')
+        return
+      }
+      keyInfo.value = info
+      keyRows.value = keyRows.value.map(r => (sameKey(r.key, key) ? { ...r, key_type: info.key_type, ttl_ms: info.ttl_ms } : r))
+      const v = value.value
+      const page = await api.redisValuePage(connId.value, key, '', v?.type === 'string' && !v.truncated)
+      if (run === valueRun) append(page, true)
+    }
+    catch (e) {
+      if (run === valueRun) valueError.value = { code: (e as { code?: string }).code ?? 'internal', message: message(e, 'Couldn\'t read the key.') }
+    }
+  }
+
+  /** What the screen needs after a write went through. */
+  async function afterWrite(op: RedisWriteOp_Deserialize) {
+    const bump = (by: number) => { keys.value = { ...keys.value, [selected.value]: Math.max(0, (keys.value[selected.value] ?? 0) + by) } }
+    switch (op.op) {
+      case 'delete':
+        keyRows.value = keyRows.value.filter(r => !sameKey(r.key, op.key))
+        bump(-1)
+        closeKey()
+        toast('Key deleted.')
+        break
+      case 'rename':
+        keyRows.value = keyRows.value.map(r => (sameKey(r.key, op.key) ? { ...r, key: op.to } : r))
+        toast('Key renamed.')
+        await openKey(op.to)
+        break
+      case 'create':
+        keyRows.value = [{ key: op.key, key_type: op.key_type, ttl_ms: op.ttl_ms }, ...keyRows.value.filter(r => !sameKey(r.key, op.key))]
+        bump(1)
+        toast('Key created.')
+        await openKey(op.key)
+        break
+      case 'publish':
+        break
+      default:
+        await refreshKey()
+    }
+  }
+
+  /** Asks Rust to make a change. True when it ran; false when it was refused, failed, or now waits in a dialog. */
+  async function write(op: RedisWriteOp_Deserialize, ask: WriteAsk): Promise<boolean> {
+    if (!connId.value || status.value !== 'ready') return false
+    try {
+      const out = await api.redisWritePrepare(connId.value, op)
+      if (out.status === 'pending') {
+        pendingWrite.value = { pending: out.pending, ask, op }
+        return false
+      }
+      await afterWrite(op)
+      return true
+    }
+    catch (e) {
+      toast.error(message(e, 'Couldn\'t make that change.'))
+      return false
+    }
+  }
+
+  /** The dialog's button: runs the prepared write. Rust uses a confirmation up even when it refuses, so the dialog closes either way. */
+  async function confirmWrite(typedName: string | null = null) {
+    const p = pendingWrite.value
+    if (!p || writeBusy.value) return
+    writeBusy.value = true
+    try {
+      await api.redisWriteCommit(connId.value, p.pending.id, typedName)
+      pendingWrite.value = null
+      await afterWrite(p.op)
+    }
+    catch (e) {
+      pendingWrite.value = null
+      toast.error(message(e, 'Couldn\'t make that change.'))
+    }
+    finally {
+      writeBusy.value = false
+    }
+  }
+  const cancelWrite = () => { if (!writeBusy.value) pendingWrite.value = null }
+
   /** Closes the connection (tab closed, or the vault locked). */
   function close() {
     generation++
@@ -304,12 +405,14 @@ function setup() {
     keyRows.value = []
     scanCursor.value = ''
     scanned.value = 0
+    pendingWrite.value = null
     closeKey()
   }
 
   return { dbId, connId, status, steps, prompt, info, error, dropped, latencyMs, selected, keys, view, open, retry, respond, select, close,
     pattern, typeFilter, keyRows, scanCursor, scanned, scanning, scanError, scanDone, openFolders, selectedKey, selectedId, keyInfo, value, valueNext, valueLoading, valueError,
-    setSeparator, scan, scanMore, toggleFolder, openKey, closeKey, loadMore, loadAll, reloadKey }
+    setSeparator, scan, scanMore, toggleFolder, openKey, closeKey, loadMore, loadAll, reloadKey,
+    pendingWrite, writeBusy, write, confirmWrite, cancelWrite }
 }
 
 // One store per Redis tab, like the SFTP tabs (P30): each tab has its own connection, steps and view.

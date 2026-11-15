@@ -1,6 +1,7 @@
 <script setup lang="ts">
-// A Redis tab (replica/redis/spec.md, S28 shell and S33 states). R1 builds the shell: the toolbar, connecting,
-// the host's questions, failures and drops. The views themselves (Browser, Console, Pub/Sub, Server) arrive in R2 to R5.
+// A Redis tab (replica/redis/spec.md, S28 shell and S33 states): the toolbar, connecting, the host's questions,
+// failures and drops, the Read-only banner, the write-mode dialog and the two write confirmations (R3).
+// The Browser view is built; Console, Pub/Sub and Server arrive in R4 and R5.
 // The tab stays mounted while another tab shows, so its connection and state carry on.
 import { CircleAlert, Database, Lock, ShieldCheck, Unlock } from '@lucide/vue'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -23,6 +24,9 @@ const routeText = computed(() => {
 })
 const MODE = { read_only: { label: 'Read-only', icon: Lock }, confirm: { label: 'Confirm writes', icon: ShieldCheck }, open: { label: 'Open', icon: Unlock } } as const
 const mode = computed(() => MODE[db.value?.write_mode ?? 'confirm'])
+const modeOpen = ref(false)
+/** Nothing can be changed from this tab: the database's mode says so, or the server is a replica. Rust decides either way. */
+const readOnly = computed(() => db.value?.write_mode === 'read_only' || !!store.info?.replica)
 
 const VIEWS = [{ id: 'browser', label: 'Browser' }, { id: 'console', label: 'Console' }, { id: 'pubsub', label: 'Pub/Sub' }, { id: 'server', label: 'Server' }] as const
 function onViewKey(e: KeyboardEvent, i: number) {
@@ -90,12 +94,15 @@ const promptHost = computed(() => {
       <span class="ml-auto flex items-center gap-1.5 text-xs text-muted" :title="store.latencyMs === null ? 'Not connected' : 'How long the server takes to answer'">
         <span :class="cn('size-2 rounded-full', latencyTone)" aria-hidden="true" />{{ store.latencyMs === null ? '…' : `${store.latencyMs} ms` }}
       </span>
-      <!-- The mode is changed in the editor for now; changing it here, with the master password on production, arrives with the write gate (R3). -->
-      <Button variant="secondary" size="sm" :title="'Writes: ' + mode.label + '. Change it under Edit database.'" @click="db && (databases.editing = db)"><component :is="mode.icon" />{{ mode.label }}</Button>
+      <Button variant="secondary" size="sm" :disabled="!db || !!store.info?.replica" :title="'Writes: ' + mode.label" :data-testid="tid('redis-mode')" @click="modeOpen = true"><component :is="mode.icon" />{{ mode.label }}</Button>
     </header>
 
     <div v-if="store.status === 'ready' && store.info?.replica" class="flex shrink-0 items-center gap-2 border-b border-border bg-surface-raised px-4 py-2 text-sm" role="status">
       <Lock class="size-3.5 text-muted" aria-hidden="true" />This server is a replica. It only accepts reads. Writes need the primary.
+    </div>
+    <div v-else-if="store.status === 'ready' && db?.write_mode === 'read_only'" class="flex shrink-0 items-center gap-2 border-b border-border bg-surface-raised px-4 py-2 text-sm" role="status" :data-testid="tid('redis-read-only')">
+      <Lock class="size-3.5 text-muted" aria-hidden="true" />Read-only. Nothing here can change data.
+      <Button variant="link" size="sm" class="ml-auto h-auto p-0 text-xs" @click="modeOpen = true">Change…</Button>
     </div>
     <div v-if="store.status === 'dropped' && store.dropped" class="flex shrink-0 items-center gap-2.5 border-b border-border px-4 py-2" role="status" :data-testid="tid('redis-dropped')">
       <CircleAlert class="size-4 text-danger" aria-hidden="true" />
@@ -104,7 +111,7 @@ const promptHost = computed(() => {
     </div>
 
     <!-- Connected: the open view. The Browser is built; the other three arrive in R4 and R5. -->
-    <RedisBrowser v-if="store.status === 'ready' && store.view === 'browser' && !store.prompt" :tab-key="tabKey" :separator="db?.key_separator ?? ':'" />
+    <RedisBrowser v-if="store.status === 'ready' && store.view === 'browser' && !store.prompt" :tab-key="tabKey" :separator="db?.key_separator ?? ':'" :mode="db?.write_mode ?? 'read_only'" :read-only="readOnly" />
 
     <main v-else class="grid min-h-0 flex-1 place-items-center overflow-auto p-6">
       <!-- A hop's question (host key, password, passphrase, 2FA): the same prompts a terminal shows. -->
@@ -125,5 +132,11 @@ const promptHost = computed(() => {
       <!-- Console, Pub/Sub and Server arrive in the next phases. Until then they say so, honestly. -->
       <EmptyState v-else-if="store.status === 'ready' && store.info" :icon="Database" :title="`Connected to ${name}`" :text="`Redis ${store.info.version}${store.info.resp3 ? '' : ' (older protocol)'}. The ${VIEWS.find(v => v.id === store.view)?.label} view isn't built yet.`" />
     </main>
+
+    <template v-if="db">
+      <WriteModeDialog v-model:open="modeOpen" :db="db" />
+      <WriteConfirmDialog :tab-key="tabKey" :db-name="db.name" :production="db.environment === 'production'" />
+      <DangerConfirmDialog :tab-key="tabKey" :db-name="db.name" />
+    </template>
   </div>
 </template>

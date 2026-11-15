@@ -44,6 +44,36 @@ export function ttlText(ms: number, parts = 2): string {
   return units.slice(first, first + parts).filter(([n]) => n > 0).map(([n, u]) => `${n}${u}`).join(' ')
 }
 
+/** What the expiry control accepts: `90s`, `15m`, `2h`, `7d`, or a date in the future. Milliseconds from `now`, or `null`. */
+export function parseExpiry(text: string, now = Date.now()): number | null {
+  const t = text.trim().toLowerCase()
+  const m = /^(\d+(?:\.\d+)?)\s*(s|m|h|d)$/.exec(t)
+  if (m) {
+    const ms = Math.round(Number(m[1]) * { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[m[2] as 's' | 'm' | 'h' | 'd'])
+    return ms > 0 ? ms : null
+  }
+  // A bare number is not a date ("90" would be the year 90).
+  if (!t || /^\d+$/.test(t)) return null
+  const at = Date.parse(text.trim())
+  return Number.isFinite(at) && at > now ? at - now : null
+}
+
+/** Text as the bytes Rust expects for a key, a field or a value the person typed. */
+export const textBytes = (text: string): RedisBytes => ({ kind: 'text', text })
+
+/** "Line 6" for a JSON mistake, when the browser says where it is; `''` when the text is valid. */
+export function jsonProblem(text: string): string {
+  try {
+    JSON.parse(text)
+    return ''
+  }
+  catch (e) {
+    const at = /position (\d+)/.exec(e instanceof Error ? e.message : '')
+    const line = at ? text.slice(0, Number(at[1])).split('\n').length : 0
+    return `${line ? `Line ${line}: t` : 'T'}his isn't valid JSON yet.`
+  }
+}
+
 /** "412 B", "2.0 KB", "1.1 MB". */
 export function sizeText(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
