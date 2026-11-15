@@ -16,6 +16,8 @@ const props = defineProps<{
   movable?: boolean
   /** More actions for the right-click menu (Close others, Duplicate tab). */
   extra?: MenuItem[]
+  /** A 2px warning line on top: a production database's tab. */
+  warning?: boolean
 }>()
 const emit = defineEmits<{ select: []; close: []; rename: [label: string]; dragStart: []; dragEnd: []; dropOn: [where: 'before' | 'after' | 'onto'] }>()
 
@@ -82,6 +84,7 @@ function onDrop(e: DragEvent) {
     @drop="onDrop"
     @auxclick.middle.prevent="closable && emit('close')"
   >
+    <span v-if="warning" class="absolute inset-x-0 top-0 h-0.5 rounded-t-md bg-warning" aria-hidden="true" />
     <input
       v-if="editing"
       ref="field"

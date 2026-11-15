@@ -44,6 +44,13 @@ export const team = (): Seed => ({
     { id: 's-release', label: 'Release', script: './deploy.sh', package_id: 'p-deploy', target_host_ids: ['h-web1'] },
     { id: 's-loose', label: 'Who is on', script: 'who', package_id: null, target_host_ids: [] },
   ],
+  // Redis: production behind the bastion, a staging one, and one on this computer (replica/redis/spec.md).
+  redisDbs: [
+    { id: 'r-cache', name: 'cache-prod', address: '127.0.0.1', environment: 'production', route: 'host', host_id: 'h-db1', username: 'app-ro', password: true, write_mode: 'confirm' },
+    { id: 'r-stage', name: 'cache-staging', address: '127.0.0.1', environment: 'staging', route: 'host', host_id: 'h-stage', write_mode: 'open' },
+    { id: 'r-local', name: 'local', address: 'localhost', write_mode: 'open' },
+    { id: 'r-sessions', name: 'sessions-prod', address: '10.0.2.11', port: 7000, environment: 'production', route: 'host', host_id: 'h-bastion', write_mode: 'read_only' },
+  ],
   forwards: [
     { id: 'f-db', host_id: 'h-bastion', label: 'Postgres', kind: 'local', bind_address: '127.0.0.1', bind_port: 5432, dest_address: '10.0.2.21', dest_port: 5432, autostart: false, state: 'active', connections: 2, error: null },
     { id: 'f-socks', host_id: 'h-bastion', label: 'SOCKS proxy', kind: 'dynamic', bind_address: '127.0.0.1', bind_port: 1080, dest_address: null, dest_port: null, autostart: false, state: 'reconnecting', connections: 0, error: null },

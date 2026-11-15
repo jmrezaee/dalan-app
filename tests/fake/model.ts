@@ -47,6 +47,27 @@ export interface FsNode { name: string, kind: 'file' | 'dir', size: number, mtim
 export interface SessionRec { events: number, data: number | null, host: string, closed: boolean }
 
 /** The data a scenario seeds. Everything optional falls back to empty. */
+/** A saved Redis database, as Rust's table holds it. The password is only a flag. */
+export interface RedisDb {
+  id: string
+  name: string
+  environment: 'none' | 'staging' | 'production'
+  route: 'direct' | 'host'
+  host_id: string | null
+  address: string
+  port: number
+  kind: 'single' | 'cluster' | 'sentinel'
+  sentinel_master: string | null
+  username: string | null
+  password: boolean
+  tls: boolean
+  tls_server_name: string | null
+  write_mode: 'read_only' | 'confirm' | 'open'
+  default_db: number
+  key_separator: string
+  last_opened_at: number | null
+}
+
 export interface Seed {
   vault?: { exists: boolean, unlocked: boolean, autoLockMinutes?: number }
   groups?: (Partial<GroupRec> & { id: string, label: string })[]
@@ -61,6 +82,7 @@ export interface Seed {
   templates?: TemplateSummary[]
   history?: { id: string, command: string, ran_at: number | null, host_id: string | null }[]
   settings?: Record<string, string>
+  redisDbs?: (Partial<RedisDb> & { id: string, name: string, address: string })[]
   /** Server file trees by host id; "local" is this computer. */
   files?: Record<string, FsNode[]>
   now?: number
@@ -115,6 +137,12 @@ export interface Model {
   links: (SshTarget_Serialize | null)[]
   /** What Settings > System shows. Not supported (a Mac or Linux) until a test says it runs on Windows. */
   system: SystemIntegration_Serialize
+  /** Saved Redis databases. */
+  redisDbs: RedisDb[]
+  /** Open Redis connections, with the channel their events go to. */
+  redisConns: Map<string, { events: number, db: string, closed: boolean }>
+  /** A test sends a connection's events itself (`fake.redisManual()`); otherwise opening one just works. */
+  redisManual: boolean
 }
 
 export function createModel(seed: Seed): Model {
@@ -151,6 +179,9 @@ export function createModel(seed: Seed): Model {
     answerLog: [],
     failNext: new Map(),
     links: [],
+    redisDbs: (seed.redisDbs ?? []).map((d): RedisDb => ({ environment: 'none', route: d.host_id ? 'host' : 'direct', host_id: null, port: 6379, kind: 'single', sentinel_master: null, username: null, password: false, tls: false, tls_server_name: null, write_mode: 'confirm', default_db: 0, key_separator: ':', last_opened_at: null, ...d })),
+    redisConns: new Map(),
+    redisManual: false,
     system: { supported: false, ssh_links: false, autostart: false, other_handler: null, pinned: false, edition: null, install_dir: null },
   }
 }

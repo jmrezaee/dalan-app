@@ -56,6 +56,11 @@ export class Fake {
   rotateHostKey = (hostId: string, o: { type?: string } = {}) => this.run<void>('rotateHostKey', hostId, o)
   failNext = (cmd: string, error: { code: string, message: string }) => this.run<void>('failNext', cmd, error)
   lock = () => this.run<void>('lock')
+  /** Redis: take over a connection's events (see tests/fake/commands/redis.ts). */
+  redisManual = (on = true) => this.run<void>('redisManual', on)
+  redisConnIds = () => this.run<string[]>('redisConnIds')
+  redisOpenConnIds = () => this.run<string[]>('redisOpenConnIds')
+  redisEvent = (connId: string, e: unknown) => this.run<void>('redisEvent', connId, e)
 
   session(id: string) {
     return {

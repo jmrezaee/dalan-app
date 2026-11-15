@@ -19,7 +19,7 @@ use specta::Type;
 use tokio::sync::watch;
 use zeroize::Zeroizing;
 
-use super::store::{self, Kind, Route};
+use super::store::{self, RedisKind, RedisRoute};
 use super::transport::{self, BoxStream, Target};
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::hosts;
@@ -35,14 +35,14 @@ const PING_TIMEOUT: Duration = Duration::from_secs(10);
 const BACKOFF: [u32; 5] = [1, 2, 4, 8, 15];
 
 #[derive(Debug, Clone, Serialize, Type)]
-pub struct PlanStep {
+pub struct RedisPlanStep {
     pub label: String,
     pub detail: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "snake_case")]
-pub enum StepState {
+pub enum RedisStepState {
     Active,
     Done,
     Failed,
@@ -50,7 +50,7 @@ pub enum StepState {
 
 /// Keys in one logical database (`db0`, `db1`, ...), for the picker in the tab's toolbar.
 #[derive(Debug, Clone, Serialize, Type)]
-pub struct DbKeys {
+pub struct RedisDbKeys {
     pub index: u32,
     // A count far below 2^53, so a JS number holds it exactly.
     #[specta(type = f64)]
@@ -59,7 +59,7 @@ pub struct DbKeys {
 
 /// What the server said about itself right after sign-in.
 #[derive(Debug, Clone, Serialize, Type)]
-pub struct ServerInfo {
+pub struct RedisServerInfo {
     pub version: String,
     /// `standalone`, `cluster` or `sentinel`, in the server's own word.
     pub mode: String,
@@ -69,7 +69,7 @@ pub struct ServerInfo {
     /// How many logical databases the server has (16 unless configured otherwise).
     pub db_count: u32,
     /// The databases that hold keys.
-    pub databases: Vec<DbKeys>,
+    pub databases: Vec<RedisDbKeys>,
     pub selected: u32,
     pub latency_ms: u32,
 }
@@ -79,11 +79,11 @@ pub struct ServerInfo {
 pub enum RedisEvent {
     /// The steps of this connection attempt, in order. Sent first, and again before each reconnect.
     Plan {
-        steps: Vec<PlanStep>,
+        steps: Vec<RedisPlanStep>,
     },
     Step {
         index: u32,
-        state: StepState,
+        state: RedisStepState,
         detail: Option<String>,
     },
     /// A question or a note from the SSH sign-in of a hop (the S18 machinery). Answer prompts with `redis_respond`.
@@ -91,7 +91,7 @@ pub enum RedisEvent {
         event: SessionEvent,
     },
     Ready {
-        info: ServerInfo,
+        info: RedisServerInfo,
     },
     Latency {
         ms: u32,
@@ -114,9 +114,9 @@ pub type Emit = Arc<dyn Fn(RedisEvent) + Send + Sync>;
 /// Everything needed to connect, from a saved database or from the editor's form (Test connection).
 pub struct Config {
     pub name: String,
-    pub route: Route,
+    pub route: RedisRoute,
     pub host_id: Option<String>,
-    pub kind: Kind,
+    pub kind: RedisKind,
     pub target: Target,
     pub username: Option<String>,
     pub password: Option<Zeroizing<String>>,
@@ -126,7 +126,7 @@ pub struct Config {
 /// A signed-in connection, with what keeps it alive.
 pub struct Connection {
     pub conn: MultiplexedConnection,
-    pub info: ServerInfo,
+    pub info: RedisServerInfo,
     /// The SSH connection the stream runs through (host route). Dropping it closes the stream.
     ssh: Option<Connected>,
 }
@@ -167,26 +167,26 @@ fn redis_error(e: &RedisError) -> AppError {
 }
 
 /// The steps the tab shows for this database, before anything is tried.
-async fn plan(store: &Store, cfg: &Config) -> AppResult<(Vec<PlanStep>, usize)> {
+async fn plan(store: &Store, cfg: &Config) -> AppResult<(Vec<RedisPlanStep>, usize)> {
     let mut steps = Vec::new();
     let mut hops = 0;
-    if let (Route::Host, Some(host_id)) = (cfg.route, cfg.host_id.clone()) {
+    if let (RedisRoute::Host, Some(host_id)) = (cfg.route, cfg.host_id.clone()) {
         let chain = store
             .with_db_session(move |c, s| hosts::connect_plan(c, s, &host_id))
             .await?;
         hops = chain.len();
         for (i, hop) in chain.iter().enumerate() {
-            steps.push(PlanStep {
+            steps.push(RedisPlanStep {
                 label: format!("Sign in to {}", hop.label),
                 detail: (i > 0).then(|| format!("through {}", chain[i - 1].label)),
             });
         }
     }
-    steps.push(PlanStep {
+    steps.push(RedisPlanStep {
         label: format!("Reach Redis at {}", cfg.target.display()),
         detail: cfg.target.tls.then(|| "with TLS".to_string()),
     });
-    steps.push(PlanStep {
+    steps.push(RedisPlanStep {
         label: match &cfg.username {
             Some(u) => format!("Sign in as {u}"),
             None => "Sign in to Redis".to_string(),
@@ -225,21 +225,21 @@ async fn sign_in_to_host(
                     if text.starts_with("Signed in") {
                         emit(RedisEvent::Step {
                             index: i as u32,
-                            state: StepState::Done,
+                            state: RedisStepState::Done,
                             detail: None,
                         });
                         if i + 1 < hops {
                             current.store(i + 1, Ordering::Relaxed);
                             emit(RedisEvent::Step {
                                 index: (i + 1) as u32,
-                                state: StepState::Active,
+                                state: RedisStepState::Active,
                                 detail: None,
                             });
                         }
                     } else {
                         emit(RedisEvent::Step {
                             index: i as u32,
-                            state: StepState::Active,
+                            state: RedisStepState::Active,
                             detail: Some(text),
                         });
                     }
@@ -252,7 +252,7 @@ async fn sign_in_to_host(
     };
     emit(RedisEvent::Step {
         index: 0,
-        state: StepState::Active,
+        state: RedisStepState::Active,
         detail: None,
     });
     match connect_authenticated(store, &io, prompts, host_id, None, false).await {
@@ -272,7 +272,7 @@ async fn sign_in_to_host(
                 });
             emit(RedisEvent::Step {
                 index: failed,
-                state: StepState::Failed,
+                state: RedisStepState::Failed,
                 detail: Some(err.message.clone()),
             });
             Err(err)
@@ -344,7 +344,7 @@ fn info_field<'a>(info: &'a str, name: &str) -> Option<&'a str> {
 }
 
 /// `db0:keys=12408,expires=3,avg_ttl=0` lines from `INFO keyspace`.
-fn keyspace(info: &str) -> Vec<DbKeys> {
+fn keyspace(info: &str) -> Vec<RedisDbKeys> {
     info.lines()
         .filter_map(|l| {
             let (name, rest) = l.split_once(':')?;
@@ -355,7 +355,7 @@ fn keyspace(info: &str) -> Vec<DbKeys> {
                 .trim()
                 .parse()
                 .ok()?;
-            Some(DbKeys { index, keys })
+            Some(RedisDbKeys { index, keys })
         })
         .collect()
 }
@@ -364,7 +364,7 @@ async fn server_info(
     conn: &mut MultiplexedConnection,
     resp3: bool,
     selected: u32,
-) -> AppResult<ServerInfo> {
+) -> AppResult<RedisServerInfo> {
     let started = Instant::now();
     let _: String = redis::cmd("PING")
         .query_async(conn)
@@ -389,7 +389,7 @@ async fn server_info(
         .arg("dalan")
         .query_async(conn)
         .await;
-    Ok(ServerInfo {
+    Ok(RedisServerInfo {
         version: info_field(&info, "redis_version")
             .unwrap_or("unknown")
             .to_string(),
@@ -412,7 +412,7 @@ pub async fn connect(
     prompts: &Arc<Prompts>,
     emit: &Emit,
 ) -> AppResult<Connection> {
-    if cfg.kind != Kind::Single {
+    if cfg.kind != RedisKind::Single {
         return Err(AppError::validation(
             "Cluster and Sentinel databases can be saved now and opened in a later version.",
         ));
@@ -420,7 +420,7 @@ pub async fn connect(
     let (steps, hops) = plan(store, cfg).await?;
     emit(RedisEvent::Plan { steps });
     let ssh = match (&cfg.host_id, cfg.route) {
-        (Some(host_id), Route::Host) => {
+        (Some(host_id), RedisRoute::Host) => {
             Some(sign_in_to_host(store, host_id, hops, prompts, emit).await?)
         }
         _ => None,
@@ -429,7 +429,7 @@ pub async fn connect(
     let fail = |index: u32, e: AppError| {
         emit(RedisEvent::Step {
             index,
-            state: StepState::Failed,
+            state: RedisStepState::Failed,
             detail: Some(e.message.clone()),
         });
         e
@@ -437,7 +437,7 @@ pub async fn connect(
 
     emit(RedisEvent::Step {
         index: reach,
-        state: StepState::Active,
+        state: RedisStepState::Active,
         detail: None,
     });
     let stream = open_stream(ssh.as_ref(), &cfg.target)
@@ -445,13 +445,13 @@ pub async fn connect(
         .map_err(|e| fail(reach, e))?;
     emit(RedisEvent::Step {
         index: reach,
-        state: StepState::Done,
+        state: RedisStepState::Done,
         detail: None,
     });
 
     emit(RedisEvent::Step {
         index: auth,
-        state: StepState::Active,
+        state: RedisStepState::Active,
         detail: None,
     });
     let (mut conn, resp3) = sign_in(ssh.as_ref(), cfg, stream)
@@ -462,7 +462,7 @@ pub async fn connect(
         .map_err(|e| fail(auth, e))?;
     emit(RedisEvent::Step {
         index: auth,
-        state: StepState::Done,
+        state: RedisStepState::Done,
         detail: None,
     });
     Ok(Connection { conn, info, ssh })
@@ -470,7 +470,7 @@ pub async fn connect(
 
 /// What `redis_db_test` answers.
 #[derive(Debug, Clone, Serialize, Type)]
-pub struct TestResult {
+pub struct RedisTestResult {
     pub version: String,
     pub mode: String,
     pub replica: bool,
@@ -479,12 +479,12 @@ pub struct TestResult {
 
 /// Connects with the form's values, reads the server's details and closes. Nobody can answer a host's question
 /// from the editor, so a host that needs one (a new key, a password) fails with a message that says so.
-pub async fn test(store: &Store, cfg: Config) -> AppResult<TestResult> {
+pub async fn test(store: &Store, cfg: Config) -> AppResult<RedisTestResult> {
     let prompts = Arc::new(Prompts::non_interactive());
     let quiet: Emit = Arc::new(|_| {});
     let host_label = cfg.name.clone();
     let c = connect(store, &cfg, &prompts, &quiet).await.map_err(|e| {
-        if e.code == ErrorCode::AuthFailed && cfg.route == Route::Host {
+        if e.code == ErrorCode::AuthFailed && cfg.route == RedisRoute::Host {
             AppError::new(
                 ErrorCode::AuthFailed,
                 format!("The host for {host_label} needs an answer from you (a new host key or a password). Open a terminal on it once, then test again."),
@@ -493,7 +493,7 @@ pub async fn test(store: &Store, cfg: Config) -> AppResult<TestResult> {
             e
         }
     })?;
-    let result = TestResult {
+    let result = RedisTestResult {
         version: c.info.version.clone(),
         mode: c.info.mode.clone(),
         replica: c.info.replica,
@@ -573,7 +573,7 @@ impl RedisManager {
     }
 
     /// Switches the logical database (`SELECT`) and says how many keys it holds.
-    pub async fn select(&self, conn_id: &str, index: u32) -> AppResult<DbKeys> {
+    pub async fn select(&self, conn_id: &str, index: u32) -> AppResult<RedisDbKeys> {
         let live = self.get(conn_id)?;
         let mut conn = self.handle(conn_id).await?;
         redis::cmd("SELECT")
@@ -586,7 +586,7 @@ impl RedisManager {
             .query_async(&mut conn)
             .await
             .map_err(|e| redis_error(&e))?;
-        Ok(DbKeys { index, keys })
+        Ok(RedisDbKeys { index, keys })
     }
 
     pub fn close(&self, conn_id: &str) {

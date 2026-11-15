@@ -2,7 +2,7 @@
 import { Channel } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { commands } from '~/types/bindings'
-import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, SessionEvent } from '~/types/bindings'
+import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, RedisDatabaseInput_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -27,6 +27,18 @@ export function useTauri() {
     quitApp: () => commands.quitApp(),
     quitCancel: () => commands.quitCancel(),
     linksTake: () => commands.linksTake(),
+    redisDbList: () => unwrap(commands.redisDbList()),
+    redisDbSave: (input: RedisDatabaseInput_Deserialize) => unwrap(commands.redisDbSave(input)),
+    redisDbDelete: (id: string) => unwrap(commands.redisDbDelete(id)),
+    redisDbTest: (input: RedisDatabaseInput_Deserialize) => unwrap(commands.redisDbTest(input)),
+    redisOpen: (dbId: string, onEvent: (e: RedisEvent_Serialize) => void) => {
+      const events = new Channel<RedisEvent_Serialize>()
+      events.onmessage = onEvent
+      return unwrap(commands.redisOpen(dbId, events as never))
+    },
+    redisRespond: (connId: string, promptId: string, answer: PromptAnswer) => unwrap(commands.redisRespond(connId, promptId, answer)),
+    redisSelect: (connId: string, index: number) => unwrap(commands.redisSelect(connId, index)),
+    redisClose: (connId: string) => commands.redisClose(connId),
     systemIntegrationGet: () => unwrap(commands.systemIntegrationGet()),
     systemIntegrationSet: (sshLinks: boolean | null, autostart: boolean | null) => unwrap(commands.systemIntegrationSet(sshLinks, autostart)),
     openDefaultApps: () => unwrap(commands.openDefaultApps()),

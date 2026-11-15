@@ -10,7 +10,7 @@ use tauri::State;
 use zeroize::Zeroizing;
 
 use crate::error::AppResult;
-use crate::redis::conn::{self, Config, DbKeys, TestResult};
+use crate::redis::conn::{self, Config, RedisDbKeys, RedisTestResult};
 use crate::redis::store::{self, RedisDatabase, RedisDatabaseInput};
 use crate::redis::transport::Target;
 use crate::redis::RedisEvent;
@@ -53,7 +53,7 @@ pub async fn redis_db_delete(state: State<'_, AppState>, id: String) -> AppResul
 pub async fn redis_db_test(
     state: State<'_, AppState>,
     input: RedisDatabaseInput,
-) -> AppResult<TestResult> {
+) -> AppResult<RedisTestResult> {
     state.require_unlocked()?;
     store::validate(&input)?;
     let typed = input
@@ -129,7 +129,7 @@ pub async fn redis_select(
     state: State<'_, AppState>,
     conn_id: String,
     index: u32,
-) -> AppResult<DbKeys> {
+) -> AppResult<RedisDbKeys> {
     state.require_unlocked()?;
     state.redis.select(&conn_id, index).await
 }

@@ -28,13 +28,13 @@ export const commands = {
 	 *  S27 "Test connection": connects with the form's values, reads version, mode and latency, then closes.
 	 *  An empty password on a saved database means "the saved one".
 	 */
-	redisDbTest: (input: RedisDatabaseInput_Deserialize) => typedError<TestResult, AppError>(__TAURI_INVOKE("redis_db_test", { input })),
+	redisDbTest: (input: RedisDatabaseInput_Deserialize) => typedError<RedisTestResult, AppError>(__TAURI_INVOKE("redis_db_test", { input })),
 	/**  Opens a Redis tab's connection. Returns at once; the steps, the host's questions and the result arrive on `events`. */
 	redisOpen: (dbId: string, events: Channel<RedisEvent_Deserialize>) => typedError<RedisOpened, AppError>(__TAURI_INVOKE("redis_open", { dbId, events })),
 	/**  The answer to a host's question asked while a Redis tab opens (host key, password, passphrase, 2FA). */
 	redisRespond: (connId: string, promptId: string, answer: PromptAnswer_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("redis_respond", { connId, promptId, answer })),
 	/**  The logical database picker (`db0`, `db1`, ...): switches and answers with the key count. */
-	redisSelect: (connId: string, index: number) => typedError<DbKeys, AppError>(__TAURI_INVOKE("redis_select", { connId, index })),
+	redisSelect: (connId: string, index: number) => typedError<RedisDbKeys, AppError>(__TAURI_INVOKE("redis_select", { connId, index })),
 	/**  Closes the tab's connection, its questions and the SSH connection it ran through. */
 	redisClose: (connId: string) => __TAURI_INVOKE<void>("redis_close", { connId }),
 	/**  First run? Locked? Allowed while locked. */
@@ -286,12 +286,6 @@ export type AutoLockWarning = {
 
 export type Choice = "replace" | "keep_both" | "skip";
 
-/**  Keys in one logical database (`db0`, `db1`, ...), for the picker in the tab's toolbar. */
-export type DbKeys = {
-	index: number,
-	keys: number | null,
-};
-
 /**  Which app opens the downloaded copy. */
 export type EditApp = 
 /**  The system's default app for the file type. */
@@ -335,9 +329,6 @@ export type EnvVar = {
 	name: string,
 	value: string,
 };
-
-/**  Stored as lowercase text; `production` adds the amber line and chip to the tab. */
-export type Environment = "none" | "staging" | "production";
 
 /**  Codes from replica/architecture.md. Add new ones there first. */
 export type ErrorCode = "locked" | "wrong_password" | "too_many_attempts" | 
@@ -927,8 +918,6 @@ export type KeyUpdate_Serialize = {
 	forget_passphrase: boolean,
 };
 
-export type Kind = "single" | "cluster" | "sentinel";
-
 export type KnownHost = KnownHost_Serialize | KnownHost_Deserialize;
 
 export type KnownHost_Deserialize = {
@@ -992,18 +981,6 @@ export type LogSummary_Serialize = {
 export type PackageSummary = {
 	id: string,
 	label: string,
-};
-
-export type PlanStep = PlanStep_Serialize | PlanStep_Deserialize;
-
-export type PlanStep_Deserialize = {
-	label: string,
-	detail?: string | null,
-};
-
-export type PlanStep_Serialize = {
-	label: string,
-	detail: string | null,
 };
 
 export type ProfileTheme = ProfileTheme_Serialize | ProfileTheme_Deserialize;
@@ -1122,19 +1099,19 @@ export type RedisDatabaseInput_Deserialize = {
 	/**  `None` creates a database. */
 	id?: string | null,
 	name: string,
-	environment: Environment,
-	route: Route,
+	environment: RedisEnvironment,
+	route: RedisRoute,
 	host_id?: string | null,
 	address: string,
 	port: number,
-	kind: Kind,
+	kind: RedisKind,
 	sentinel_master?: string | null,
 	username?: string | null,
 	password?: string | null,
 	clear_password: boolean,
 	tls: boolean,
 	tls_server_name?: string | null,
-	write_mode: WriteMode,
+	write_mode: RedisWriteMode,
 	default_db: number,
 	key_separator: string,
 };
@@ -1144,19 +1121,19 @@ export type RedisDatabaseInput_Serialize = {
 	/**  `None` creates a database. */
 	id: string | null,
 	name: string,
-	environment: Environment,
-	route: Route,
+	environment: RedisEnvironment,
+	route: RedisRoute,
 	host_id: string | null,
 	address: string,
 	port: number,
-	kind: Kind,
+	kind: RedisKind,
 	sentinel_master: string | null,
 	username: string | null,
 	password: string | null,
 	clear_password: boolean,
 	tls: boolean,
 	tls_server_name: string | null,
-	write_mode: WriteMode,
+	write_mode: RedisWriteMode,
 	default_db: number,
 	key_separator: string,
 };
@@ -1165,20 +1142,20 @@ export type RedisDatabaseInput_Serialize = {
 export type RedisDatabase_Deserialize = {
 	id: string,
 	name: string,
-	environment: Environment,
-	route: Route,
+	environment: RedisEnvironment,
+	route: RedisRoute,
 	host_id?: string | null,
 	/**  The host's label, for "Through db-primary". */
 	host_label?: string | null,
 	address: string,
 	port: number,
-	kind: Kind,
+	kind: RedisKind,
 	sentinel_master?: string | null,
 	username?: string | null,
 	has_password: boolean,
 	tls: boolean,
 	tls_server_name?: string | null,
-	write_mode: WriteMode,
+	write_mode: RedisWriteMode,
 	default_db: number,
 	key_separator: string,
 	last_opened_at?: number | null,
@@ -1188,50 +1165,102 @@ export type RedisDatabase_Deserialize = {
 export type RedisDatabase_Serialize = {
 	id: string,
 	name: string,
-	environment: Environment,
-	route: Route,
+	environment: RedisEnvironment,
+	route: RedisRoute,
 	host_id: string | null,
 	/**  The host's label, for "Through db-primary". */
 	host_label: string | null,
 	address: string,
 	port: number,
-	kind: Kind,
+	kind: RedisKind,
 	sentinel_master: string | null,
 	username: string | null,
 	has_password: boolean,
 	tls: boolean,
 	tls_server_name: string | null,
-	write_mode: WriteMode,
+	write_mode: RedisWriteMode,
 	default_db: number,
 	key_separator: string,
 	last_opened_at: number | null,
 };
 
+/**  Keys in one logical database (`db0`, `db1`, ...), for the picker in the tab's toolbar. */
+export type RedisDbKeys = {
+	index: number,
+	keys: number | null,
+};
+
+/**  Stored as lowercase text; `production` adds the amber line and chip to the tab. */
+export type RedisEnvironment = "none" | "staging" | "production";
+
 export type RedisEvent = RedisEvent_Serialize | RedisEvent_Deserialize;
 
 export type RedisEvent_Deserialize = 
 /**  The steps of this connection attempt, in order. Sent first, and again before each reconnect. */
-{ type: "plan"; steps: PlanStep_Deserialize[] } | { type: "step"; index: number; state: StepState; detail?: string | null } | 
+{ type: "plan"; steps: RedisPlanStep_Deserialize[] } | { type: "step"; index: number; state: RedisStepState; detail?: string | null } | 
 /**  A question or a note from the SSH sign-in of a hop (the S18 machinery). Answer prompts with `redis_respond`. */
-{ type: "host"; event: SessionEvent_Deserialize } | { type: "ready"; info: ServerInfo } | { type: "latency"; ms: number } | { type: "failed"; code: ErrorCode; message: string } | 
+{ type: "host"; event: SessionEvent_Deserialize } | { type: "ready"; info: RedisServerInfo } | { type: "latency"; ms: number } | { type: "failed"; code: ErrorCode; message: string } | 
 /**  The connection dropped; trying again in `retry_in_secs` (attempt `attempt` of `of`). */
 { type: "dropped"; attempt: number; of: number; retry_in_secs: number } | { type: "closed" };
 
 export type RedisEvent_Serialize = 
 /**  The steps of this connection attempt, in order. Sent first, and again before each reconnect. */
-{ type: "plan"; steps: PlanStep_Serialize[] } | { type: "step"; index: number; state: StepState; detail: string | null } | 
+{ type: "plan"; steps: RedisPlanStep_Serialize[] } | { type: "step"; index: number; state: RedisStepState; detail: string | null } | 
 /**  A question or a note from the SSH sign-in of a hop (the S18 machinery). Answer prompts with `redis_respond`. */
-{ type: "host"; event: SessionEvent_Serialize } | { type: "ready"; info: ServerInfo } | { type: "latency"; ms: number } | { type: "failed"; code: ErrorCode; message: string } | 
+{ type: "host"; event: SessionEvent_Serialize } | { type: "ready"; info: RedisServerInfo } | { type: "latency"; ms: number } | { type: "failed"; code: ErrorCode; message: string } | 
 /**  The connection dropped; trying again in `retry_in_secs` (attempt `attempt` of `of`). */
 { type: "dropped"; attempt: number; of: number; retry_in_secs: number } | { type: "closed" };
+
+export type RedisKind = "single" | "cluster" | "sentinel";
 
 export type RedisOpened = {
 	conn_id: string,
 };
 
-export type Route = "direct" | 
+export type RedisPlanStep = RedisPlanStep_Serialize | RedisPlanStep_Deserialize;
+
+export type RedisPlanStep_Deserialize = {
+	label: string,
+	detail?: string | null,
+};
+
+export type RedisPlanStep_Serialize = {
+	label: string,
+	detail: string | null,
+};
+
+export type RedisRoute = "direct" | 
 /**  Sign in to a saved host (with its jump chain) and talk to Redis from there. */
 "host";
+
+/**  What the server said about itself right after sign-in. */
+export type RedisServerInfo = {
+	version: string,
+	/**  `standalone`, `cluster` or `sentinel`, in the server's own word. */
+	mode: string,
+	/**  A replica only accepts reads: the tab opens read-only. */
+	replica: boolean,
+	resp3: boolean,
+	/**  How many logical databases the server has (16 unless configured otherwise). */
+	db_count: number,
+	/**  The databases that hold keys. */
+	databases: RedisDbKeys[],
+	selected: number,
+	latency_ms: number,
+};
+
+export type RedisStepState = "active" | "done" | "failed";
+
+/**  What `redis_db_test` answers. */
+export type RedisTestResult = {
+	version: string,
+	mode: string,
+	replica: boolean,
+	latency_ms: number,
+};
+
+/**  What the write gate allows (spec section 4). New databases start as `Confirm`. */
+export type RedisWriteMode = "read_only" | "confirm" | "open";
 
 export type SerialConfig = {
 	baud: number,
@@ -1243,22 +1272,6 @@ export type SerialConfig = {
 	parity: string,
 	/**  `none`, `hardware` (RTS/CTS) or `software` (XON/XOFF). */
 	flow: string,
-};
-
-/**  What the server said about itself right after sign-in. */
-export type ServerInfo = {
-	version: string,
-	/**  `standalone`, `cluster` or `sentinel`, in the server's own word. */
-	mode: string,
-	/**  A replica only accepts reads: the tab opens read-only. */
-	replica: boolean,
-	resp3: boolean,
-	/**  How many logical databases the server has (16 unless configured otherwise). */
-	db_count: number,
-	/**  The databases that hold keys. */
-	databases: DbKeys[],
-	selected: number,
-	latency_ms: number,
 };
 
 export type SessionEvent = SessionEvent_Serialize | SessionEvent_Deserialize;
@@ -1365,8 +1378,6 @@ export type SshTarget_Serialize = {
 	port: number,
 };
 
-export type StepState = "active" | "done" | "failed";
-
 export type Suggestion = {
 	command: string,
 	/**  The model asked a question instead of giving a command (the text after `# `). */
@@ -1442,14 +1453,6 @@ export type TemplateSummary = {
 	layout: string,
 	/**  JSON array: `[{ "host_id": "...", "title": "..." }]`. */
 	panes: string,
-};
-
-/**  What `redis_db_test` answers. */
-export type TestResult = {
-	version: string,
-	mode: string,
-	replica: boolean,
-	latency_ms: number,
 };
 
 export type Themes = Themes_Serialize | Themes_Deserialize;
@@ -1545,9 +1548,6 @@ export type VaultStatus_Serialize = {
 	/**  Set while wrong-password attempts are cooling down. */
 	cooldown_secs: number | null,
 };
-
-/**  What the write gate allows (spec section 4). New databases start as `Confirm`. */
-export type WriteMode = "read_only" | "confirm" | "open";
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

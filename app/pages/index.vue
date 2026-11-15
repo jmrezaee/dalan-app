@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The app shell: tab bar, the Vault sections (S02 Hosts and the rest), terminals kept mounted, and the global shortcuts.
-import { ScrollText, ArrowDownUp, Code2, Copy, LayoutGrid, KeyRound, Lock, Server, Settings, ShieldCheck, Trash2, Vault, Waypoints } from '@lucide/vue'
+import { ScrollText, ArrowDownUp, Code2, Copy, Database, LayoutGrid, KeyRound, Lock, Server, Settings, ShieldCheck, Trash2, Vault, Waypoints } from '@lucide/vue'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { buttonVariants } from '@/components/ui/button'
 import type { Session } from '~/stores/sessions'
@@ -14,11 +14,12 @@ const snippetsStore = useSnippetsStore()
 const logsStore = useLogsStore()
 const forwardsStore = useForwardsStore()
 const quitStore = useQuitStore()
+const redisDatabases = useRedisDatabasesStore()
 const linksStore = useLinksStore()
 const workspaces = useWorkspacesStore()
 const workspaceView = ref<{ askSave: () => void }[] | null>(null)
 const settings = useSettingsStore()
-const section = ref<'hosts' | 'keychain' | 'forwards' | 'snippets' | 'logs' | 'known-hosts' | 'settings'>('hosts')
+const section = ref<'hosts' | 'keychain' | 'databases' | 'forwards' | 'snippets' | 'logs' | 'known-hosts' | 'settings'>('hosts')
 const paletteOpen = ref(false)
 const knownHosts = ref<{ refresh: () => void } | null>(null)
 onMounted(() => {
@@ -27,6 +28,7 @@ onMounted(() => {
   snippetsStore.refresh()
   forwardsStore.refresh()
   workspaces.refresh()
+  redisDatabases.refresh()
   forwardsStore.watch()
   quitStore.watch()
   linksStore.watch()
@@ -37,6 +39,7 @@ onBeforeUnmount(() => {
   keychain.clear()
   snippetsStore.clear()
   forwardsStore.clear()
+  redisDatabases.clear()
   clearAllSftp()
   workspaces.clear()
   logsStore.clear()
@@ -46,12 +49,18 @@ onBeforeUnmount(() => {
 const nav = computed(() => [
   { id: 'hosts', label: 'Hosts', icon: Server, count: hosts.hosts.length },
   { id: 'keychain', label: 'Keychain', icon: KeyRound, count: keychain.keys.length + keychain.identities.length },
+  { id: 'databases', label: 'Databases', icon: Database, count: redisDatabases.dbs.length },
   { id: 'forwards', label: 'Port forwarding', icon: Waypoints, count: forwardsStore.rules.length },
   { id: 'snippets', label: 'Snippets', icon: Code2, count: snippetsStore.snippets.length },
   { id: 'logs', label: 'Logs', icon: ScrollText },
   { id: 'known-hosts', label: 'Known hosts', icon: ShieldCheck },
 ])
 
+// The host menu and the palette ask for the Databases section (to add a database, or to show a host's).
+watch(() => redisDatabases.showRequests, () => {
+  sessions.activeKey = null
+  section.value = 'databases'
+})
 function editHost(hostId: string) {
   const h = hosts.hosts.find(x => x.id === hostId)
   if (!h) return
@@ -81,7 +90,10 @@ function dropTab(ontoKey: string, where: 'before' | 'after' | 'onto') {
   const key = dragKey.value
   dragKey.value = ''
   if (!key || key === ontoKey) return
-  if (where === 'onto') sessions.mergeTabs(key, ontoKey, hosts.hosts)
+  // A Redis tab has no shell to put in a pane: dropping onto or with one only reorders.
+  const isRedis = (k: string) => sessions.sessions.find(t => t.key === k)?.kind === 'redis'
+  if (where === 'onto' && (isRedis(key) || isRedis(ontoKey))) sessions.moveTab(key, ontoKey, 'after')
+  else if (where === 'onto') sessions.mergeTabs(key, ontoKey, hosts.hosts)
   else sessions.moveTab(key, ontoKey, where)
 }
 function tabMenu(s: Session): MenuItem[] {
@@ -113,6 +125,7 @@ function onPaletteAction(name: string) {
   else if (name === 'lock') vault.lock()
   else if (name === 'sftp') sessions.activeKey = 'sftp'
   else if (name === 'new-sftp') sessions.openSftpTab()
+  else if (name === 'new-database') redisDatabases.openNew()
   else go(name === 'vault' ? 'hosts' : name as typeof section.value)
 }
 /** ⌘D: another pane on the same server as the focused one. ⌘⇧D puts it directly below (one grid row down). */
@@ -189,6 +202,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
         :label="s.label"
         :active="sessions.activeKey === s.key"
         :unsaved="s.kind === 'workspace' && s.dirty"
+        :warning="s.kind === 'redis' && redisDatabases.dbs.find(d => d.id === s.dbId)?.environment === 'production'"
         closable
         movable
         :extra="tabMenu(s)"
@@ -201,6 +215,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
       >
         <template #leading>
           <StatusDot v-if="s.kind === 'session'" :status="paneDot(s)" :label="paneDotLabel(s, s.label)" />
+          <Database v-else-if="s.kind === 'redis'" class="size-4" aria-hidden="true" />
           <template v-else-if="s.kind === 'workspace'">
             <LayoutGrid class="size-4 text-accent" aria-hidden="true" />
             <StatusDot :status="workspaceDot(s.panes)" :label="`${s.label}: ${workspaceDot(s.panes) === 'idle' ? 'all quiet' : workspaceDot(s.panes) === 'waiting' ? 'a pane is waiting for input' : workspaceDot(s.panes) === 'error' ? 'a pane failed or disconnected' : 'new output'}`" />
@@ -213,6 +228,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
       <!-- Terminals stay mounted (v-show), so scrollback survives switching tabs. -->
       <div v-for="s in sessions.sessions" v-show="sessions.activeKey === s.key" :key="s.key" class="absolute inset-0">
         <WorkspaceView v-if="s.kind === 'workspace'" ref="workspaceView" :ws="s" :active="sessions.activeKey === s.key" @edit-host="editHost" @new-host="newHost" />
+        <RedisTab v-else-if="s.kind === 'redis'" :tab-key="s.key" :db-id="s.dbId" :active="sessions.activeKey === s.key" @close="sessions.close(s)" />
         <SessionPane v-else :session="s" :active="sessions.activeKey === s.key" @edit-host="editHost" @new-host="newHost" />
       </div>
 
@@ -255,6 +271,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
             <KnownHostsList ref="knownHosts" />
           </template>
           <KeychainView v-else-if="section === 'keychain'" />
+          <DatabasesView v-else-if="section === 'databases'" />
           <ForwardsView v-else-if="section === 'forwards'" />
           <SnippetsView v-else-if="section === 'snippets'" />
           <LogsView v-else-if="section === 'logs'" @settings="go('settings')" />
@@ -265,6 +282,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
     </div>
 
     <CommandPalette v-model:open="paletteOpen" @action="onPaletteAction" />
+    <!-- Always mounted: a Redis tab's "Edit database" opens it while the Databases section is not showing. -->
+    <DatabaseSheet />
     <QuitDialog />
     <LinkDialog />
     <DroppedSessionsCard />

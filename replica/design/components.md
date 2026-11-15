@@ -294,6 +294,45 @@ TransferDrawer (S22)
   ProgressRow: direction icon, name, from → to (xs muted), progress bar (h 4, accent; success when done; danger on fail), speed, ETA, cancel ×
   ConflictDialog: "notes.txt already exists in /home/deploy" · sizes and dates side by side · [Skip] [Keep both] [Replace] + "Do this for all" checkbox
 
+DatabasesView (S26)                                                              [Redis, replica/redis/spec.md]
+  PageToolbar "Databases" + muted "Redis"; filter Input (220 wide, "Filter databases"); primary "New database"
+  table: Name (3px environment bar: warning = production, border-input = staging, none; name medium; environment word xs),
+         Address (mono xs, muted), Route ("Direct" or "bastion → db-primary"), Kind, Writes (pill: Read-only muted, Confirm writes accent, Open warning)
+  rows h 44; hover bg surface; Enter or double-click opens the database in a tab; row menu: Open, Edit, Delete
+  note under the table (xs muted): "A database can be reached directly, or through any saved host. Passwords are kept in the vault, like your SSH passwords."
+  states    loading (skeleton rows), empty (EmptyState, Database icon: "No databases yet. Add one to browse its keys, run commands and watch channels." + New database),
+            no filter match ("No database matches cache."), delete → AlertDialog "Delete cache-prod?" (Cancel focused, danger-solid "Delete database")
+  keyboard  Tab reaches the filter, the button and each row; ↑/↓ move between rows; Enter opens; the row menu opens with the context-menu key
+
+DatabaseSheet (S27)
+  Sheet 440 wide, title "New database" / "Edit database", footer h 56: [Test connection] result text … [Cancel] [Save] (primary)
+  fields    Name · Environment (Segmented None / Staging / Production + hint "Production shows an amber bar on the tab, so nobody mistakes it for staging.")
+            Reach it (Segmented Directly / Through a host) · Host (select of saved SSH hosts; hint "Dalan signs in to db-primary and talks to Redis from there. Nothing to forward by hand.")
+            Address ("Address", or "Address, as seen from the host") + Port (96 wide, mono) · Kind (Segmented Single server / Cluster / Sentinel; the last two disabled until they are built)
+            Username (optional) + Password (PasswordInput; "Saved in the vault" + Change when one is saved; "Remove saved password")
+            Use TLS (Switch, "certificate is checked") + "Certificate name (optional)" when on
+            Writes (radio cards): Read-only "Look, never change. Write commands are refused before they are sent." · Confirm writes "Every change shows what it will do and asks first." (default)
+                                  · Open "Edits go straight through. Dangerous commands still ask."
+  states    saving (Save shows a spinner), validation error (role=alert under the form, the server's sentence), testing (Test connection spinner),
+            test ok (success text "Connected · Redis 7.2 · 3 ms", plus "· replica" when it is one), test failed (danger text, one line), no hosts yet ("No hosts yet. Add one under Hosts first.")
+  keyboard  Enter in a field saves; Esc closes; the radio cards are one radiogroup (arrows move)
+
+RedisTab (S28 shell; the views arrive in R2 to R5)
+  toolbar h 44, border-b: Database icon, name (medium), environment chip ("production" warning / "staging" muted), route text (xs muted: "Direct" or "bastion → db-primary"),
+           logical database picker ("db0 · 12,408 keys"; hidden for Cluster), the four views (Browser, Console, Pub/Sub, Server; aria-current on the open one),
+           latency dot + "3 ms" (success under 100 ms, warning under 500, danger above; "…" until the first ping), write-mode button (lock icon + the mode's name)
+  a production database adds a 2px warning line on top of its tab
+  states    connecting (ConnectSteps, centred), a host question (PromptPanel in the same card: host key, password, passphrase, 2FA),
+            failed (one line of what happened + one useful action: auth → Edit database; unreachable → Try again; certificate → Edit database; host problems → Try again),
+            dropped ("The connection dropped" + "Trying again in 4 s (2 of 5)." + Reconnect now), replica banner ("This server is a replica. It only accepts reads."),
+            ready (the open view; until R2 an EmptyState "Connected to cache-prod" with the server's version)
+  keyboard  the views are a tablist (←/→ move, Enter opens); the tab stays mounted while another tab shows
+
+ConnectSteps (S33 "Connecting")
+  card: title "Opening cache-prod"; one row per step h 28: state icon (done = success check, active = spinning accent ring, pending = empty ring, failed = danger ×),
+        label ("Sign in to bastion", "Reach Redis at 127.0.0.1:6379", "Sign in as app-ro"), detail (xs muted: "through bastion", the SSH client's progress line, or why it failed)
+  footer: [Cancel] (closes the tab); the list is aria-live="polite" so each finished step is announced
+
 ShortcutRecorder (S23)
   Input-like button "Press keys…"; shows captured combo as Kbd chips; conflict → danger text "Already used by New tab" + [Replace]
 

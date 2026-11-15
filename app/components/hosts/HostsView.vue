@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // S02: groups first, then the hosts in the group you are in. Search and tag filters look at every host.
-import { ChevronRight, Copy, CopyPlus, Download, FolderOpen, FolderPlus, FolderTree, LayoutGrid, List, Pencil, Plug, Plus, Server, SquareTerminal, Trash2 } from '@lucide/vue'
+import { ChevronRight, Copy, CopyPlus, Database, Download, FolderOpen, FolderPlus, FolderTree, LayoutGrid, List, Pencil, Plug, Plus, Server, SquareTerminal, Trash2 } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import type { MenuItem } from '@/components/common/ItemMenuList.vue'
 import type { GroupSummary, HostSummary } from '~/types/bindings'
@@ -10,6 +10,7 @@ import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
 
 const hosts = useHostsStore()
 const sessions = useSessionsStore()
+const redisDatabases = useRedisDatabasesStore()
 const selected = ref<string | null>(null)
 
 // S02 right-click menu (and the "…" menu): the same list in both places.
@@ -34,6 +35,8 @@ function menuFor(h: HostSummary): MenuItem[] {
     { label: 'Connect', icon: Plug, onSelect: () => sessions.open(h) },
     { label: 'Connect with SFTP', icon: FolderOpen, onSelect: () => connectWithSftp(h), disabled: h.protocol === 'serial' },
     { label: 'Connect with SFTP in a new tab', icon: FolderOpen, onSelect: () => connectWithSftp(h, true), disabled: h.protocol === 'serial' },
+    // Redis reached through this host: the saved databases for it if there are any, else a new one with the route filled in.
+    { label: 'Open Redis on this host…', icon: Database, onSelect: () => (redisDatabases.forHost(h.id).length ? redisDatabases.show(h.label) : redisDatabases.openNew(h.id)), disabled: h.protocol === 'serial' || h.protocol === 'telnet' },
     {
       label: 'Add to workspace',
       icon: SquareTerminal,

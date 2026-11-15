@@ -14,7 +14,7 @@ use crate::vault::VaultSession;
 /// Stored as lowercase text; `production` adds the amber line and chip to the tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
-pub enum Environment {
+pub enum RedisEnvironment {
     None,
     Staging,
     Production,
@@ -22,7 +22,7 @@ pub enum Environment {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
-pub enum Route {
+pub enum RedisRoute {
     Direct,
     /// Sign in to a saved host (with its jump chain) and talk to Redis from there.
     Host,
@@ -30,7 +30,7 @@ pub enum Route {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
-pub enum Kind {
+pub enum RedisKind {
     Single,
     Cluster,
     Sentinel,
@@ -39,7 +39,7 @@ pub enum Kind {
 /// What the write gate allows (spec section 4). New databases start as `Confirm`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
-pub enum WriteMode {
+pub enum RedisWriteMode {
     ReadOnly,
     Confirm,
     Open,
@@ -61,30 +61,30 @@ macro_rules! text_enum {
         }
     };
 }
-text_enum!(Environment { None => "none", Staging => "staging", Production => "production" });
-text_enum!(Route { Direct => "direct", Host => "host" });
-text_enum!(Kind { Single => "single", Cluster => "cluster", Sentinel => "sentinel" });
-text_enum!(WriteMode { ReadOnly => "read_only", Confirm => "confirm", Open => "open" });
+text_enum!(RedisEnvironment { None => "none", Staging => "staging", Production => "production" });
+text_enum!(RedisRoute { Direct => "direct", Host => "host" });
+text_enum!(RedisKind { Single => "single", Cluster => "cluster", Sentinel => "sentinel" });
+text_enum!(RedisWriteMode { ReadOnly => "read_only", Confirm => "confirm", Open => "open" });
 
 /// One row of the Databases table, as the UI sees it.
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct RedisDatabase {
     pub id: String,
     pub name: String,
-    pub environment: Environment,
-    pub route: Route,
+    pub environment: RedisEnvironment,
+    pub route: RedisRoute,
     pub host_id: Option<String>,
     /// The host's label, for "Through db-primary".
     pub host_label: Option<String>,
     pub address: String,
     pub port: u16,
-    pub kind: Kind,
+    pub kind: RedisKind,
     pub sentinel_master: Option<String>,
     pub username: Option<String>,
     pub has_password: bool,
     pub tls: bool,
     pub tls_server_name: Option<String>,
-    pub write_mode: WriteMode,
+    pub write_mode: RedisWriteMode,
     pub default_db: u32,
     pub key_separator: String,
     #[specta(type = Option<f64>)]
@@ -97,19 +97,19 @@ pub struct RedisDatabaseInput {
     /// `None` creates a database.
     pub id: Option<String>,
     pub name: String,
-    pub environment: Environment,
-    pub route: Route,
+    pub environment: RedisEnvironment,
+    pub route: RedisRoute,
     pub host_id: Option<String>,
     pub address: String,
     pub port: u16,
-    pub kind: Kind,
+    pub kind: RedisKind,
     pub sentinel_master: Option<String>,
     pub username: Option<String>,
     pub password: Option<String>,
     pub clear_password: bool,
     pub tls: bool,
     pub tls_server_name: Option<String>,
-    pub write_mode: WriteMode,
+    pub write_mode: RedisWriteMode,
     pub default_db: u32,
     pub key_separator: String,
 }
@@ -120,19 +120,19 @@ fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RedisDatabase> {
     Ok(RedisDatabase {
         id: r.get(0)?,
         name: r.get(1)?,
-        environment: Environment::parse(&r.get::<_, String>(2)?)?,
-        route: Route::parse(&r.get::<_, String>(3)?)?,
+        environment: RedisEnvironment::parse(&r.get::<_, String>(2)?)?,
+        route: RedisRoute::parse(&r.get::<_, String>(3)?)?,
         host_id: r.get(4)?,
         host_label: r.get(5)?,
         address: r.get(6)?,
         port: r.get(7)?,
-        kind: Kind::parse(&r.get::<_, String>(8)?)?,
+        kind: RedisKind::parse(&r.get::<_, String>(8)?)?,
         sentinel_master: r.get(9)?,
         username: r.get(10)?,
         has_password: r.get(11)?,
         tls: r.get(12)?,
         tls_server_name: r.get(13)?,
-        write_mode: WriteMode::parse(&r.get::<_, String>(14)?)?,
+        write_mode: RedisWriteMode::parse(&r.get::<_, String>(14)?)?,
         default_db: r.get(15)?,
         key_separator: r.get(16)?,
         last_opened_at: r.get(17)?,
@@ -219,14 +219,14 @@ pub fn validate(input: &RedisDatabaseInput) -> AppResult<()> {
             "The port must be between 1 and 65535.",
         ));
     }
-    if (input.route == Route::Host) != clean(&input.host_id).is_some() {
-        return Err(AppError::validation(if input.route == Route::Host {
+    if (input.route == RedisRoute::Host) != clean(&input.host_id).is_some() {
+        return Err(AppError::validation(if input.route == RedisRoute::Host {
             "Pick the host to go through."
         } else {
             "A direct database has no host."
         }));
     }
-    if input.kind == Kind::Sentinel && clean(&input.sentinel_master).is_none() {
+    if input.kind == RedisKind::Sentinel && clean(&input.sentinel_master).is_none() {
         return Err(AppError::validation(
             "A Sentinel database needs the name of its primary.",
         ));
@@ -409,19 +409,19 @@ mod tests {
         RedisDatabaseInput {
             id: None,
             name: name.into(),
-            environment: Environment::None,
-            route: Route::Direct,
+            environment: RedisEnvironment::None,
+            route: RedisRoute::Direct,
             host_id: None,
             address: "localhost".into(),
             port: 6379,
-            kind: Kind::Single,
+            kind: RedisKind::Single,
             sentinel_master: None,
             username: None,
             password: None,
             clear_password: false,
             tls: false,
             tls_server_name: None,
-            write_mode: WriteMode::Confirm,
+            write_mode: RedisWriteMode::Confirm,
             default_db: 0,
             key_separator: ":".into(),
         }
@@ -435,8 +435,8 @@ mod tests {
             &mut conn,
             &s,
             RedisDatabaseInput {
-                environment: Environment::Production,
-                route: Route::Host,
+                environment: RedisEnvironment::Production,
+                route: RedisRoute::Host,
                 host_id: Some(h.clone()),
                 address: " 127.0.0.1 ".into(),
                 username: Some("app-ro".into()),
@@ -449,7 +449,7 @@ mod tests {
         assert_eq!(saved.address, "127.0.0.1");
         assert_eq!(saved.host_label.as_deref(), Some("db-primary"));
         assert!(saved.has_password);
-        assert_eq!(saved.write_mode, WriteMode::Confirm);
+        assert_eq!(saved.write_mode, RedisWriteMode::Confirm);
         // The row as the UI gets it has no password field at all; the text must not appear in its JSON.
         let json = serde_json::to_string(&list(&conn, &s.vault_id).unwrap()).unwrap();
         assert!(!json.contains("s3cret"), "{json}");
@@ -552,7 +552,7 @@ mod tests {
             &mut conn,
             &s,
             RedisDatabaseInput {
-                route: Route::Host,
+                route: RedisRoute::Host,
                 host_id: Some(h.clone()),
                 password: Some("a-long-password".into()),
                 ..input("queue")
@@ -603,7 +603,7 @@ mod tests {
         }));
         // The route and the host go together
         assert!(bad(RedisDatabaseInput {
-            route: Route::Host,
+            route: RedisRoute::Host,
             ..input("a")
         }));
         assert!(bad(RedisDatabaseInput {
@@ -611,11 +611,11 @@ mod tests {
             ..input("a")
         }));
         assert!(bad(RedisDatabaseInput {
-            kind: Kind::Sentinel,
+            kind: RedisKind::Sentinel,
             ..input("a")
         }));
         assert!(validate(&RedisDatabaseInput {
-            kind: Kind::Sentinel,
+            kind: RedisKind::Sentinel,
             sentinel_master: Some("mymaster".into()),
             ..input("a")
         })
@@ -641,7 +641,7 @@ mod tests {
             &mut conn,
             &s,
             RedisDatabaseInput {
-                route: Route::Host,
+                route: RedisRoute::Host,
                 host_id: Some("no-such-host".into()),
                 ..input("a")
             },
@@ -656,10 +656,10 @@ mod tests {
 
     #[test]
     fn the_enums_are_stored_as_the_words_the_schema_checks() {
-        assert_eq!(WriteMode::ReadOnly.as_str(), "read_only");
-        assert_eq!(Environment::Production.as_str(), "production");
-        assert_eq!(Route::Host.as_str(), "host");
-        assert_eq!(Kind::Sentinel.as_str(), "sentinel");
-        assert!(WriteMode::parse("nope").is_err());
+        assert_eq!(RedisWriteMode::ReadOnly.as_str(), "read_only");
+        assert_eq!(RedisEnvironment::Production.as_str(), "production");
+        assert_eq!(RedisRoute::Host.as_str(), "host");
+        assert_eq!(RedisKind::Sentinel.as_str(), "sentinel");
+        assert!(RedisWriteMode::parse("nope").is_err());
     }
 }

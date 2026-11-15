@@ -1,15 +1,16 @@
 <script setup lang="ts">
 // S17: jump to a host, a tab or an action. Built on the shadcn Command (Reka listbox) dialog.
-import { ScrollText, ArrowDownUp, Code2, LayoutGrid, KeyRound, Waypoints, Lock, Plus, Server, Settings, ShieldCheck, SquareTerminal, Vault } from '@lucide/vue'
+import { ScrollText, ArrowDownUp, Code2, Database, LayoutGrid, KeyRound, Waypoints, Lock, Plus, Server, Settings, ShieldCheck, SquareTerminal, Vault } from '@lucide/vue'
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator, CommandShortcut } from '@/components/ui/command'
 import type { HostSummary } from '~/types/bindings'
 const { label: shortcutLabel, fixed: shortcutFixed } = useShortcutLabel()
 
 const open = defineModel<boolean>('open', { required: true })
-const emit = defineEmits<{ action: [name: 'new-host' | 'new-tab' | 'local' | 'sftp' | 'new-sftp' | 'keychain' | 'forwards' | 'snippets' | 'logs' | 'known-hosts' | 'settings' | 'lock' | 'vault'] }>()
+const emit = defineEmits<{ action: [name: 'new-host' | 'new-tab' | 'local' | 'sftp' | 'new-sftp' | 'new-database' | 'databases' | 'keychain' | 'forwards' | 'snippets' | 'logs' | 'known-hosts' | 'settings' | 'lock' | 'vault'] }>()
 const hosts = useHostsStore()
 const sessions = useSessionsStore()
 const templates = useWorkspacesStore()
+const databases = useRedisDatabasesStore()
 
 const run = (fn: () => void) => {
   open.value = false
@@ -53,6 +54,12 @@ const shownHosts = computed(() => matchingHosts.value.slice(0, HOST_LIMIT))
         <p v-if="matchingHosts.length > HOST_LIMIT" class="px-2 py-1.5 text-xs text-muted">Showing {{ HOST_LIMIT }} of {{ matchingHosts.length }} hosts. Keep typing to narrow it down.</p>
       </CommandGroup>
 
+      <CommandGroup v-if="databases.dbs.length" heading="Databases">
+        <CommandItem v-for="d in databases.dbs" :key="d.id" :value="`database redis open ${d.name} ${d.address}`" @select="run(() => sessions.openRedis(d))">
+          <Database />Open {{ d.name }}<span class="ml-2 font-mono text-xs text-muted">{{ d.address }}:{{ d.port }}</span>
+        </CommandItem>
+      </CommandGroup>
+
       <CommandGroup v-if="templates.templates.length" heading="Workspaces">
         <CommandItem v-for="t in templates.templates" :key="t.id" :value="`workspace ${t.name}`" @select="run(() => templates.open(t))"><LayoutGrid />{{ t.name }}</CommandItem>
       </CommandGroup>
@@ -66,6 +73,8 @@ const shownHosts = computed(() => matchingHosts.value.slice(0, HOST_LIMIT))
         <CommandItem value="action sftp files transfer" @select="act('sftp')"><ArrowDownUp />Go to SFTP</CommandItem>
         <CommandItem value="action new sftp tab files transfer" @select="act('new-sftp')"><ArrowDownUp />New SFTP tab</CommandItem>
         <CommandItem value="action keychain keys identities" @select="act('keychain')"><KeyRound />Go to Keychain</CommandItem>
+        <CommandItem value="action new database redis add" @select="act('new-database')"><Plus />New database</CommandItem>
+        <CommandItem value="action databases redis" @select="act('databases')"><Database />Go to Databases</CommandItem>
         <CommandItem value="action port forwarding tunnels" @select="act('forwards')"><Waypoints />Go to Port forwarding</CommandItem>
         <CommandItem value="action snippets scripts" @select="act('snippets')"><Code2 />Go to Snippets</CommandItem>
         <CommandItem value="action logs session history" @select="act('logs')"><ScrollText />Go to Logs</CommandItem>

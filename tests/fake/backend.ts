@@ -193,6 +193,16 @@ export function install(opts: Options) {
     setSystem: (patch: Partial<typeof m.system>) => { m.system = { ...m.system, supported: true, ...patch } },
     /** Transfers: drive one by hand after `manualTransfers()`. */
     manualTransfers: (on = true) => { m.manualTransfers = on },
+    /** Redis: opening a database no longer connects by itself; the test sends the events (`redisEvent`). */
+    redisManual: (on = true) => { m.redisManual = on },
+    redisConnIds: () => [...m.redisConns.keys()],
+    redisOpenConnIds: () => [...m.redisConns].filter(([, c]) => !c.closed).map(([id]) => id),
+    /** One event of a Redis connection, as Rust would send it (plan, step, host, ready, failed, dropped, ...). */
+    redisEvent: (connId: string, e: unknown) => {
+      const c = m.redisConns.get(connId)
+      if (!c) throw new Error(`No fake Redis connection ${connId}`)
+      send(c.events, e)
+    },
     transferIds: () => [...m.transfers.keys()],
     transfer: (id: string, e: unknown) => send(m.transfers.get(id)!.events, e),
     transferPending: () => [...m.transfers.entries()].map(([id, t]) => ({ id, items: t.items.length, pending: t.pending })),

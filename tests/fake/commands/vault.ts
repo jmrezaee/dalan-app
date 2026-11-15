@@ -45,6 +45,7 @@ export const vault: Pick<Handlers, Keys> = {
   },
   vaultLock: (_a, { m }) => {
     m.vault.unlocked = false
+    for (const c of m.redisConns.values()) c.closed = true // Rust closes every Redis connection on lock
     return null
   },
   vaultChangePassword: (a) => {
