@@ -314,6 +314,9 @@ each opened by the `Opener` through the same route (another `direct-tcpip` chann
 replies put back in order. `SCAN` walks the primaries one after another: the UI's cursor is `node:cursor`. Bulk delete sends one
 `UNLINK` per key. A cluster has one logical database; `SELECT` is not offered.
 
+**Settings (R7).** The `redis` settings value holds `{ default_mode, key_separator, scan_count, keep_history }`. The UI uses the first three
+(a new database's defaults, the `COUNT` of each `SCAN`); Rust reads `keep_history` before it saves a console line (on unless turned off).
+
 **Sentinel (R6, `redis/sentinel.rs`).** The address is a comma list of sentinels. Each is asked `SENTINEL get-master-addr-by-name`
 through the route until one answers; the tab connects to that address and refuses it if it says it is a replica. A reconnect asks
 again. The plan gets one more step ("Ask the sentinels for mymaster").

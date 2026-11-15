@@ -51,6 +51,9 @@ export const useSettingsStore = defineStore('settings', () => {
   /** Remember typed commands for the side panel's History tab. Off until chosen. */
   const historyEnabled = ref(false)
 
+  /** Settings > Databases: what a new Redis database starts with, how much one scan asks for, and console history. */
+  const redis = reactive({ default_mode: 'confirm' as 'read_only' | 'confirm' | 'open', key_separator: ':', scan_count: 500, keep_history: true })
+
   /** Light or dark right now (resolves "system"). */
   const resolvedTheme = computed(() => (colorMode.value === 'light' ? 'light' : 'dark'))
 
@@ -85,6 +88,11 @@ export const useSettingsStore = defineStore('settings', () => {
       const ov = parse('shortcuts').overrides
       shortcutOverrides.value = ov && typeof ov === 'object' ? Object.fromEntries(Object.entries(ov).filter(([id, c]) => SHORTCUT_ACTIONS.some(a => a.id === id) && typeof c === 'string')) as Record<string, string> : {}
       historyEnabled.value = parse('history').enabled === true
+      const r = parse('redis')
+      redis.default_mode = r.default_mode === 'read_only' || r.default_mode === 'open' ? r.default_mode : 'confirm'
+      redis.key_separator = typeof r.key_separator === 'string' && /^\S{1,4}$/.test(r.key_separator) ? r.key_separator : ':'
+      redis.scan_count = clamp(r.scan_count as number | undefined, 100, 5000, 500)
+      redis.keep_history = r.keep_history !== false
       loaded.value = true
     }
     catch {
@@ -150,10 +158,16 @@ export const useSettingsStore = defineStore('settings', () => {
     save('logs', { enabled })
   }
 
+  /** Rust reads `keep_history` from the same saved value before it writes a console line to history. */
+  function setRedis(patch: Partial<typeof redis>) {
+    Object.assign(redis, patch)
+    save('redis', { ...redis })
+  }
+
   function setHistory(enabled: boolean) {
     historyEnabled.value = enabled
     save('history', { enabled })
   }
 
-  return { detectOs, setDetectOs, postQuantum, setPostQuantum, localShell, setLocalShell, shortcutOverrides, combos, setShortcut, logsEnabled, setLogs, historyEnabled, setHistory, theme, terminal, autoLockMinutes, loaded, resolvedTheme, load, setTheme, setTerminal, setAutoLock, aiGet: api.aiGet, aiSave: api.aiSave, appInfo: api.appInfo, systemIntegrationGet: api.systemIntegrationGet, systemIntegrationSet: api.systemIntegrationSet, openDefaultApps: api.openDefaultApps, diagnosticsText: api.diagnosticsText, updateCheck: api.updateCheck, updateInstall: api.updateInstall }
+  return { detectOs, setDetectOs, postQuantum, setPostQuantum, localShell, setLocalShell, shortcutOverrides, combos, setShortcut, logsEnabled, setLogs, historyEnabled, setHistory, redis, setRedis, theme, terminal, autoLockMinutes, loaded, resolvedTheme, load, setTheme, setTerminal, setAutoLock, aiGet: api.aiGet, aiSave: api.aiSave, appInfo: api.appInfo, systemIntegrationGet: api.systemIntegrationGet, systemIntegrationSet: api.systemIntegrationSet, openDefaultApps: api.openDefaultApps, diagnosticsText: api.diagnosticsText, updateCheck: api.updateCheck, updateInstall: api.updateInstall }
 })

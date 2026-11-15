@@ -443,6 +443,12 @@ RedisServer (S31)
            note beside the title: "the tiles above are one node's; keys are the whole cluster's" / "as the sentinels see them"
   states   loading (skeleton tiles), error (danger line + Try again), a limited user (tiles show what INFO gave; the slow log is empty)
 
+Settings > Databases (S23)
+  rows     Writes on a new database (Segmented Read-only / Confirm writes / Open; default Confirm writes) ·
+           Key separator (Input mono, 1 to 4 characters, default ":") · Keys per scan (NumberInput 100 to 5,000, default 500) ·
+           Keep console history (Switch, on by default; Rust checks it before it saves a line)
+  note     "Values load 500 items at a time, and a string over 1 MB opens as a preview first. Those are fixed."
+
 RedisPubSub (S32)
   left     "Listening to" aside, 300 wide: Input (mono, "channel or pat*ern") + primary [Listen]; a name with *, ? or [ is a pattern
            rows h 36: dot (success while listening, border-input when stopped), name (mono), "channel" / "pattern" (xs muted), count right (tabular), × "Stop listening to orders.*"

@@ -76,3 +76,89 @@ test('a 5 MB flood of terminal output does not freeze the window: another tab an
   // Everything arrived: the terminal acknowledged bytes (that is how reading is paced).
   await expect.poll(() => page.evaluate(() => (window as any).__fake.state.calls.filter((c: string) => c.startsWith('ack:')).length)).toBeGreaterThan(0)
 })
+
+// ---- Redis (replica/redis/spec.md section 6): a big keyspace, a big value and a Pub/Sub flood stay usable.
+async function openRedis(page: import('@playwright/test').Page, fill?: (fake: Awaited<ReturnType<typeof installFakeBackend>>) => Promise<void>) {
+  const fake = await installFakeBackend(page, { scenario: 'team', unlocked: true })
+  await page.goto('/')
+  await fill?.(fake)
+  await page.getByRole('navigation', { name: 'Vault' }).getByRole('link', { name: /Databases/ }).click()
+  await page.getByRole('row', { name: /local/ }).dblclick()
+  const tab = page.getByTestId('redis-tab-local')
+  await expect(tab.getByRole('tree', { name: 'Keys' })).toBeVisible()
+  return { fake, tab }
+}
+
+test('scanning 100,000 keys keeps the tree quick: each "Scan more" paints in under 200 ms and only the rows in view are drawn @perf', async ({ page }) => {
+  test.setTimeout(180_000)
+  const { tab } = await openRedis(page, fake => fake.redisFill(100_000))
+  // Bigger steps, like someone who set "Keys per scan" to its largest.
+  await page.keyboard.press('ControlOrMeta+,')
+  await page.getByRole('button', { name: 'Databases', exact: true }).first().click()
+  await page.getByLabel('Keys per scan').fill('5000')
+  await page.getByLabel('Keys per scan').press('Tab')
+  await page.getByRole('tab', { name: 'local' }).click()
+  const more = tab.getByRole('button', { name: 'Scan more' })
+  const times: number[] = []
+  for (let i = 0; i < 20; i++) times.push(await paintTime(page, () => more.click()))
+  await expect(tab.getByText(/Scanned 1\d\d,\d{3} of 101,237 keys|All 101,237 keys scanned/)).toBeVisible()
+  // 100,000 keys under bulk: fold into 1,000 folders; open one and scroll to the end.
+  await tab.getByRole('treeitem', { name: /^bulk:/ }).click()
+  const drawn = await tab.getByRole('treeitem').count()
+  console.log(`Scan more with up to 100,000 keys loaded: median ${median(times).toFixed(0)} ms, worst ${Math.max(...times).toFixed(0)} ms; ${drawn} rows drawn`)
+  expect(median(times), 'median repaint per Scan more').toBeLessThan(200)
+  expect(Math.max(...times), 'worst repaint per Scan more').toBeLessThan(1500)
+  expect(drawn, 'rows in the DOM').toBeLessThan(120)
+  const scroll = await paintTime(page, () => tab.getByRole('tree', { name: 'Keys' }).evaluate((el) => { el.scrollTop = el.scrollHeight }))
+  console.log(`Scroll to the end of the tree: ${scroll.toFixed(0)} ms`)
+  expect(scroll, 'scroll to the end of the tree').toBeLessThan(300)
+  const heap = await page.evaluate(() => (performance as any).memory?.usedJSHeapSize as number | undefined)
+  if (heap) {
+    console.log(`JS heap with 100,000 scanned keys: ${(heap / 1024 / 1024).toFixed(0)} MB`)
+    expect(heap, 'JS heap').toBeLessThan(600 * 1024 * 1024)
+  }
+})
+
+test('a 50,000-member set loads in pages and scrolls smoothly @perf', async ({ page }) => {
+  test.setTimeout(180_000)
+  const { tab } = await openRedis(page, fake => fake.redisAddSet('audit:seen', 50_000))
+  await tab.getByRole('treeitem', { name: /audit:seen/ }).click()
+  const value = tab.getByTestId('redis-value')
+  const more = value.getByRole('button', { name: 'Load more' })
+  const times: number[] = []
+  for (let i = 0; i < 99; i++) times.push(await paintTime(page, () => more.click()))
+  await expect(value.getByText('All 50,000 members loaded')).toBeVisible()
+  const table = value.getByRole('table', { name: 'Members' })
+  const scrolls: number[] = []
+  for (const at of [0.25, 0.5, 0.75, 1, 0]) scrolls.push(await paintTime(page, () => table.evaluate((el, f) => { el.scrollTop = el.scrollHeight * f }, at)))
+  const drawn = await table.getByRole('row').count()
+  console.log(`Load more to 50,000 members: median ${median(times).toFixed(0)} ms; scroll: median ${median(scrolls).toFixed(0)} ms, worst ${Math.max(...scrolls).toFixed(0)} ms; ${drawn} rows drawn`)
+  expect(median(times), 'median repaint per Load more').toBeLessThan(150)
+  expect(median(scrolls), 'median repaint per scroll').toBeLessThan(100)
+  expect(drawn, 'rows in the DOM').toBeLessThan(100)
+})
+
+test('a Pub/Sub flood of 10,000 messages a second does not freeze the tab: Pause answers in under 200 ms @perf', async ({ page }) => {
+  const { fake, tab } = await openRedis(page)
+  await tab.getByRole('tab', { name: 'Pub/Sub' }).click()
+  await tab.getByLabel('Channel or pattern').fill('flood')
+  await tab.getByRole('button', { name: 'Listen', exact: true }).click()
+  // Three seconds of 10,000 a second, sent without waiting, while the app is used.
+  const flood = (async () => {
+    for (let s = 0; s < 3; s++) {
+      await fake.redisPublish('flood', `second ${s}`, 10_000)
+      await page.waitForTimeout(1000)
+    }
+  })()
+  await page.waitForTimeout(300)
+  const ms = await page.evaluate(() => new Promise<number>((done) => {
+    const t0 = performance.now()
+    ;([...document.querySelectorAll('button')].find(b => b.textContent?.trim() === 'Pause') as HTMLElement).click()
+    requestAnimationFrame(() => requestAnimationFrame(() => done(performance.now() - t0)))
+  }))
+  console.log(`Click on Pause during a 10,000 messages/s flood: ${ms.toFixed(0)} ms`)
+  expect(ms, 'time for Pause to show').toBeLessThan(200)
+  await flood
+  await expect(tab.getByText(/30,000 received · keeping the last 5,000/)).toBeVisible()
+  expect(await tab.getByRole('table', { name: 'Messages' }).getByRole('row').count()).toBeLessThan(80)
+})

@@ -80,7 +80,9 @@ export const useRedisDatabasesStore = defineStore('redisDatabases', () => {
 
   const forHost = (hostId: string) => dbs.value.filter(d => d.host_id === hostId)
   function openNew(hostId: string | null = null) {
-    editing.value = blankDatabase(hostId)
+    // New ones start with what Settings > Databases says (Confirm writes and ":" unless changed).
+    const defaults = useSettingsStore().redis
+    editing.value = { ...blankDatabase(hostId), write_mode: defaults.default_mode, key_separator: defaults.key_separator }
     showRequests.value++
   }
   function show(text = '') {

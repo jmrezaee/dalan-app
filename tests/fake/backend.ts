@@ -200,6 +200,11 @@ export function install(opts: Options) {
     redisConnIds: () => [...m.redisConns.keys()],
     /** Removes a key from the fake database, as if it expired while the app was looking at it. */
     redisDropKey: (name: string) => { m.redisKeys = m.redisKeys.filter(k => !(k.key.kind === 'text' && k.key.text === name)) },
+    /** Fills the fake database with `n` more string keys (`bulk:000001` ...), for the timing tests. */
+    redisFill: (n: number) => {
+      if (!m.redisKeys.length) m.redisKeys = keyspace()
+      for (let i = 0; i < n; i++) m.redisKeys.push({ key: { kind: 'text', text: `bulk:${String(i % 1000).padStart(3, '0')}:${String(i).padStart(7, '0')}` }, ttl_ms: null, value: { type: 'string', value: { kind: 'text', text: 'x' } } })
+    },
     /** Adds a set with `members` members to the fake database (a key big enough that deleting it is dangerous). */
     redisAddSet: (name: string, members: number) => {
       if (!m.redisKeys.length) m.redisKeys = keyspace()
@@ -216,6 +221,8 @@ export function install(opts: Options) {
     /** How many times the Server view asked for INFO (to check it refreshes, and stops when hidden). */
     redisInfoCalls: () => m.redisInfoCalls,
     redisHistory: (dbId: string) => m.redisHistory[dbId] ?? [],
+    /** The saved settings, as the JSON text per key that Rust stores. */
+    settings: () => m.settings,
     /** A saved database as the fake holds it. */
     redisDb: (name: string) => m.redisDbs.find(d => d.name === name) ?? null,
     /** The saved database's write mode. */

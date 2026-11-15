@@ -19,6 +19,23 @@ const open = async (page: Page, fake: Fake, name: string) => {
   return ids[ids.length - 1]!
 }
 
+/** Opens a saved Redis database in a tab (the fake connects by itself) and, if asked, one of its views. */
+const redisTab = async (page: Page, name: string, view?: 'Console' | 'Pub/Sub' | 'Server') => {
+  await vaultNav(page, 'Databases')
+  await page.getByRole('row', { name: new RegExp(name) }).dblclick()
+  const tab = page.getByTestId(`redis-tab-${name}`)
+  await tab.getByRole('tree', { name: 'Keys' }).waitFor()
+  if (view) await tab.getByRole('tab', { name: view }).click()
+  return tab
+}
+/** Opens user:1042:<key> in the tree. */
+const redisKey = async (tab: ReturnType<Page['getByTestId']>, key: string) => {
+  await tab.getByRole('treeitem', { name: /^user:/ }).click()
+  await tab.getByRole('treeitem', { name: /^1042:/ }).click()
+  await tab.getByRole('treeitem', { name: new RegExp(key) }).first().click()
+  await tab.getByTestId('redis-value').getByRole('table').waitFor()
+}
+
 export const SCREENS: ScreenState[] = [
   { id: 'S24-first-run', scenario: 'fresh', unlocked: false, open: async () => {} },
   { id: 'S24-unlock', scenario: 'team', unlocked: false, open: async () => {} },
@@ -58,5 +75,54 @@ export const SCREENS: ScreenState[] = [
   { id: 'S23-settings-terminal', scenario: 'team', open: async (p) => { await p.keyboard.press('ControlOrMeta+,'); await p.getByRole('button', { name: 'Terminal', exact: true }).or(p.getByRole('tab', { name: 'Terminal', exact: true })).first().click() } },
   { id: 'S23-settings-shortcuts', scenario: 'team', open: async (p) => { await p.keyboard.press('ControlOrMeta+,'); await p.getByRole('button', { name: 'Shortcuts', exact: true }).or(p.getByRole('tab', { name: 'Shortcuts', exact: true })).first().click() } },
   { id: 'S23-settings-ai', scenario: 'team', open: async (p) => { await p.keyboard.press('ControlOrMeta+,'); await p.getByRole('button', { name: 'AI', exact: true }).or(p.getByRole('tab', { name: 'AI', exact: true })).first().click() } },
+  // ---- Redis (replica/redis/spec.md): S26 to S33.
+  { id: 'S26-databases', scenario: 'team', open: async (p) => { await vaultNav(p, 'Databases') } },
+  { id: 'S27-database-sheet', scenario: 'team', open: async (p) => { await vaultNav(p, 'Databases'); await p.getByRole('button', { name: 'New database' }).click(); await p.getByRole('radio', { name: 'Sentinel' }).click() } },
+  { id: 'S28-browser-hash', scenario: 'team', open: async (p) => { const t = await redisTab(p, 'cache-prod'); await redisKey(t, 'profile') } },
+  { id: 'S28-read-only', scenario: 'team', open: async (p) => { const t = await redisTab(p, 'sessions-prod'); await t.getByRole('treeitem', { name: /leaderboard:weekly/ }).click(); await t.getByRole('table', { name: 'Members' }).waitFor() } },
+  { id: 'S29-edit-row', scenario: 'team', open: async (p) => { const t = await redisTab(p, 'cache-prod'); await redisKey(t, 'profile'); await t.getByRole('button', { name: 'Edit field plan' }).click() } },
+  { id: 'S29-string', scenario: 'team', open: async (p) => { const t = await redisTab(p, 'cache-prod'); await t.getByRole('treeitem', { name: /maintenance/ }).click(); await t.getByRole('textbox', { name: 'Value as text' }).waitFor() } },
+  { id: 'S30-console', scenario: 'team', open: async (p) => {
+    const t = await redisTab(p, 'cache-prod', 'Console')
+    const input = t.getByRole('textbox', { name: 'Command' })
+    for (const line of ['HGETALL user:1043:profile', 'KEYS *', 'EXPIRE maintenance 600']) { await input.fill(line); await input.press('Enter') }
+    await input.fill('HSE')
+  } },
+  { id: 'S31-server', scenario: 'team', open: async (p) => { const t = await redisTab(p, 'events-cluster', 'Server'); await t.getByRole('table', { name: 'Nodes' }).waitFor() } },
+  { id: 'S32-pubsub', scenario: 'team', open: async (p, f) => {
+    const t = await redisTab(p, 'cache-prod', 'Pub/Sub')
+    for (const name of ['orders.*', 'deploys']) { await t.getByLabel('Channel or pattern').fill(name); await t.getByRole('button', { name: 'Listen', exact: true }).click() }
+    await f.redisPublish('deploys', 'api v2.41.0 started')
+    await f.redisPublish('orders.paid', '{"order":5512,"total":84.00}')
+    await t.getByRole('table', { name: 'Messages' }).getByRole('row').nth(2).waitFor()
+  } },
+  { id: 'S33-confirm', scenario: 'team', open: async (p) => {
+    const t = await redisTab(p, 'cache-prod'); await redisKey(t, 'profile')
+    await t.getByRole('button', { name: 'Edit field plan' }).click()
+    await p.getByTestId('redis-edit-row').getByLabel('Value').fill('business')
+    await p.getByTestId('redis-edit-row').getByRole('button', { name: 'Review change' }).click()
+    await p.getByTestId('redis-confirm').waitFor()
+  } },
+  { id: 'S33-danger', scenario: 'team', open: async (p) => {
+    const t = await redisTab(p, 'cache-prod', 'Console')
+    await t.getByRole('textbox', { name: 'Command' }).fill('FLUSHDB'); await p.keyboard.press('Enter')
+    await p.getByTestId('redis-danger').getByLabel(/^Type cache-prod/).fill('cache-pr')
+  } },
+  { id: 'S33-bulk', scenario: 'team', open: async (p) => {
+    const t = await redisTab(p, 'cache-prod'); await t.getByRole('button', { name: 'Bulk…' }).click()
+    const d = p.getByTestId('redis-bulk')
+    await d.getByLabel('Key pattern').fill('session:*'); await d.getByRole('button', { name: 'Preview' }).click()
+    await d.getByTestId('bulk-preview').waitFor()
+  } },
+  { id: 'S33-write-mode', scenario: 'team', open: async (p) => { const t = await redisTab(p, 'sessions-prod'); await t.getByTestId('redis-mode').click(); await p.getByTestId('redis-mode-dialog').getByRole('radio', { name: /Confirm writes/ }).click() } },
+  { id: 'S33-connecting', scenario: 'team', open: async (p, f) => {
+    await f.redisManual()
+    await vaultNav(p, 'Databases'); await p.getByRole('row', { name: /cache-prod/ }).dblclick()
+    const conn = (await f.redisConnIds()).at(-1)!
+    await f.redisEvent(conn, { type: 'plan', steps: [{ label: 'Sign in to bastion', detail: null }, { label: 'Sign in to db-1', detail: 'through bastion' }, { label: 'Reach Redis at 127.0.0.1:6379', detail: null }, { label: 'Sign in as app-ro', detail: null }] })
+    await f.redisEvent(conn, { type: 'step', index: 0, state: 'done', detail: null })
+    await f.redisEvent(conn, { type: 'step', index: 1, state: 'active', detail: null })
+  } },
+  { id: 'S23-settings-databases', scenario: 'team', open: async (p) => { await p.keyboard.press('ControlOrMeta+,'); await p.getByRole('button', { name: 'Databases', exact: true }).first().click() } },
   { id: 'S25-import', scenario: 'empty', open: async (p) => { await p.getByRole('button', { name: 'Import', exact: true }).click(); await p.getByRole('button', { name: 'Choose file…' }).click() } },
 ]

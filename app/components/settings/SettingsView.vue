@@ -13,11 +13,11 @@ const { label: shortcutLabel } = useShortcutLabel()
 const settings = useSettingsStore()
 const sftp = useSftpStore()
 // Windows only: "System" (ssh:// links, start with Windows). The registry is Rust's business: `supported` says whether to show it.
-type SectionName = 'Appearance' | 'Terminal' | 'Logs' | 'AI' | 'Shortcuts' | 'Security' | 'System' | 'About'
+type SectionName = 'Appearance' | 'Terminal' | 'Databases' | 'Logs' | 'AI' | 'Shortcuts' | 'Security' | 'System' | 'About'
 type SystemInfo = SystemIntegration_Serialize
 const NO_SYSTEM: SystemInfo = { supported: false, ssh_links: false, autostart: false, other_handler: null, pinned: false, edition: null, install_dir: null }
 const system = ref<SystemInfo>(NO_SYSTEM)
-const sections = computed<SectionName[]>(() => ['Appearance', 'Terminal', 'Logs', 'AI', 'Shortcuts', 'Security', ...(system.value.supported ? ['System' as const] : []), 'About'])
+const sections = computed<SectionName[]>(() => ['Appearance', 'Terminal', 'Databases', 'Logs', 'AI', 'Shortcuts', 'Security', ...(system.value.supported ? ['System' as const] : []), 'About'])
 const section = ref<SectionName>('Appearance')
 onMounted(async () => { system.value = await settings.systemIntegrationGet().catch(() => NO_SYSTEM) })
 async function openDefaultApps() {
@@ -220,6 +220,26 @@ const num = (v: string | number, fallback: number) => (Number.isFinite(Number(v)
             </ul>
           </div>
           <p class="pt-3 text-xs text-muted">Changes apply to open terminals straight away.</p>
+        </template>
+
+        <template v-else-if="section === 'Databases'">
+          <div class="row">
+            <span class="flex flex-1 flex-col">Writes on a new database<span class="text-xs text-muted">What a database starts with. Each one can be changed from the mode button in its tab.</span></span>
+            <div class="w-80"><Segmented :model-value="settings.redis.default_mode" label="Writes on a new database" :options="[{ value: 'read_only', label: 'Read-only' }, { value: 'confirm', label: 'Confirm writes' }, { value: 'open', label: 'Open' }]" @update:model-value="(v: string) => settings.setRedis({ default_mode: v as 'read_only' | 'confirm' | 'open' })" /></div>
+          </div>
+          <div class="row">
+            <span class="flex flex-1 flex-col">Key separator<span class="text-xs text-muted">Groups keys into folders in the key tree: user:1042:profile sits under user: and 1042:. One to four characters.</span></span>
+            <div class="w-24"><Input :model-value="settings.redis.key_separator" aria-label="Key separator" class="font-mono" maxlength="4" autocomplete="off" spellcheck="false" @change="(e: Event) => { const v = (e.target as HTMLInputElement).value.trim(); if (/^\S{1,4}$/.test(v)) settings.setRedis({ key_separator: v }) }" /></div>
+          </div>
+          <div class="row">
+            <span class="flex flex-1 flex-col">Keys per scan<span class="text-xs text-muted">How many keys one step of the key list asks the server to look at. Smaller is gentler on a busy server.</span></span>
+            <div class="w-24"><NumberInput label="Keys per scan" :model-value="settings.redis.scan_count" :min="100" :max="5000" @update:model-value="(v: string | number) => settings.setRedis({ scan_count: Math.min(5000, Math.max(100, num(v, 500))) })" /></div>
+          </div>
+          <div class="row">
+            <span class="flex flex-1 flex-col">Keep console history<span class="text-xs text-muted">Remembers the commands you run in a database's Console, encrypted on this computer. Commands that carry a password are never saved.</span></span>
+            <Switch :model-value="settings.redis.keep_history" aria-label="Keep console history" @update:model-value="(v: boolean) => settings.setRedis({ keep_history: v })" />
+          </div>
+          <p class="pt-3 text-xs text-muted">Values load 500 items at a time, and a string over 1 MB opens as a preview first. Those are fixed.</p>
         </template>
 
         <template v-else-if="section === 'Logs'">

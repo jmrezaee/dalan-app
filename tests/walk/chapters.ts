@@ -19,6 +19,7 @@ export const CHAPTERS: ChapterInfo[] = [
   { n: 15, title: 'Settings', flows: ['S23'] },
   { n: 16, title: 'Light theme', flows: ['S02', 'S03', 'S18', 'S19', 'S21'] },
   { n: 17, title: 'Lock', flows: ['S24'] },
+  { n: 18, title: 'Databases', flows: ['F13', 'F14', 'F15', 'F16', 'F17', 'F18', 'F19', 'S26', 'S27', 'S28', 'S29', 'S30', 'S31', 'S32', 'S33'] },
 ]
 
 /** Which chapters to run, from the WALK_FROM and WALK_ONLY the run script sets. */

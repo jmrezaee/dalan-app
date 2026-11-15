@@ -124,7 +124,8 @@ export const redisConsole: Pick<Handlers, Keys> = {
     const args = split(String(a.line))
     if (!args.length) fail('validation', 'Type a command.')
     args[0] = args[0]!.toUpperCase()
-    if (!SECRET(args)) {
+    const keep = (() => { try { return JSON.parse(m.settings.redis ?? '{}').keep_history !== false } catch { return true } })()
+    if (keep && !SECRET(args)) {
       const h = (m.redisHistory[db.id] ??= [])
       const line = String(a.line).trim()
       if (h[0] !== line) h.unshift(line)

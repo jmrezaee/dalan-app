@@ -3,6 +3,7 @@
 import { test, type Locator, type Page } from '@playwright/test'
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { CHAPTERS } from './chapters'
 
 export interface StepInfo { id: string, flow?: string, screen?: string, caption: string }
 
@@ -63,7 +64,7 @@ let currentCaption = ''
 
 export async function step(page: Page, info: StepInfo, body: () => Promise<void>) {
   const n = ++stepNumber
-  const caption = `Chapter ${chapterNumber} of 17 · ${chapterTitle} · step ${n}${info.flow ? ` · ${info.flow}` : ''}${info.screen ? ` ${info.screen}` : ''} · ${info.caption}`
+  const caption = `Chapter ${chapterNumber} of ${CHAPTERS.length} · ${chapterTitle} · step ${n}${info.flow ? ` · ${info.flow}` : ''}${info.screen ? ` ${info.screen}` : ''} · ${info.caption}`
   currentCaption = caption
   const started = Date.now()
   let error = ''

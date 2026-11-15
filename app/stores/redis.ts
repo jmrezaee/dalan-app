@@ -7,7 +7,7 @@ import { useTauri } from '~/composables/useTauri'
 
 export type RedisStatus = 'connecting' | 'ready' | 'dropped' | 'failed' | 'closed'
 /** `note` is the step's fixed remark ("through bastion"); `detail` is what shows now: a progress line, why it failed, or the note. */
-/** How many keys one `SCAN` call asks the server to look at (replica/redis/spec.md). */
+/** How many keys one `SCAN` call asks the server to look at, unless Settings > Databases says otherwise. */
 export const SCAN_COUNT = 500
 
 /** The value of the open key, as far as it has been loaded. One shape per type; pages are appended. */
@@ -89,6 +89,8 @@ function setup() {
   // Each scan and each key load has a number: an answer that comes back after a newer request is dropped.
   let scanRun = 0
   let valueRun = 0
+  /** The ids of the keys in `keyRows`, so a key SCAN returns twice is listed once. Rebuilt when the list was edited. */
+  let seenKeys = new Set<string>()
 
   // An attempt number: events from a connection that was replaced (Try again) are ignored.
   let generation = 0
@@ -214,16 +216,24 @@ function setup() {
   async function scanMore() {
     if (!connId.value || status.value !== 'ready' || scanDone.value || scanning.value) return
     const run = scanRun
+    const scanCount = useSettingsStore().redis.scan_count || SCAN_COUNT
     scanning.value = true
     scanError.value = ''
     try {
-      const page = await api.redisScan(connId.value, scanCursor.value, pattern.value.trim(), typeFilter.value, SCAN_COUNT)
+      const page = await api.redisScan(connId.value, scanCursor.value, pattern.value.trim(), typeFilter.value, scanCount)
       if (run !== scanRun) return
       // SCAN may return a key twice while the keyspace changes: keep the first.
-      const seen = new Set(keyRows.value.map(r => bytesId(r.key)))
-      keyRows.value = [...keyRows.value, ...page.keys.filter(r => !seen.has(bytesId(r.key)))]
+      // `seenKeys` is kept between pages: rebuilding it from 100,000 rows on every page would be the slow part.
+      if (seenKeys.size !== keyRows.value.length) seenKeys = new Set(keyRows.value.map(r => bytesId(r.key)))
+      const fresh = page.keys.filter((r) => {
+        const id = bytesId(r.key)
+        if (seenKeys.has(id)) return false
+        seenKeys.add(id)
+        return true
+      })
+      keyRows.value = keyRows.value.concat(fresh)
       scanCursor.value = page.cursor
-      scanned.value += SCAN_COUNT
+      scanned.value += scanCount
     }
     catch (e) {
       if (run === scanRun) scanError.value = message(e, 'Couldn\'t list the keys.')
