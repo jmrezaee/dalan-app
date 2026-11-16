@@ -35,6 +35,7 @@ watch(() => databases.editing, (e) => {
   hadPassword.value = !!saved?.has_password
   savedMode.value = saved?.environment === 'production' ? saved.write_mode : null
   password.value = ''
+  masterPassword.value = ''
   error.value = ''
   tested.value = null
 }, { immediate: true })
@@ -71,7 +72,12 @@ const savedPassword = computed(() => hadPassword.value && !form.clear_password)
 // master password (Rust refuses it from this form either way).
 const RANK = { read_only: 2, confirm: 1, open: 0 } as const
 const savedMode = ref<DatabaseForm['write_mode'] | null>(null)
-const lockedModes = computed(() => (savedMode.value ? (['read_only', 'confirm', 'open'] as const).filter(m => RANK[m] < RANK[savedMode.value!]) : []))
+// Un-marking a saved production database would unlock its mode, so that asks for the master password here
+// (Rust checks it). With it, the save may also loosen the mode in the same go.
+const unmarking = computed(() => savedMode.value !== null && form.environment !== 'production')
+const masterPassword = ref('')
+watch(unmarking, () => { masterPassword.value = '' })
+const lockedModes = computed(() => (savedMode.value && !unmarking.value ? (['read_only', 'confirm', 'open'] as const).filter(m => RANK[m] < RANK[savedMode.value!]) : []))
 
 const input = (): DatabaseForm => ({ ...form, port: Number(form.port) || 0, password: password.value || null })
 
@@ -89,7 +95,13 @@ async function test() {
 async function submit() {
   if (busy.value) return
   busy.value = true
-  const r = await databases.save(input())
+  if (unmarking.value && !masterPassword.value) {
+    busy.value = false
+    error.value = 'Type your master password to stop marking this database as production.'
+    return
+  }
+  const r = await databases.save(input(), unmarking.value ? masterPassword.value : null)
+  masterPassword.value = ''
   busy.value = false
   error.value = r.error
   if (!r.error) open.value = false
@@ -107,6 +119,11 @@ async function submit() {
         <div class="flex flex-col gap-1.5">
           <Label>Environment</Label>
           <Segmented v-model="environment" label="Environment" :options="[{ value: 'none', label: 'None' }, { value: 'staging', label: 'Staging' }, { value: 'production', label: 'Production' }]" />
+          <div v-if="unmarking" class="flex flex-col gap-1.5 rounded-lg border border-warning/40 p-2.5">
+            <label for="rdb-master-password" class="text-sm font-medium">Master password</label>
+            <PasswordInput id="rdb-master-password" v-model="masterPassword" />
+            <p class="text-xs text-muted">This database is marked production. Un-marking it makes it less protected, so it needs your master password.</p>
+          </div>
           <p class="text-xs text-muted">Production shows an amber bar on the tab, so nobody mistakes it for staging.</p>
         </div>
 

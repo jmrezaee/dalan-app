@@ -5,6 +5,7 @@ import { fail, type Handlers } from '../types'
 import type { Model, RedisDb } from '../model'
 import type { RedisBytes } from '../../../app/types/bindings'
 import { globToRegExp, keyspace, otherKeyspace, type FakeKey } from './redisKeys'
+import { MASTER } from './vault'
 
 type Keys = 'redisNodes' | 'redisDbList' | 'redisDbSave' | 'redisDbDelete' | 'redisDbTest' | 'redisOpen' | 'redisRespond' | 'redisSelect' | 'redisClose'
   | 'redisScan' | 'redisKeyInfo' | 'redisValuePage'
@@ -89,9 +90,21 @@ export const redis: Pick<Handlers, Keys> = {
       tls: !!i.tls, tls_server_name: i.tls_server_name || null, write_mode: i.write_mode, default_db: i.default_db ?? 0, key_separator: i.key_separator ?? ':',
       last_opened_at: existing?.last_opened_at ?? null,
     }
-    // Like Rust: the editor can't loosen a production database's mode (that needs the master password).
+    // Like Rust: making a production database less protected (a looser mode, or un-marking it) needs the master password.
     const rank = { read_only: 2, confirm: 1, open: 0 } as const
-    if (existing?.environment === 'production' && rank[d.write_mode] < rank[existing.write_mode]) fail('validation', 'A production database\'s write mode changes from the mode button in its tab, with the master password.')
+    if (existing?.environment === 'production' && (d.environment !== 'production' || rank[d.write_mode] < rank[existing.write_mode])) {
+      if (Date.now() < m.vault.cooldownUntil) fail('too_many_attempts', 'Too many wrong tries. Wait 30 seconds.')
+      if (!a.masterPassword) fail('wrong_password', 'Type the master password to make a production database less protected.')
+      if (a.masterPassword !== MASTER) {
+        m.vault.wrongTries++
+        if (m.vault.wrongTries >= 5) {
+          m.vault.cooldownUntil = Date.now() + 30_000
+          m.vault.wrongTries = 0
+        }
+        fail('wrong_password', 'That password didn\'t work.')
+      }
+      m.vault.wrongTries = 0
+    }
     if (existing) Object.assign(existing, d)
     else m.redisDbs.push(d)
     return summary(m, d)

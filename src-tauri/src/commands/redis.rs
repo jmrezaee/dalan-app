@@ -38,15 +38,59 @@ pub async fn redis_db_list(state: State<'_, AppState>) -> AppResult<Vec<RedisDat
         .await
 }
 
+/// Checks the master password for a change that makes a production database less protected. Five wrong tries
+/// start the same cooldown as unlocking. The password is zeroized when it is dropped.
+async fn check_master(state: &AppState, password: Option<String>) -> AppResult<()> {
+    let password = password.map(Zeroizing::new);
+    state.check_cooldown()?;
+    let Some(pw) = password.filter(|p| !p.is_empty()) else {
+        return Err(AppError::new(
+            ErrorCode::WrongPassword,
+            "Type the master password to make a production database less protected.",
+        ));
+    };
+    // `unlock` derives the key and checks it; the session it builds is dropped (and zeroized) right away.
+    match state
+        .with_db(move |c| crate::vault::unlock(c, &pw).map(|_| ()))
+        .await
+    {
+        Ok(()) => {
+            state.reset_failures();
+            Ok(())
+        }
+        Err(e) => {
+            if e.code == ErrorCode::WrongPassword {
+                state.record_failure();
+            }
+            Err(e)
+        }
+    }
+}
+
 /// S27: creates or updates a database. The password, if any, goes straight into the vault.
+/// A save that makes a production database less protected (a looser write mode, or no longer marked
+/// production) needs the master password, checked here.
 #[tauri::command]
 #[specta::specta]
 pub async fn redis_db_save(
     state: State<'_, AppState>,
     input: RedisDatabaseInput,
+    master_password: Option<String>,
 ) -> AppResult<RedisDatabase> {
+    state.require_unlocked()?;
+    // Read the saved row first: only a save that lowers protection asks for (and checks) the password.
+    let (lowers, input) = state
+        .with_db_session(move |c, s| Ok((store::lowers_protection(c, &s.vault_id, &input)?, input)))
+        .await?;
+    if lowers {
+        check_master(&state, master_password).await?;
+        log::info!(
+            "redis: {} was made less protected from the editor",
+            input.name.trim()
+        );
+    }
     state
-        .with_db_session(move |c, s| store::save(c, s, input))
+        .with_db_session(move |c, s| store::save_with_master(c, s, input, lowers))
         .await
 }
 
@@ -265,33 +309,13 @@ pub async fn redis_set_mode(
     master_password: Option<String>,
 ) -> AppResult<RedisDatabase> {
     state.require_unlocked()?;
-    let password = master_password.map(Zeroizing::new);
     let id = db_id.clone();
     let db = state
         .with_db_session(move |c, s| store::get(c, &s.vault_id, &id))
         .await?;
     let loosens = gate::protection(mode) < gate::protection(db.write_mode);
     if loosens && db.environment == RedisEnvironment::Production {
-        state.check_cooldown()?;
-        let Some(pw) = password.filter(|p| !p.is_empty()) else {
-            return Err(AppError::new(
-                ErrorCode::WrongPassword,
-                "Type the master password to make a production database less protected.",
-            ));
-        };
-        // `unlock` derives the key and checks it; the session it builds is dropped (and zeroized) right away.
-        match state
-            .with_db(move |c| crate::vault::unlock(c, &pw).map(|_| ()))
-            .await
-        {
-            Ok(()) => state.reset_failures(),
-            Err(e) => {
-                if e.code == ErrorCode::WrongPassword {
-                    state.record_failure();
-                }
-                return Err(e);
-            }
-        }
+        check_master(&state, master_password).await?;
     }
     log::info!("redis: write mode of {} is now {}", db.name, mode.as_str());
     state

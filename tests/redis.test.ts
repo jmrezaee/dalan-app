@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { RedisBytes, RedisKeyRow } from '~/types/bindings'
 import { byteLength, bytesId, bytesOf, bytesText, hexDump, parsedJson, sizeText, ttlText } from '~/utils/redisBytes'
-import { foldersOf, treeRows } from '~/utils/redisTree'
+import { foldersOf, treeCache, treeRows } from '~/utils/redisTree'
 
 const text = (t: string): RedisBytes => ({ kind: 'text', text: t })
 const bin = (...bytes: number[]): RedisBytes => ({ kind: 'binary', bytes })
@@ -125,5 +125,37 @@ describe('redis editors (R3)', () => {
     expect(jsonProblem('[1, 2]')).toBe('')
     expect(jsonProblem('{"a":')).toContain('his isn\'t valid JSON yet.')
     expect(jsonProblem('{\n  "a": 1,\n  nope\n}')).toMatch(/^(Line 3: t|T)his isn't valid JSON yet\.$/)
+  })
+})
+
+describe('redis key tree cache', () => {
+  const names = (rows: ReturnType<typeof treeRows>) => rows.map(r => (r.kind === 'folder' ? `${r.name}(${r.count})` : r.name))
+  const open = new Set(['user:'])
+
+  it('gives the same rows with and without the cache, as the list grows, changes and shrinks', () => {
+    const cache = treeCache()
+    const check = (keys: RedisKeyRow[]) => expect(names(treeRows(keys, ':', open, cache))).toEqual(names(treeRows(keys, ':', open)))
+    const page1 = [key('user:1'), key('user:2'), key('queue:a'), key('solo')]
+    check(page1)
+    check(page1) // the same list again (a folder opened)
+    const page2 = page1.concat([key('user:3'), key('queue:b'), key('zeta')]) // the next page of the scan
+    check(page2)
+    expect(names(treeRows(page2, ':', open, cache))).toEqual(['queue:(2)', 'user:(3)', '1', '2', '3', 'solo', 'zeta'])
+    check(page2.map(r => (r === page2[1] ? { ...r, ttl_ms: 5 } : r))) // one key re-read: same length, another list
+    check(page2.filter(r => r !== page2[0])) // a key deleted
+    check([key('fresh:1'), ...page2]) // a key created at the top
+    check(page2) // back to an earlier list
+    expect(names(treeRows(page2, '/', open, cache))).toEqual(names(treeRows(page2, '/', open))) // another separator
+    check([]) // a new scan
+    check(page1)
+  })
+
+  it('shows a re-read key\'s new details (the cache is not used when a row in the middle changed)', () => {
+    const cache = treeCache()
+    const keys = [key('a'), key('b', 'string', null), key('c')]
+    treeRows(keys, ':', new Set(), cache)
+    const reread = keys.map(r => (r === keys[1] ? { ...r, ttl_ms: 60_000 } : r))
+    const row = treeRows(reread, ':', new Set(), cache).find(r => r.kind === 'key' && r.name === 'b')
+    expect(row?.kind === 'key' && row.row.ttl_ms).toBe(60_000)
   })
 })

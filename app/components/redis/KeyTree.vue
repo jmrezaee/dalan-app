@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import { count, ttlText } from '~/utils/redisBytes'
-import { treeRows } from '~/utils/redisTree'
+import { treeCache, treeRows } from '~/utils/redisTree'
 import type { TreeRow } from '~/utils/redisTree'
 
 const props = defineProps<{ tabKey: string, separator: string, writable?: boolean }>()
@@ -23,7 +23,9 @@ function setType(v: unknown) {
   void store.scan()
 }
 
-const rows = computed(() => treeRows(store.keyRows, props.separator, store.openFolders))
+// The cache lets the next page of a scan add its keys to the tree instead of building 100,000 again.
+const cache = treeCache()
+const rows = computed(() => treeRows(store.keyRows, props.separator, store.openFolders, cache))
 const ROW = 28
 const { scroller, onScroll, from, to, padTop, padBottom, reveal } = useVirtualRows(computed(() => rows.value.length), ROW)
 const shown = computed(() => rows.value.slice(from.value, to.value))

@@ -260,11 +260,39 @@ pub fn validate(input: &RedisDatabaseInput) -> AppResult<()> {
     Ok(())
 }
 
+/// Whether saving this form would make a saved production database less protected: a looser write mode, or no
+/// longer marked production (which would unlock the mode). Such a save needs the master password.
+pub fn lowers_protection(
+    conn: &Connection,
+    vault_id: &str,
+    input: &RedisDatabaseInput,
+) -> AppResult<bool> {
+    let Some(id) = &input.id else {
+        return Ok(false);
+    };
+    let old = get(conn, vault_id, id)?;
+    Ok(old.environment == RedisEnvironment::Production
+        && (input.environment != RedisEnvironment::Production
+            || gate::protection(input.write_mode) < gate::protection(old.write_mode)))
+}
+
 /// Creates or updates a database in one transaction, password included. Returns the saved row.
+/// A save that lowers a production database's protection is refused here; see `save_with_master`.
 pub fn save(
     conn: &mut Connection,
     s: &VaultSession,
     input: RedisDatabaseInput,
+) -> AppResult<RedisDatabase> {
+    save_with_master(conn, s, input, false)
+}
+
+/// `master_checked`: the caller has just checked the master password, so the save may lower a production
+/// database's protection.
+pub fn save_with_master(
+    conn: &mut Connection,
+    s: &VaultSession,
+    input: RedisDatabaseInput,
+    master_checked: bool,
 ) -> AppResult<RedisDatabase> {
     validate(&input)?;
     let tx = conn.transaction()?;
@@ -281,17 +309,13 @@ pub fn save(
             return Err(AppError::validation("That host is gone. Pick another one."));
         }
     }
-    // The editor cannot loosen a production database's mode: that goes through `set_mode`, which asks for the
-    // master password.
-    if let Some(existing) = &input.id {
-        let old = get(&tx, &s.vault_id, existing)?;
-        if old.environment == RedisEnvironment::Production
-            && gate::protection(input.write_mode) < gate::protection(old.write_mode)
-        {
-            return Err(AppError::validation(
-                "A production database's write mode changes from the mode button in its tab, with the master password.",
-            ));
-        }
+    // Without the master password the editor cannot make a production database less protected: not by a looser
+    // mode, and not by un-marking it production first (which would unlock the mode on the next save).
+    if !master_checked && lowers_protection(&tx, &s.vault_id, &input)? {
+        return Err(AppError::new(
+            ErrorCode::WrongPassword,
+            "Type the master password to make a production database less protected.",
+        ));
     }
     let now = now_ms();
     let id = match &input.id {
@@ -716,8 +740,30 @@ mod tests {
         };
         for looser in [RedisWriteMode::Confirm, RedisWriteMode::Open] {
             let err = save(&mut conn, &s, edit(looser)).unwrap_err();
-            assert_eq!(err.code, ErrorCode::Validation);
+            assert_eq!(err.code, ErrorCode::WrongPassword);
         }
+        // Un-marking it production is the same thing by another road: refused without the master password,
+        // whatever mode comes with it.
+        for env in [RedisEnvironment::None, RedisEnvironment::Staging] {
+            for mode in [RedisWriteMode::ReadOnly, RedisWriteMode::Open] {
+                let unmark = RedisDatabaseInput {
+                    environment: env,
+                    ..edit(mode)
+                };
+                assert!(lowers_protection(&conn, &s.vault_id, &unmark).unwrap());
+                assert_eq!(
+                    save(&mut conn, &s, unmark).unwrap_err().code,
+                    ErrorCode::WrongPassword
+                );
+            }
+        }
+        let still = get(&conn, &s.vault_id, &prod.id).unwrap();
+        assert_eq!(
+            (still.environment, still.write_mode),
+            (RedisEnvironment::Production, RedisWriteMode::ReadOnly)
+        );
+        assert!(!lowers_protection(&conn, &s.vault_id, &edit(RedisWriteMode::ReadOnly)).unwrap());
+        assert!(!lowers_protection(&conn, &s.vault_id, &input("brand-new")).unwrap());
         assert_eq!(
             get(&conn, &s.vault_id, &prod.id).unwrap().write_mode,
             RedisWriteMode::ReadOnly
@@ -741,6 +787,21 @@ mod tests {
         )
         .unwrap();
         assert_eq!(open.write_mode, RedisWriteMode::Open);
+        // With the master password checked, the editor may un-mark it and open it up in one save.
+        let freed = save_with_master(
+            &mut conn,
+            &s,
+            RedisDatabaseInput {
+                environment: RedisEnvironment::None,
+                ..edit(RedisWriteMode::Open)
+            },
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            (freed.environment, freed.write_mode),
+            (RedisEnvironment::None, RedisWriteMode::Open)
+        );
         assert_eq!(
             set_mode(&conn, &s.vault_id, "nope", RedisWriteMode::Open)
                 .unwrap_err()

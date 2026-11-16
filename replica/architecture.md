@@ -324,7 +324,7 @@ again. The plan gets one more step ("Ask the sentinels for mymaster").
 | command | does | input | output | flow |
 | --- | --- | --- | --- | --- |
 | `redis_db_list` | saved databases, by name; never a password, only `has_password` | – | `RedisDatabase[]` | F13 |
-| `redis_db_save` | create or update; the password goes into `secrets` | `RedisDatabaseInput` | `RedisDatabase` | F13 |
+| `redis_db_save` | create or update; the password goes into `secrets`; a save that makes a production database less protected (looser mode, or no longer production) needs the master password | `{ input: RedisDatabaseInput, master_password? }` | `RedisDatabase` | F13 |
 | `redis_db_delete` | removes the row and its secret | `{ id }` | `()` | F13 |
 | `redis_db_test` | connects with the form's values, reads version, mode and latency, closes | `RedisDatabaseInput` | `RedisTestResult` | F13 |
 | `redis_open` | starts a tab's connection and returns at once; progress on the channel | `{ db_id, events: Channel<RedisEvent> }` | `{ conn_id }` | F13 |

@@ -33,10 +33,13 @@ export const useRedisDatabasesStore = defineStore('redisDatabases', () => {
     loaded.value = true
   }
 
-  /** Saves the form. Returns the saved row, or the sentence to show under the form. */
-  async function save(input: DatabaseForm): Promise<{ db: SavedDatabase | null, error: string }> {
+  /**
+   * Saves the form. Returns the saved row, or the sentence to show under the form. `masterPassword` is for a save
+   * that makes a production database less protected; Rust checks it, and it is not kept here.
+   */
+  async function save(input: DatabaseForm, masterPassword: string | null = null): Promise<{ db: SavedDatabase | null, error: string }> {
     try {
-      const db = await api.redisDbSave(input)
+      const db = await api.redisDbSave(input, masterPassword)
       await refresh()
       return { db, error: '' }
     }

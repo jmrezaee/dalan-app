@@ -27,15 +27,13 @@ export type TreeRow = TreeFolder | TreeKey
 interface Node { folders: Map<string, Node>, keys: { name: string, row: RedisKeyRow }[], count: number }
 const node = (): Node => ({ folders: new Map(), keys: [], count: 0 })
 
-/**
- * The rows to draw, top to bottom, for the folders that are open.
- * - Only readable (text) keys are split; a binary key is one row at the top level.
- * - A folder that holds a single key is not worth a click: that key is shown in its place, with the rest of its name.
- * - Folders come first, then keys, each by name.
- */
-export function treeRows(keys: RedisKeyRow[], separator: string, open: ReadonlySet<string>): TreeRow[] {
-  const root = node()
-  for (const row of keys) {
+/** What `treeRows` built last time, so the next page of a scan only adds its own keys. One per key tree. */
+export interface TreeCache { keys: RedisKeyRow[], separator: string, root: Node }
+export const treeCache = (): TreeCache => ({ keys: [], separator: '', root: node() })
+
+function insert(root: Node, rows: RedisKeyRow[], from: number, separator: string) {
+  for (let r = from; r < rows.length; r++) {
+    const row = rows[r]!
     const parts = row.key.kind === 'text' && separator ? row.key.text.split(separator) : [bytesText(row.key)]
     let at = root
     at.count++
@@ -52,6 +50,39 @@ export function treeRows(keys: RedisKeyRow[], separator: string, open: ReadonlyS
     }
     at.keys.push({ name: parts[parts.length - 1]!, row })
   }
+}
+
+/**
+ * The folders and keys of everything scanned. With a cache: the same list is not built again (opening a folder),
+ * and a list that only grew at its end (the next page of a scan) only has its new keys added. Anything else
+ * (a key deleted, renamed, re-read, or a new scan) builds it again.
+ */
+function build(keys: RedisKeyRow[], separator: string, cache?: TreeCache): Node {
+  if (!cache) {
+    const root = node()
+    insert(root, keys, 0, separator)
+    return root
+  }
+  const had = cache.keys.length
+  const same = cache.separator === separator
+  if (same && cache.keys === keys) return cache.root
+  // Grew at the end: the rows it had are the same objects, in the same places (checked at both ends).
+  const grew = same && had > 0 && keys.length > had && keys[0] === cache.keys[0] && keys[had - 1] === cache.keys[had - 1]
+  if (!grew) cache.root = node()
+  insert(cache.root, keys, grew ? had : 0, separator)
+  cache.keys = keys
+  cache.separator = separator
+  return cache.root
+}
+
+/**
+ * The rows to draw, top to bottom, for the folders that are open.
+ * - Only readable (text) keys are split; a binary key is one row at the top level.
+ * - A folder that holds a single key is not worth a click: that key is shown in its place, with the rest of its name.
+ * - Folders come first, then keys, each by name.
+ */
+export function treeRows(keys: RedisKeyRow[], separator: string, open: ReadonlySet<string>, cache?: TreeCache): TreeRow[] {
+  const root = build(keys, separator, cache)
 
   const out: TreeRow[] = []
   /** The one key under a folder that holds exactly one, with its name from that folder down. */

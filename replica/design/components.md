@@ -404,6 +404,10 @@ WriteModeDialog (S33; the toolbar's mode button and the banner's "Change…")
   footer [Cancel] [Change mode] (disabled while the mode is unchanged)
   states   wrong password ("That password didn't work." under the field), too many tries (the cooldown sentence), saving
   In the editor (S27) a saved production database's looser modes are disabled with the hint "Loosen this from the mode button in its tab (it asks for your master password)."
+  Changing a saved production database's Environment to None or Staging shows, under the field, a warning-bordered block:
+  PasswordInput "Master password" + "This database is marked production. Un-marking it makes it less protected, so it needs your master password."
+  Saving without it: "Type your master password to stop marking this database as production."; a wrong one: "That password didn't work."
+  With the password the looser modes are no longer disabled (the same save may loosen the mode).
 
 NewKeyDialog (S28; KeyTree's New key)
   Dialog "New key": Name (mono) · Type (Select: String, Hash, List, Set, Sorted set, Stream, JSON) · the first item for that type

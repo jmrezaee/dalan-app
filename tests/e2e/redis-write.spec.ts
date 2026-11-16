@@ -458,4 +458,44 @@ test.describe('changing the mode (S33)', () => {
     await expect(sheet.getByRole('radio', { name: /^Open/ })).toBeDisabled()
     await expect(sheet.getByText('Loosen this from the mode button in its tab (it asks for your master password).')).toBeVisible()
   })
+
+  test('un-marking a production database in the editor needs the master password too, so the mode cannot be unlocked that way', async ({ page }) => {
+    const { fake } = await openDb(page, 'sessions-prod')
+    await page.getByRole('tab', { name: 'Vault' }).click()
+    await page.getByRole('row', { name: /sessions-prod/ }).click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Edit' }).click()
+    const sheet = page.getByRole('dialog', { name: /database/i })
+    await expect(sheet.getByLabel('Master password')).toHaveCount(0)
+    await sheet.getByRole('radio', { name: 'None', exact: true }).click()
+    await expect(sheet.getByText('Un-marking it makes it less protected, so it needs your master password.')).toBeVisible()
+
+    // Without the password, and with a wrong one, nothing changes.
+    await sheet.getByRole('button', { name: 'Save' }).click()
+    await expect(sheet.getByRole('alert')).toHaveText('Type your master password to stop marking this database as production.')
+    await sheet.getByLabel('Master password').fill('not-the-password')
+    await sheet.getByRole('button', { name: 'Save' }).click()
+    await expect(sheet.getByRole('alert')).toHaveText('That password didn\'t work.')
+    expect(await fake.redisDb('sessions-prod')).toMatchObject({ environment: 'production', write_mode: 'read_only' })
+
+    // The page asking the backend directly gets the same answer.
+    const code = await page.evaluate(async () => {
+      const invoke = (window as any).__TAURI_INTERNALS__.invoke
+      const [db] = (await invoke('redis_db_list')).filter((d: { name: string }) => d.name === 'sessions-prod')
+      const input = { ...db, environment: 'none', write_mode: 'open', password: null, clear_password: false }
+      return invoke('redis_db_save', { input, masterPassword: null }).then(() => 'saved', (e: { code: string }) => e.code)
+    })
+    expect(code).toBe('wrong_password')
+    expect(await fake.redisDb('sessions-prod')).toMatchObject({ environment: 'production', write_mode: 'read_only' })
+
+    // Going back to Production needs nothing.
+    await sheet.getByRole('radio', { name: 'Production' }).click()
+    await expect(sheet.getByLabel('Master password')).toHaveCount(0)
+    // With the right password it is un-marked, and the same save may open it up.
+    await sheet.getByRole('radio', { name: 'None', exact: true }).click()
+    await sheet.getByRole('radio', { name: /^Open/ }).click()
+    await sheet.getByLabel('Master password').fill('correct-horse')
+    await sheet.getByRole('button', { name: 'Save' }).click()
+    await expect(sheet).toHaveCount(0)
+    expect(await fake.redisDb('sessions-prod')).toMatchObject({ environment: 'none', write_mode: 'open' })
+  })
 })

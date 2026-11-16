@@ -21,8 +21,12 @@ export const commands = {
 	openDefaultApps: () => typedError<null, AppError>(__TAURI_INVOKE("open_default_apps")),
 	/**  S26: the saved databases, by name. */
 	redisDbList: () => typedError<RedisDatabase_Serialize[], AppError>(__TAURI_INVOKE("redis_db_list")),
-	/**  S27: creates or updates a database. The password, if any, goes straight into the vault. */
-	redisDbSave: (input: RedisDatabaseInput_Deserialize) => typedError<RedisDatabase_Serialize, AppError>(__TAURI_INVOKE("redis_db_save", { input })),
+	/**
+	 *  S27: creates or updates a database. The password, if any, goes straight into the vault.
+	 *  A save that makes a production database less protected (a looser write mode, or no longer marked
+	 *  production) needs the master password, checked here.
+	 */
+	redisDbSave: (input: RedisDatabaseInput_Deserialize, masterPassword: string | null) => typedError<RedisDatabase_Serialize, AppError>(__TAURI_INVOKE("redis_db_save", { input, masterPassword })),
 	redisDbDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("redis_db_delete", { id })),
 	/**
 	 *  S27 "Test connection": connects with the form's values, reads version, mode and latency, then closes.

@@ -28,7 +28,7 @@ export function useTauri() {
     quitCancel: () => commands.quitCancel(),
     linksTake: () => commands.linksTake(),
     redisDbList: () => unwrap(commands.redisDbList()),
-    redisDbSave: (input: RedisDatabaseInput_Deserialize) => unwrap(commands.redisDbSave(input)),
+    redisDbSave: (input: RedisDatabaseInput_Deserialize, masterPassword: string | null = null) => unwrap(commands.redisDbSave(input, masterPassword)),
     redisDbDelete: (id: string) => unwrap(commands.redisDbDelete(id)),
     redisDbTest: (input: RedisDatabaseInput_Deserialize) => unwrap(commands.redisDbTest(input)),
     redisOpen: (dbId: string, onEvent: (e: RedisEvent_Serialize) => void) => {

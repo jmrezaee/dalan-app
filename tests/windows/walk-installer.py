@@ -143,10 +143,20 @@ def reinstall_page(setup: Path, label: str):
     app, dlg = open_app(setup)
     def page():
         wait_page(dlg, "Welcome to Dalan")
-        press(dlg)
-        time.sleep(4)
-        screen_shot(f"{label}-reinstall-after-next")  # what is on screen after Next (kept to see why the page may not show)
-        steps[-1]["note"] = "debug: the whole screen after pressing Next"
+        # On a busy CI machine the first click on Next can be lost (the window is up but not ready for it): the
+        # debug shot showed the Welcome page still there. So: press, wait a little for the next page, and press
+        # again only while Welcome is still the page shown.
+        for _ in range(5):
+            press(dlg)
+            try:
+                wait_page(dlg, "Dalan is already installed", 6)
+                break
+            except WaitTimeout:
+                if not dlg.child_window(title_re="Welcome to Dalan").is_visible():
+                    break  # it moved on, to something else: let the wait below say what
+        else:
+            screen_shot(f"{label}-reinstall-after-next")  # what is on screen after five tries
+            steps[-1]["note"] = "debug: the whole screen after pressing Next five times"
         wait_page(dlg, "Dalan is already installed", 20)
         shot(dlg, f"{label}-reinstall")
 
