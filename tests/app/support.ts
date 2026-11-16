@@ -117,3 +117,58 @@ export async function jsClick(el: ChainablePromiseElement | WebdriverIO.Element)
   await e.waitForExist()
   await browser.execute((node: HTMLElement) => node.click(), e as unknown as HTMLElement)
 }
+
+/** The first element matching `xpath` that is on screen. Tabs stay mounted while hidden (terminals, Redis tabs), so the
+ *  first match in the page is often one from another tab. */
+export async function shown(xpath: string, timeout = 20_000): Promise<WebdriverIO.Element> {
+  let found: WebdriverIO.Element | undefined
+  await browser.waitUntil(async () => {
+    for (const el of await $$(xpath)) {
+      if (await el.isDisplayed().catch(() => false)) {
+        found = el as unknown as WebdriverIO.Element
+        return true
+      }
+    }
+    return false
+  }, { timeout, timeoutMsg: `nothing on screen matches ${xpath}` })
+  return found!
+}
+
+/** Adds a Redis database with the editor (S27): tested first when asked, then saved. */
+export async function addDatabase(d: { name: string, address: string, port?: number, password?: string, throughHost?: string, kind?: 'Cluster' | 'Sentinel', test?: boolean }) {
+  await (await shown('//button[contains(normalize-space(.),"New database")]')).click()
+  await type($('#rdb-name'), d.name)
+  if (d.kind) await $(`//*[@role="radio"][normalize-space(.)="${d.kind}"]`).click()
+  if (d.throughHost) {
+    await $('//*[@role="radio"][normalize-space(.)="Through a host"]').click()
+    await pick($('#rdb-host'), d.throughHost)
+  }
+  await type($('#rdb-address'), d.address)
+  if (d.port) await type($('#rdb-port'), String(d.port))
+  if (d.password) await type($('#rdb-pass'), d.password)
+  if (d.test) {
+    await (await shown('//button[normalize-space(.)="Test connection"]')).click()
+    await shown('//*[@role="status"][contains(normalize-space(.),"Connected")]', 40_000)
+  }
+  await (await shown('//button[normalize-space(.)="Save"]')).click()
+  await $('#rdb-name').waitForDisplayed({ reverse: true, timeout: 10_000 })
+  await browser.pause(500) // the sheet slides away
+}
+
+/** Opens a saved database in a tab and waits for its key tree (the connection is real: SSH hops, then Redis). */
+export async function openDatabase(name: string, timeout = 60_000) {
+  const row = await shown(`//tr[.//*[normalize-space(text())="${name}"]]`)
+  // WebKit's driver refuses to click a table row, so the row is focused the way Tab would, and Enter opens it.
+  await browser.execute((node: HTMLElement) => node.focus(), row as unknown as HTMLElement)
+  await browser.keys('Enter')
+  await shown('//*[@role="tree"][@aria-label="Keys"]', timeout)
+}
+
+/** Runs a line in the Console of the Redis tab in front and waits for `expectText` in its output. */
+export async function consoleRun(line: string, expectText: string) {
+  const input = await shown('//input[@aria-label="Command"]')
+  await input.click()
+  await input.setValue(line)
+  await browser.keys('Enter')
+  await shown(`//*[@role="log"][contains(normalize-space(.),"${expectText}")]`)
+}

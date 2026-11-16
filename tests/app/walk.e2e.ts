@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process'
-import { addHost, button, byLabel, byText, createVault, heading, openHost, pick, servers, type, typeInTerminal, waitForTerminal } from './support'
+import { addDatabase, addHost, button, byLabel, byText, consoleRun, createVault, heading, openDatabase, openHost, pick, servers, shown, type, typeInTerminal, waitForTerminal } from './support'
 import { startChapter, step } from './walkStep'
 
 // `pnpm walk:app`: the story from tests/walk on the REAL app and the REAL Docker servers (replica/testing/test-plan.md
@@ -106,6 +106,81 @@ describe('the walkthrough on the real app', function () {
       await button('Start tunnel').click()
       await $('//*[starts-with(@aria-label,"web through a: Active")]').waitForDisplayed({ timeout: 40_000 })
       expect(execSync('curl -s http://127.0.0.1:15080/').toString()).toContain('Welcome to nginx')
+    })
+  })
+
+  // The Redis servers from tests/servers/compose.yml: `redis` (one server, password test-redis) and the six-node
+  // cluster `rc1` to `rc6`. The runner is on their network, so the direct route works; the route through "server a"
+  // (added and trusted in chapter 5) is the one a production database takes.
+  it('Chapter 18: databases (F13 to F19, S26 to S33)', async () => {
+    startChapter(18, 'Databases')
+    const vaultTab = () => $('//*[@role="tab"][contains(normalize-space(.),"Vault")]').click()
+    const view = async (name: string) => (await shown(`//*[@role="tab"][normalize-space(.)="${name}"]`)).click()
+    const redisCli = (args: string) => execSync(`docker exec dalan-test-redis redis-cli -a test-redis --no-auth-warning ${args}`).toString().trim()
+    // Its own name per run, and an expiry, so a run leaves nothing behind.
+    const key = `walk:greeting:${Date.now()}`
+
+    await step({ id: '18-01', flow: 'F13', screen: 'S27', caption: 'A Redis database: tested against the real server, then saved' }, async () => {
+      await vaultTab()
+      await $('nav[aria-label="Vault"]').$('//*[normalize-space(.)="Databases"]').click()
+      await addDatabase({ name: 'walk-cache', address: 'redis', password: 'test-redis', test: true })
+      await shown('//tr[.//*[normalize-space(text())="walk-cache"]]')
+    })
+
+    await step({ id: '18-02', flow: 'F13', screen: 'S28', caption: 'Open it: the tab connects and lists the keys' }, async () => {
+      await openDatabase('walk-cache')
+      await shown('//button[normalize-space(.)="Confirm writes"]')
+    })
+
+    await step({ id: '18-03', flow: 'F15', screen: 'S33', caption: 'A new key is reviewed first: the dialog shows the exact command' }, async () => {
+      await (await shown('//button[@aria-label="New key"]')).click()
+      await type($('#rk-name'), key)
+      await type($('#rk-value'), 'hello from the walk')
+      await type($('#rk-expiry'), '15m')
+      await (await shown('//*[@role="dialog"]//button[normalize-space(.)="Review change"]')).click()
+      await shown(`//*[@role="alertdialog"]//*[contains(normalize-space(.),"SET ${key}")]`)
+      // Nothing was sent yet: the server does not have the key.
+      expect(redisCli(`EXISTS ${key}`)).toBe('0')
+      await (await shown('//*[@role="alertdialog"]//button[normalize-space(.)="Create key"]')).click()
+      await shown(`//h2[normalize-space(.)="${key}"]`)
+      expect(redisCli(`GET ${key}`)).toBe('hello from the walk')
+    })
+
+    await step({ id: '18-04', flow: 'F16', screen: 'S30', caption: 'The console: a read runs at once, KEYS is held back' }, async () => {
+      await view('Console')
+      await consoleRun(`TTL ${key}`, '(integer) ')
+      await consoleRun('KEYS *', 'Not sent. KEYS walks every key at once')
+    })
+
+    await step({ id: '18-05', flow: 'F15', screen: 'S33', caption: 'Switch it to Read-only: a write from the console is refused before it is sent' }, async () => {
+      await (await shown('//button[normalize-space(.)="Confirm writes"]')).click()
+      await (await shown('//*[@role="dialog"]//*[@role="radio"][contains(normalize-space(.),"Read-only")]')).click()
+      await (await shown('//*[@role="dialog"]//button[normalize-space(.)="Change mode"]')).click()
+      await shown('//*[@role="status"][contains(normalize-space(.),"Read-only. Nothing here can change data.")]')
+      await consoleRun(`DEL ${key}`, 'walk-cache is read-only in Dalan')
+      expect(redisCli(`EXISTS ${key}`)).toBe('1')
+    })
+
+    await step({ id: '18-06', flow: 'F13', screen: 'S33', caption: 'The same Redis through the SSH host: Dalan signs in to the host and reaches Redis from there' }, async () => {
+      await vaultTab()
+      await addDatabase({ name: 'walk-through-a', address: 'redis', password: 'test-redis', throughHost: 'server a' })
+      await openDatabase('walk-through-a')
+      await view('Console')
+      await consoleRun(`GET ${key}`, 'hello from the walk')
+    })
+
+    await step({ id: '18-07', flow: 'F19', screen: 'S31', caption: 'A cluster through the host: a write finds its node, and the Server view lists the nodes' }, async () => {
+      await vaultTab()
+      await addDatabase({ name: 'walk-cluster', address: 'rc1', port: 7000, password: 'test-redis', throughHost: 'server a', kind: 'Cluster' })
+      await openDatabase('walk-cluster')
+      await view('Console')
+      await consoleRun(`SET ${key} cluster-ok EX 600`, 'This changes data')
+      await (await shown('//button[normalize-space(.)="Send"]')).click()
+      // Read it back by its length (10 characters): the value itself is already on screen in the SET line above.
+      await consoleRun(`STRLEN ${key}`, '(integer) 10')
+      await view('Server')
+      await shown('//table[@aria-labelledby="nodes-title"]//td[normalize-space(.)="primary"]', 30_000)
+      await shown('//table[@aria-labelledby="nodes-title"]//td[contains(normalize-space(.),"5460")]')
     })
   })
 })

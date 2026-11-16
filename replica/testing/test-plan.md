@@ -347,7 +347,7 @@ export async function step(page: Page, info: { id: string, flow?: string, screen
 
 ### 8.5 `pnpm walk:app`: the real app (T5)
 
-The same chapters (as far as they don't need fake-only controls), run by WebdriverIO against the **real Dalan binary** and the **real Docker test servers**. Shared step definitions go through a small driver interface:
+The same chapters (as far as they don't need fake-only controls), run by WebdriverIO against the **real Dalan binary** and the **real Docker test servers**. Chapter 18 (Databases) is one of them: the single Redis directly and through the SSH host, and the cluster through the host. Shared step definitions go through a small driver interface:
 
 ```ts
 interface Driver {

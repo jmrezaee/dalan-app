@@ -130,7 +130,7 @@ Needs a Windows 11 PC or VM (Parallels or UTM on the Mac, or a teammate's PC). T
 
 ## I. Redis (R1 to R7)
 
-The Rust side has run against real Redis servers in Docker (I1, 2026-11-16). **The app's window has not been used with a real Redis by a person yet**: I3 onward are those checks.
+The Rust side has run against real Redis servers in Docker (I1, 2026-11-16). `pnpm walk:app` also drives the real app (on Linux, in a container) through a Redis chapter against these servers, cluster included (2026-11-16). **The macOS window has not been used with a real Redis by a person yet**: I3 onward are those checks.
 
 Setup: `scripts/test-servers.sh up` starts a single Redis (`127.0.0.1:6390`, password `test-redis`, read-only user `app-ro` / `ro-pass`), a six-node cluster (`rc1` to `rc6`, port 7000) and a Sentinel set (`rs-s1` to `rs-s3`, primary `mymaster`), the last two reachable only through the `a` container (SSH on `127.0.0.1:2222`, `test` / `test`). Add `a` as a host in Dalan first.
 

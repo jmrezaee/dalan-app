@@ -60,7 +60,6 @@ services:
     ports: ["6390:6379"]
     command: ["redis-server", "--requirepass", "test-redis", "--user", "app-ro", "on", ">ro-pass", "~*", "&*", "+@read", "+@connection", "+info", "+dbsize", "+select", "+config|get"]
 
-  # kbd: password, then "Verification code:" (a time-based code; scripts/test-servers.sh otp prints the current one).
   # Redis Cluster (R6): three primaries and three replicas. No published ports: the nodes announce their
   # addresses on this network, so the cluster is only reachable through a host (`a`), like a production one.
   rc1: &rcnode
@@ -73,7 +72,9 @@ services:
   rc4: { <<: *rcnode, container_name: dalan-test-rc4, networks: { default: { aliases: [rc4] } } }
   rc5: { <<: *rcnode, container_name: dalan-test-rc5, networks: { default: { aliases: [rc5] } } }
   rc6: { <<: *rcnode, container_name: dalan-test-rc6, networks: { default: { aliases: [rc6] } } }
-  # Joins the six nodes once (a second run finds the cluster already made and does nothing).
+  # Joins the six nodes. Runs on every `up`: a healthy cluster is left alone. After Docker restarts, the containers
+  # can come back with other addresses while each node still remembers the old ones (cluster_state:fail); then every
+  # node is emptied and forgotten, and the cluster is made again. These are throwaway test servers: nothing is kept.
   rc-init:
     image: redis:7
     container_name: dalan-test-rc-init
@@ -84,9 +85,17 @@ services:
       - -c
       - |
         sleep 3
+        cli() { redis-cli -a test-redis --no-auth-warning "$$@"; }
+        if cli -h rc1 -p 7000 cluster info | grep -q 'cluster_state:ok'; then echo "cluster is healthy"; exit 0; fi
         nodes=""
-        for n in rc1 rc2 rc3 rc4 rc5 rc6; do nodes="$$nodes $$(getent hosts $$n | cut -d' ' -f1):7000"; done
-        redis-cli -a test-redis --no-auth-warning --cluster create $$nodes --cluster-replicas 1 --cluster-yes || true
+        for n in rc1 rc2 rc3 rc4 rc5 rc6; do
+          cli -h $$n -p 7000 flushall >/dev/null 2>&1 || true
+          cli -h $$n -p 7000 cluster reset hard >/dev/null 2>&1 || true
+          nodes="$$nodes $$(getent hosts $$n | cut -d' ' -f1):7000"
+        done
+        cli --cluster create $$nodes --cluster-replicas 1 --cluster-yes
+        for i in $$(seq 1 30); do cli -h rc1 -p 7000 cluster info | grep -q 'cluster_state:ok' && exit 0; sleep 1; done
+        echo "the cluster did not become healthy" >&2; exit 1
 
   # Redis Sentinel (R6): one primary, two replicas, three sentinels watching "mymaster". Also only on this network.
   rs-primary:
@@ -115,6 +124,7 @@ services:
   rs-s2: { <<: *rssentinel, container_name: dalan-test-rs-s2, networks: { default: { aliases: [rs-s2] } } }
   rs-s3: { <<: *rssentinel, container_name: dalan-test-rs-s3, networks: { default: { aliases: [rs-s3] } } }
 
+  # kbd: password, then "Verification code:" (a time-based code; scripts/test-servers.sh otp prints the current one).
   kbd:
     build: ./debian-sshd
     container_name: dalan-test-kbd
