@@ -309,7 +309,14 @@ pub(super) fn redis_error(e: &RedisError) -> AppError {
             "The connection to Redis closed before it answered. Is this really a Redis port?",
         );
     }
-    AppError::new(ErrorCode::RedisRefused, text)
+    // The server's own sentence, as it wrote it: `WRONGTYPE Operation against a key ...`. (The crate's own
+    // formatting puts the code in quotes, or uses its name for the error, which is not what the server said.)
+    let said = match (e.code(), e.detail()) {
+        (Some(code), Some(detail)) => format!("{code} {detail}"),
+        (Some(code), None) => code.to_string(),
+        _ => text,
+    };
+    AppError::new(ErrorCode::RedisRefused, said)
 }
 
 /// The steps the tab shows for this database, before anything is tried.
@@ -1102,6 +1109,32 @@ mod tests {
         assert_eq!((dbs[0].index, dbs[0].keys), (0, 12408));
         assert_eq!((dbs[1].index, dbs[1].keys), (3, 2));
         assert!(keyspace("").is_empty());
+    }
+
+    #[test]
+    fn a_servers_error_is_shown_as_the_server_wrote_it() {
+        use redis::{ErrorKind, ServerErrorKind};
+        let known = RedisError::from((
+            ErrorKind::Server(ServerErrorKind::CrossSlot),
+            "CROSSSLOT",
+            "Keys in request don't hash to the same slot".to_string(),
+        ));
+        let e = redis_error(&known);
+        assert_eq!(e.code, ErrorCode::RedisRefused);
+        assert_eq!(
+            e.message,
+            "CROSSSLOT Keys in request don't hash to the same slot"
+        );
+        let other = redis::make_extension_error(
+            "WRONGTYPE".into(),
+            Some("Operation against a key holding the wrong kind of value".into()),
+        );
+        assert_eq!(
+            redis_error(&other).message,
+            "WRONGTYPE Operation against a key holding the wrong kind of value"
+        );
+        let bare = redis::make_extension_error("LOADING".into(), None);
+        assert_eq!(redis_error(&bare).message, "LOADING");
     }
 
     #[test]

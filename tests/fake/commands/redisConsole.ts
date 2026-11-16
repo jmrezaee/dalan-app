@@ -193,7 +193,8 @@ export const redisConsole: Pick<Handlers, Keys> = {
     return {
       version: '7.2.4', mode: m.redisDbs.find(d => d.id === m.redisConns.get(a.connId)?.db)?.kind === 'cluster' ? 'cluster' : 'standalone', role: 'primary', uptime_secs: 41 * 86400 + 3600, memory_used: 1932735283, memory_max: 4294967296,
       clients: 212, blocked_clients: 0, ops_per_sec: 8420 + m.redisInfoCalls++, hits: 962, misses: 38,
-      databases: db0.length ? [{ index: 0, keys: db0.length, expires: db0.filter(k => k.ttl_ms !== null).length || expires.length, avg_ttl_ms: 18_720_000 }, { index: 3, keys: 2, expires: 0, avg_ttl_ms: 0 }] : [{ index: 3, keys: 2, expires: 0, avg_ttl_ms: 0 }],
+      // A cluster has one logical database.
+      databases: (m.redisDbs.find(d => d.id === m.redisConns.get(a.connId)?.db)?.kind === 'cluster' ? [0] : [0, 3]).flatMap(n => (n === 3 ? [{ index: 3, keys: 2, expires: 0, avg_ttl_ms: 0 }] : db0.length ? [{ index: 0, keys: db0.length, expires: db0.filter(k => k.ttl_ms !== null).length || expires.length, avg_ttl_ms: 18_720_000 }] : [])),
     }
   },
   redisSlowlog: (_a, { m }) => m.redisSlowlog,

@@ -1480,7 +1480,8 @@ async fn l3_redis_cluster_routes_by_slot_scans_every_node_and_deletes_in_bulk() 
         .arg(2)
         .query_async::<()>(&mut r)
         .await;
-    assert!(cross.unwrap_err().to_string().contains("CROSSSLOT"));
+    let cross = conn::redis_error(&cross.unwrap_err());
+    assert!(cross.message.starts_with("CROSSSLOT"), "{}", cross.message);
 
     // The scan walks all three primaries; the cursor names the node.
     let mut cursor = String::new();
