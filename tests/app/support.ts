@@ -167,7 +167,9 @@ export async function openDatabase(name: string, timeout = 60_000) {
 /** Runs a line in the Console of the Redis tab in front and waits for `expectText` in its output. */
 export async function consoleRun(line: string, expectText: string) {
   const input = await shown('//input[@aria-label="Command"]')
-  await input.click()
+  // The Console focuses its input when it opens, and WebKit's driver sometimes calls a click on it "intercepted"
+  // (it did on GitHub's slower machine). Focusing it from the page is what a click would have done.
+  await browser.execute((node: HTMLElement) => node.focus(), input as unknown as HTMLElement)
   await input.setValue(line)
   await browser.keys('Enter')
   await shown(`//*[@role="log"][contains(normalize-space(.),"${expectText}")]`)
