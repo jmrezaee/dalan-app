@@ -26,7 +26,7 @@ A personal desktop SSH client for Mehrdad and his team. It is a clean-room rebui
 
 - **UI:** Nuxt 4 with `ssr: false` (SPA served by Tauri), TypeScript strict, Pinia, shadcn-vue (Reka UI), Tailwind, `@xterm/xterm` + addons; CodeMirror 6 for SQL, JSON and pipeline editors (from D3)
 - **Desktop:** Tauri 2. **All SSH, SFTP, tunnels, PTY, filesystem, crypto and DB live in Rust** (`src-tauri/`).
-- **Rust crates:** `russh`, `russh-sftp`, `ssh-key`, `portable-pty`, `rusqlite` (bundled) + `rusqlite_migration`, `argon2`, `chacha20poly1305`, `zeroize`, `notify`, `uuid` (v7), `thiserror`, `serde`, `tokio`; for Redis: `redis`, `tokio-rustls`, `rustls-native-certs`; for SQL and MongoDB (from D0, confirmed by the spike): `tokio-postgres`, `mysql_async`, `mongodb` + `bson`, `sqlparser`
+- **Rust crates:** `russh`, `russh-sftp`, `ssh-key`, `portable-pty`, `rusqlite` (bundled) + `rusqlite_migration`, `argon2`, `chacha20poly1305`, `zeroize`, `notify`, `uuid` (v7), `thiserror`, `serde`, `tokio`; for Redis: `redis`, `tokio-rustls`, `rustls-native-certs`; for SQL and MongoDB (from D0, confirmed by the spike): `tokio-postgres` (+ `tokio-postgres-rustls`), `mysql_common` (own MySQL/MariaDB protocol client: `mysql_async` can't take our stream), `bson` (own MongoDB `OP_MSG` client: the `mongodb` crate can't take our stream), `sqlparser`
 - **Database:** SQLite, one file in the app data dir, opened only by Rust. `PRAGMA foreign_keys=ON; journal_mode=WAL`.
 - **Package manager:** **pnpm** only. Node **24.12.0**: run `nvm use 24.12.0` before any node/pnpm command.
 - **Dev server port:** 4000 (set `devUrl` in `tauri.conf.json` to match)

@@ -19,6 +19,13 @@ log = "0.4.35"
 portable-pty = "0.9"
 rand = { version = "0.10", features = ["thread_rng"] }
 redis = { version = "1", default-features = false, features = ["aio", "tokio-comp"] }
+# D0 (replica/databases/spec.md): the SQL and MongoDB drivers. tokio-postgres takes any stream (`connect_raw`), so it is
+# used as it is. mysql_async and mongodb cannot take a stream (checked in their sources), so MySQL and MariaDB are
+# driven over mysql_common's packets and MongoDB over bson, on our own stream. See the D0 note in replica/progress.md.
+bson = "3"
+mysql_common = { version = "0.37", default-features = false }
+tokio-postgres = "0.7"
+tokio-postgres-rustls = "0.14"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 rusqlite_migration = "2"

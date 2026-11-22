@@ -60,6 +60,63 @@ services:
     ports: ["16390:6379"]
     command: ["redis-server", "--requirepass", "test-redis", "--user", "app-ro", "on", ">ro-pass", "~*", "&*", "+@read", "+@connection", "+info", "+dbsize", "+select", "+config|get"]
 
+  # SQL and MongoDB (D0 onward). Reachable from the sshd container `a` by name (the "through a host" route), and each
+  # on a published port that is not the engine's usual one (a developer's own Postgres or MongoDB is often running).
+  pg:
+    image: postgres:16
+    container_name: dalan-test-pg
+    networks: { default: { aliases: [pg] } }
+    ports: ["15432:5432"]
+    environment: { POSTGRES_PASSWORD: test-pg, POSTGRES_USER: app, POSTGRES_DB: shop }
+    # TLS with a certificate made at start: a small CA, and a server certificate it signed for the names pg and
+    # localhost (a self-signed certificate that is its own CA is refused by rustls as a server certificate). The tests
+    # trust ca.crt ("verify") or ignore the chain ("require").
+    command:
+      - sh
+      - -c
+      - |
+        d=/var/lib/postgresql
+        openssl req -new -x509 -days 3650 -nodes -subj "/CN=dalan-test-ca" -keyout $$d/ca.key -out $$d/ca.crt
+        openssl req -new -nodes -subj "/CN=pg" -keyout $$d/server.key -out $$d/server.csr
+        printf 'subjectAltName=DNS:pg,DNS:localhost,IP:127.0.0.1\nbasicConstraints=CA:FALSE\n' > $$d/ext.cnf
+        openssl x509 -req -in $$d/server.csr -CA $$d/ca.crt -CAkey $$d/ca.key -CAcreateserial -days 3650 -extfile $$d/ext.cnf -out $$d/server.crt
+        chown postgres:postgres $$d/server.crt $$d/server.key
+        chmod 600 $$d/server.key
+        exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=$$d/server.crt -c ssl_key_file=$$d/server.key
+  mysql:
+    image: mysql:8.4
+    container_name: dalan-test-mysql
+    networks: { default: { aliases: [mysql] } }
+    ports: ["13306:3306"]
+    environment: { MYSQL_ROOT_PASSWORD: test-mysql, MYSQL_USER: app, MYSQL_PASSWORD: test-mysql, MYSQL_DATABASE: shop }
+  mariadb:
+    image: mariadb:11
+    container_name: dalan-test-mariadb
+    networks: { default: { aliases: [mariadb] } }
+    ports: ["13307:3306"]
+    environment: { MARIADB_ROOT_PASSWORD: test-mariadb, MARIADB_USER: app, MARIADB_PASSWORD: test-mariadb, MARIADB_DATABASE: shop }
+  mongo:
+    image: mongo:7
+    container_name: dalan-test-mongo
+    networks: { default: { aliases: [mongo] } }
+    ports: ["17017:27017"]
+    environment: { MONGO_INITDB_ROOT_USERNAME: app, MONGO_INITDB_ROOT_PASSWORD: test-mongo }
+    # TLS is optional here (preferTLS: a client may use it or not), with a small CA and a certificate it signed for the
+    # names mongo and localhost. The tests trust ca.crt ("verify") or ignore the chain ("require").
+    command:
+      - sh
+      - -c
+      - |
+        d=/data/tls
+        mkdir -p $$d
+        openssl req -new -x509 -days 3650 -nodes -subj "/CN=dalan-test-ca" -keyout $$d/ca.key -out $$d/ca.crt
+        openssl req -new -nodes -subj "/CN=mongo" -keyout $$d/server.key -out $$d/server.csr
+        printf 'subjectAltName=DNS:mongo,DNS:localhost,IP:127.0.0.1\nbasicConstraints=CA:FALSE\n' > $$d/ext.cnf
+        openssl x509 -req -in $$d/server.csr -CA $$d/ca.crt -CAkey $$d/ca.key -CAcreateserial -days 3650 -extfile $$d/ext.cnf -out $$d/server.crt
+        cat $$d/server.key $$d/server.crt > $$d/server.pem
+        chown -R mongodb:mongodb $$d
+        exec docker-entrypoint.sh mongod --tlsMode preferTLS --tlsCertificateKeyFile $$d/server.pem --tlsCAFile $$d/ca.crt --tlsAllowConnectionsWithoutCertificates --bind_ip_all
+
   # Redis Cluster (R6): three primaries and three replicas. No published ports: the nodes announce their
   # addresses on this network, so the cluster is only reachable through a host (`a`), like a production one.
   rc1: &rcnode

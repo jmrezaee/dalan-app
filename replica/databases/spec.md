@@ -128,8 +128,8 @@ Then copy `redis_databases` into `databases` (engine `redis`; `kind`, `sentinel_
 Proposed, confirmed by the D0 spike (record versions and results in the D0 note):
 
 - `tokio-postgres` (+ `postgres-types`, `rust_decimal`, `chrono` or `time` features as the tree already uses): run over our stream with `Config::connect_raw`. Expected to work; this is the reason Postgres goes first.
-- `mysql_async` for MySQL and MariaDB.
-- `mongodb` + `bson` for MongoDB.
+- `mysql_common` for MySQL and MariaDB (own protocol client; `mysql_async` cannot take our stream, D0 finding).
+- `bson` for MongoDB (own `OP_MSG` client; the `mongodb` crate cannot take our stream, D0 finding).
 - `sqlparser` for classifying SQL statements (Postgres, MySQL dialects).
 
 **The spike question:** can `mysql_async` and `mongodb` run over a stream Dalan hands them (an SSH `direct-tcpip` channel)? The Redis rule stands: no local listener, because any program on the computer could use it. If a driver can't take our stream:

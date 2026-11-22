@@ -153,3 +153,9 @@ Setup: `scripts/test-servers.sh up` starts a single Redis (`127.0.0.1:16390`, pa
 - [ ] **I17. Sentinel and a failover.** Through `a`, add `rs-s1, rs-s2, rs-s3` with the primary's name `mymaster`. Open it, then `docker stop dalan-test-rs-primary`. **Expected:** the tab says the connection dropped, asks the sentinels again and comes back on the new primary within the five tries; Nodes shows the new primary. A wrong name says the sentinels don't know it.
 - [ ] **I18. Lock.** With Redis tabs open (one listening), lock Dalan. **Expected:** every Redis connection closes (`CLIENT LIST` on the server no longer shows `name=dalan`), and after unlocking the tabs are gone.
 - [ ] **I19. Light theme and a small window.** Look at the Browser, Console, Pub/Sub and Server in light, and at 1024 × 640. **Expected:** readable, nothing cut off; note anything cramped.
+
+## J. SQL and MongoDB (D0 to D11)
+
+Setup: `scripts/test-servers.sh up` also starts `pg` (PostgreSQL 16, TLS, user `app`, password `test-pg`, database `shop`, published on `127.0.0.1:15432`), `mysql` (8.4, `app` / `test-mysql`, `13306`), `mariadb` (11, `app` / `test-mariadb`, `13307`) and `mongo` (7, `app` / `test-mongo`, `17017`); all four are also reachable by those names from the `a` container (SSH on `127.0.0.1:2222`, `test` / `test`), which is the "through a host" route. The ports are not the engines' usual ones on purpose.
+
+- [ ] **J0. The driver spike against the servers.** `cargo test --lib -- --ignored l3_spike` (from `src-tauri`). **Expected:** three tests pass (PostgreSQL over our stream with TLS, MySQL and MariaDB on `mysql_common`, MongoDB `hello` on `bson`). It needs no one at the keyboard; it is listed so the result of D0 can be reproduced.

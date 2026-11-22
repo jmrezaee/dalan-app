@@ -2,6 +2,7 @@ pub mod agent;
 pub mod ai;
 pub mod commands;
 pub mod db;
+pub mod dbs;
 pub mod diagnostics;
 pub mod env;
 pub mod error;
