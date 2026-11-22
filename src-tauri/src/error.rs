@@ -39,6 +39,18 @@ pub enum ErrorCode {
     /// A write needs its confirmation: the pending id is unknown, used, expired or for another connection, or the
     /// typed name does not match.
     RedisConfirmNeeded,
+    /// The database (not Redis) refused the user name or password.
+    DbAuthFailed,
+    /// Nothing answered at a SQL or MongoDB database's address.
+    DbUnreachable,
+    /// TLS: the server's certificate isn't trusted by this computer, or is for another name.
+    DbTlsUntrusted,
+    /// The server answered with an error of its own; its text is the message.
+    DbRefused,
+    /// The database is Read-only in Dalan: the statement was not sent.
+    DbReadOnlyMode,
+    /// A write needs its confirmation (unknown, used, expired or foreign pending id, or the typed name is wrong).
+    DbConfirmNeeded,
     Internal,
 }
 
@@ -130,6 +142,12 @@ mod tests {
             RedisRefused,
             RedisReadOnlyMode,
             RedisConfirmNeeded,
+            DbAuthFailed,
+            DbUnreachable,
+            DbTlsUntrusted,
+            DbRefused,
+            DbReadOnlyMode,
+            DbConfirmNeeded,
             Internal,
         ];
         // An exhaustive match: adding a variant is a compile error here until the list above has it.
@@ -139,7 +157,8 @@ mod tests {
                 | NotFound | Validation | InUse | AuthFailed | HostUnreachable | HostKeyChanged
                 | KexFailed | PortInUse | PermissionDenied | SftpDisabled | RedisAuthFailed
                 | RedisUnreachable | RedisTlsUntrusted | RedisRefused | RedisReadOnlyMode
-                | RedisConfirmNeeded | Internal => {}
+                | RedisConfirmNeeded | DbAuthFailed | DbUnreachable | DbTlsUntrusted
+                | DbRefused | DbReadOnlyMode | DbConfirmNeeded | Internal => {}
             }
             let json = serde_json::to_value(AppError::new(c, "m")).unwrap();
             let obj = json.as_object().unwrap();

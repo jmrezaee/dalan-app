@@ -40,7 +40,7 @@ pub async fn redis_db_list(state: State<'_, AppState>) -> AppResult<Vec<RedisDat
 
 /// Checks the master password for a change that makes a production database less protected. Five wrong tries
 /// start the same cooldown as unlocking. The password is zeroized when it is dropped.
-async fn check_master(state: &AppState, password: Option<String>) -> AppResult<()> {
+pub(crate) async fn check_master(state: &AppState, password: Option<String>) -> AppResult<()> {
     let password = password.map(Zeroizing::new);
     state.check_cooldown()?;
     let Some(pw) = password.filter(|p| !p.is_empty()) else {

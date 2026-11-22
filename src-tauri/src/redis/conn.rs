@@ -363,7 +363,7 @@ async fn plan(store: &Store, cfg: &Config) -> AppResult<(Vec<RedisPlanStep>, usi
 }
 
 /// Signs in to the host (every hop asks its own questions through `emit`), or says why it couldn't.
-async fn sign_in_to_host(
+pub(crate) async fn sign_in_to_host(
     store: &Store,
     host_id: &str,
     hops: usize,

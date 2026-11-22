@@ -53,7 +53,7 @@ macro_rules! text_enum {
             pub fn as_str(self) -> &'static str {
                 match self { $(Self::$v => $s),+ }
             }
-            fn parse(s: &str) -> rusqlite::Result<Self> {
+            pub(crate) fn parse(s: &str) -> rusqlite::Result<Self> {
                 match s {
                     $($s => Ok(Self::$v),)+
                     other => Err(rusqlite::Error::InvalidColumnType(0, other.to_string(), rusqlite::types::Type::Text)),
@@ -190,7 +190,7 @@ pub fn names_using_host(conn: &Connection, host_id: &str) -> AppResult<Vec<Strin
     Ok(rows)
 }
 
-fn clean(s: &Option<String>) -> Option<String> {
+pub(crate) fn clean(s: &Option<String>) -> Option<String> {
     s.as_deref()
         .map(str::trim)
         .filter(|t| !t.is_empty())

@@ -19,6 +19,26 @@ export const commands = {
 	systemIntegrationSet: (sshLinks: boolean | null, autostart: boolean | null) => typedError<SystemIntegration_Serialize, AppError>(__TAURI_INVOKE("system_integration_set", { sshLinks, autostart })),
 	/**  Opens Windows Settings > Default apps (opened here, not by the webview). */
 	openDefaultApps: () => typedError<null, AppError>(__TAURI_INVOKE("open_default_apps")),
+	/**  S34: every saved database of every engine. */
+	dbList: () => typedError<DatabaseRow_Serialize[], AppError>(__TAURI_INVOKE("db_list")),
+	/**
+	 *  S35: creates or updates a PostgreSQL, MySQL, MariaDB or MongoDB database. A save that makes a production
+	 *  database less protected needs the master password (the same rule and cooldown as Redis).
+	 */
+	dbSave: (input: DatabaseInput_Deserialize, masterPassword: string | null) => typedError<DatabaseRow_Serialize, AppError>(__TAURI_INVOKE("db_save", { input, masterPassword })),
+	dbDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("db_delete", { id })),
+	/**  S35 "Test connection". For now it proves the route (see `dbs::route`); each engine adds its sign-in with its phase. */
+	dbTest: (input: DatabaseInput_Deserialize) => typedError<DbTestResult, AppError>(__TAURI_INVOKE("db_test", { input })),
+	/**
+	 *  S35 "paste a connection string": the fields to fill in. The password is not sent back; the form keeps the string
+	 *  (`DatabaseInput::from_url`) and the save reads the password from it.
+	 */
+	dbParseUrl: (url: string) => typedError<DbUrlFields_Serialize, AppError>(__TAURI_INVOKE("db_parse_url", { url })),
+	/**  The engines this build can open, in picker order. */
+	dbEngines: () => __TAURI_INVOKE<Engine[]>("db_engines"),
+	savedList: () => typedError<SavedQuery_Serialize[], AppError>(__TAURI_INVOKE("saved_list")),
+	savedSave: (input: SavedQueryInput_Deserialize) => typedError<SavedQuery_Serialize, AppError>(__TAURI_INVOKE("saved_save", { input })),
+	savedDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("saved_delete", { id })),
 	/**  S26: the saved databases, by name. */
 	redisDbList: () => typedError<RedisDatabase_Serialize[], AppError>(__TAURI_INVOKE("redis_db_list")),
 	/**
@@ -353,6 +373,168 @@ export type AutoLockWarning = {
 
 export type Choice = "replace" | "keep_both" | "skip";
 
+/**
+ *  The editor's form (S35) for PostgreSQL, MySQL, MariaDB and MongoDB. `password: Some` sets a new one;
+ *  `clear_password` removes the saved one. `from_url` is a connection string the form was filled from: its password
+ *  is used when the password field is empty.
+ */
+export type DatabaseInput = DatabaseInput_Serialize | DatabaseInput_Deserialize;
+
+/**
+ *  The editor's form (S35) for PostgreSQL, MySQL, MariaDB and MongoDB. `password: Some` sets a new one;
+ *  `clear_password` removes the saved one. `from_url` is a connection string the form was filled from: its password
+ *  is used when the password field is empty.
+ */
+export type DatabaseInput_Deserialize = {
+	id?: string | null,
+	engine: Engine,
+	name: string,
+	environment: RedisEnvironment,
+	route: RedisRoute,
+	host_id?: string | null,
+	address: string,
+	port?: number | null,
+	default_database?: string | null,
+	username?: string | null,
+	password?: string | null,
+	clear_password: boolean,
+	tls: string,
+	tls_server_name?: string | null,
+	write_mode: RedisWriteMode,
+	options: DbOptions_Deserialize,
+	from_url?: string | null,
+};
+
+/**
+ *  The editor's form (S35) for PostgreSQL, MySQL, MariaDB and MongoDB. `password: Some` sets a new one;
+ *  `clear_password` removes the saved one. `from_url` is a connection string the form was filled from: its password
+ *  is used when the password field is empty.
+ */
+export type DatabaseInput_Serialize = {
+	id: string | null,
+	engine: Engine,
+	name: string,
+	environment: RedisEnvironment,
+	route: RedisRoute,
+	host_id: string | null,
+	address: string,
+	port: number | null,
+	default_database: string | null,
+	username: string | null,
+	password: string | null,
+	clear_password: boolean,
+	tls: string,
+	tls_server_name: string | null,
+	write_mode: RedisWriteMode,
+	options: DbOptions_Serialize,
+	from_url: string | null,
+};
+
+/**  One saved database of any engine, as the list (S34) sees it. */
+export type DatabaseRow = DatabaseRow_Serialize | DatabaseRow_Deserialize;
+
+/**  One saved database of any engine, as the list (S34) sees it. */
+export type DatabaseRow_Deserialize = {
+	id: string,
+	engine: Engine,
+	name: string,
+	environment: RedisEnvironment,
+	route: RedisRoute,
+	host_id?: string | null,
+	host_label?: string | null,
+	address: string,
+	port?: number | null,
+	default_database?: string | null,
+	username?: string | null,
+	has_password: boolean,
+	/**  `off`, `require` or `verify`. */
+	tls: string,
+	tls_server_name?: string | null,
+	write_mode: RedisWriteMode,
+	options: DbOptions_Deserialize,
+	last_opened_at?: number | null,
+};
+
+/**  One saved database of any engine, as the list (S34) sees it. */
+export type DatabaseRow_Serialize = {
+	id: string,
+	engine: Engine,
+	name: string,
+	environment: RedisEnvironment,
+	route: RedisRoute,
+	host_id: string | null,
+	host_label: string | null,
+	address: string,
+	port: number | null,
+	default_database: string | null,
+	username: string | null,
+	has_password: boolean,
+	/**  `off`, `require` or `verify`. */
+	tls: string,
+	tls_server_name: string | null,
+	write_mode: RedisWriteMode,
+	options: DbOptions_Serialize,
+	last_opened_at: number | null,
+};
+
+/**  What only some engines have. Stored as the `options` JSON and checked here per engine. */
+export type DbOptions = DbOptions_Serialize | DbOptions_Deserialize;
+
+/**  What only some engines have. Stored as the `options` JSON and checked here per engine. */
+export type DbOptions_Deserialize = {
+	/**  MongoDB: the database that holds the user (`authSource`). */
+	auth_source?: string | null,
+	/**  MongoDB: the replica set's name. */
+	replica_set?: string | null,
+	/**  MongoDB: `mongodb+srv`, the address is a DNS name that lists the members. */
+	srv?: boolean,
+};
+
+/**  What only some engines have. Stored as the `options` JSON and checked here per engine. */
+export type DbOptions_Serialize = {
+	/**  MongoDB: the database that holds the user (`authSource`). */
+	auth_source: string | null,
+	/**  MongoDB: the replica set's name. */
+	replica_set: string | null,
+	/**  MongoDB: `mongodb+srv`, the address is a DNS name that lists the members. */
+	srv: boolean,
+};
+
+export type DbTestResult = {
+	engine: Engine,
+	/**  Milliseconds to open the route and reach the port. */
+	latency_ms: number,
+	/**  What the test proved, in plain words. */
+	detail: string,
+};
+
+/**  What the window gets back: the fields to fill in, and whether a password was in the string. */
+export type DbUrlFields = DbUrlFields_Serialize | DbUrlFields_Deserialize;
+
+/**  What the window gets back: the fields to fill in, and whether a password was in the string. */
+export type DbUrlFields_Deserialize = {
+	engine: Engine,
+	address: string,
+	port?: number | null,
+	username?: string | null,
+	has_password: boolean,
+	default_database?: string | null,
+	tls: string,
+	options: DbOptions_Deserialize,
+};
+
+/**  What the window gets back: the fields to fill in, and whether a password was in the string. */
+export type DbUrlFields_Serialize = {
+	engine: Engine,
+	address: string,
+	port: number | null,
+	username: string | null,
+	has_password: boolean,
+	default_database: string | null,
+	tls: string,
+	options: DbOptions_Serialize,
+};
+
 /**  Which app opens the downloaded copy. */
 export type EditApp = 
 /**  The system's default app for the file type. */
@@ -373,6 +555,9 @@ export type EditOpened = {
 export type EditUpload = "uploaded" | 
 /**  The file on the server changed since it was downloaded. Upload again with `force` to overwrite. */
 "remote_changed";
+
+/**  The database engines Dalan can open. The names are the `engine` column of the `databases` table. */
+export type Engine = "redis" | "postgres" | "mysql" | "mariadb" | "mongodb";
 
 export type EntryKind = "file" | "dir" | "other";
 
@@ -419,7 +604,19 @@ export type ErrorCode = "locked" | "wrong_password" | "too_many_attempts" |
  *  A write needs its confirmation: the pending id is unknown, used, expired or for another connection, or the
  *  typed name does not match.
  */
-"redis_confirm_needed" | "internal";
+"redis_confirm_needed" | 
+/**  The database (not Redis) refused the user name or password. */
+"db_auth_failed" | 
+/**  Nothing answered at a SQL or MongoDB database's address. */
+"db_unreachable" | 
+/**  TLS: the server's certificate isn't trusted by this computer, or is for another name. */
+"db_tls_untrusted" | 
+/**  The server answered with an error of its own; its text is the message. */
+"db_refused" | 
+/**  The database is Read-only in Dalan: the statement was not sent. */
+"db_read_only_mode" | 
+/**  A write needs its confirmation (unknown, used, expired or foreign pending id, or the typed name is wrong). */
+"db_confirm_needed" | "internal";
 
 export type ForwardInput = ForwardInput_Serialize | ForwardInput_Deserialize;
 
@@ -1715,6 +1912,62 @@ export type RedisWriteOutcome_Deserialize =
 export type RedisWriteOutcome_Serialize = 
 /**  It ran. `reply` is the server's answer when it is worth showing (a new stream entry's id). */
 { status: "done"; reply: string | null } | { status: "pending"; pending: RedisPending_Serialize };
+
+export type SavedKind = "sql" | "pipeline" | "filter" | "command";
+
+export type SavedQuery = SavedQuery_Serialize | SavedQuery_Deserialize;
+
+export type SavedQueryInput = SavedQueryInput_Serialize | SavedQueryInput_Deserialize;
+
+export type SavedQueryInput_Deserialize = {
+	id?: string | null,
+	database_id?: string | null,
+	engine: Engine,
+	kind: SavedKind,
+	folder?: string | null,
+	name: string,
+	description?: string | null,
+	body: string,
+};
+
+export type SavedQueryInput_Serialize = {
+	id: string | null,
+	database_id: string | null,
+	engine: Engine,
+	kind: SavedKind,
+	folder: string | null,
+	name: string,
+	description: string | null,
+	body: string,
+};
+
+export type SavedQuery_Deserialize = {
+	id: string,
+	/**  `None`: usable on any database of that engine. */
+	database_id?: string | null,
+	database_name?: string | null,
+	engine: Engine,
+	kind: SavedKind,
+	folder?: string | null,
+	name: string,
+	description?: string | null,
+	body: string,
+	updated_at: number | null,
+};
+
+export type SavedQuery_Serialize = {
+	id: string,
+	/**  `None`: usable on any database of that engine. */
+	database_id: string | null,
+	database_name: string | null,
+	engine: Engine,
+	kind: SavedKind,
+	folder: string | null,
+	name: string,
+	description: string | null,
+	body: string,
+	updated_at: number | null,
+};
 
 export type SerialConfig = {
 	baud: number,

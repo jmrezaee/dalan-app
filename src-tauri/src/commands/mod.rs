@@ -3,6 +3,7 @@
 pub mod agent;
 pub mod ai;
 pub mod app;
+pub mod databases;
 pub mod env;
 pub mod history;
 pub mod hosts;
