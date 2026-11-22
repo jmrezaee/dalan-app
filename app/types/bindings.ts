@@ -39,6 +39,22 @@ export const commands = {
 	savedList: () => typedError<SavedQuery_Serialize[], AppError>(__TAURI_INVOKE("saved_list")),
 	savedSave: (input: SavedQueryInput_Deserialize) => typedError<SavedQuery_Serialize, AppError>(__TAURI_INVOKE("saved_save", { input })),
 	savedDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("saved_delete", { id })),
+	/**  Opens a SQL tab's connection. Returns at once; the steps, the host's questions and the result arrive on `events`. */
+	dbOpen: (dbId: string, events: Channel<DbEvent_Deserialize>) => typedError<DbOpened, AppError>(__TAURI_INVOKE("db_open", { dbId, events })),
+	/**  The answer to a host's question asked while a SQL tab opens (host key, password, passphrase, 2FA). */
+	dbRespond: (connId: string, promptId: string, answer: PromptAnswer_Deserialize) => typedError<null, AppError>(__TAURI_INVOKE("db_respond", { connId, promptId, answer })),
+	/**  Closes the tab's connection, its questions and the SSH connection it ran through. */
+	dbClose: (connId: string) => __TAURI_INVOKE<void>("db_close", { connId }),
+	/**  The lazy object tree: `[]` lists schemas, `[schema]` lists its tables and views. */
+	sqlObjects: (connId: string, path: string[]) => typedError<SqlObject_Serialize[], AppError>(__TAURI_INVOKE("sql_objects", { connId, path })),
+	/**  A table's columns, primary key and foreign keys (both directions). */
+	sqlTableInfo: (connId: string, schema: string, table: string) => typedError<SqlTableInfo_Serialize, AppError>(__TAURI_INVOKE("sql_table_info", { connId, schema, table })),
+	/**  One page of a table: filter, sort, columns and the cursor of the page before. */
+	sqlTablePage: (connId: string, request: PageRequest_Deserialize) => typedError<SqlPage_Serialize, AppError>(__TAURI_INVOKE("sql_table_page", { connId, request })),
+	/**  "Count exactly": `count(*)` with the same filter. */
+	sqlCount: (connId: string, schema: string, table: string, filter: string) => typedError<number | null, AppError>(__TAURI_INVOKE("sql_count", { connId, schema, table, filter })),
+	/**  One whole cell (the page cut it), for the cell panel. */
+	sqlCell: (connId: string, schema: string, table: string, key: KeyPart[], column: string) => typedError<Cell_Serialize, AppError>(__TAURI_INVOKE("sql_cell", { connId, schema, table, key, column })),
 	/**  S26: the saved databases, by name. */
 	redisDbList: () => typedError<RedisDatabase_Serialize[], AppError>(__TAURI_INVOKE("redis_db_list")),
 	/**
@@ -371,6 +387,26 @@ export type AutoLockWarning = {
 	seconds_left: number,
 };
 
+export type Cell = Cell_Serialize | Cell_Deserialize;
+
+export type CellKind = "null" | "bool" | "int" | "decimal" | "float" | "text" | "bytes" | "json" | "datetime" | "array" | "enum" | "uuid" | "interval" | "unknown";
+
+export type Cell_Deserialize = {
+	kind: CellKind,
+	/**  The value's text form; `None` for NULL. */
+	v?: string | null,
+	/**  The text was cut at `CUT_AT` characters. */
+	cut: boolean,
+};
+
+export type Cell_Serialize = {
+	kind: CellKind,
+	/**  The value's text form; `None` for NULL. */
+	v: string | null,
+	/**  The text was cut at `CUT_AT` characters. */
+	cut: boolean,
+};
+
 export type Choice = "replace" | "keep_both" | "skip";
 
 /**
@@ -475,6 +511,27 @@ export type DatabaseRow_Serialize = {
 	write_mode: RedisWriteMode,
 	options: DbOptions_Serialize,
 	last_opened_at: number | null,
+};
+
+/**  What a connecting or open SQL tab hears. The first four are the same machinery as a Redis tab's. */
+export type DbEvent = DbEvent_Serialize | DbEvent_Deserialize;
+
+/**  What a connecting or open SQL tab hears. The first four are the same machinery as a Redis tab's. */
+export type DbEvent_Deserialize = { type: "plan"; steps: RedisPlanStep_Deserialize[] } | { type: "step"; index: number; state: RedisStepState; detail?: string | null } | 
+/**  A question or a note from the SSH sign-in of a hop. Answer prompts with `db_respond`. */
+{ type: "host"; event: SessionEvent_Deserialize } | { type: "ready"; info: SqlServerInfo } | { type: "failed"; code: ErrorCode; message: string } | 
+/**  The server closed the connection (or the host's SSH did). */
+{ type: "closed" };
+
+/**  What a connecting or open SQL tab hears. The first four are the same machinery as a Redis tab's. */
+export type DbEvent_Serialize = { type: "plan"; steps: RedisPlanStep_Serialize[] } | { type: "step"; index: number; state: RedisStepState; detail: string | null } | 
+/**  A question or a note from the SSH sign-in of a hop. Answer prompts with `db_respond`. */
+{ type: "host"; event: SessionEvent_Serialize } | { type: "ready"; info: SqlServerInfo } | { type: "failed"; code: ErrorCode; message: string } | 
+/**  The server closed the connection (or the host's SSH did). */
+{ type: "closed" };
+
+export type DbOpened = {
+	conn_id: string,
 };
 
 /**  What only some engines have. Stored as the `options` JSON and checked here per engine. */
@@ -1133,6 +1190,11 @@ export type Inherited_Serialize = {
 
 export type KeyKind = "ed25519" | "ecdsa_p256" | "ecdsa_p384" | "ecdsa_p521" | "rsa4096";
 
+export type KeyPart = {
+	column: string,
+	value: string,
+};
+
 export type KeySummary = KeySummary_Serialize | KeySummary_Deserialize;
 
 export type KeySummary_Deserialize = {
@@ -1249,9 +1311,56 @@ export type LogSummary_Serialize = {
 	comment: string | null,
 };
 
+export type ObjectKind = "schema" | "table" | "view" | "matview" | "foreign";
+
 export type PackageSummary = {
 	id: string,
 	label: string,
+};
+
+/**  Where the next page starts. Opaque to the window: it hands back what the last page gave it. */
+export type PageCursor = PageCursor_Serialize | PageCursor_Deserialize;
+
+/**  Where the next page starts. Opaque to the window: it hands back what the last page gave it. */
+export type PageCursor_Deserialize = {
+	/**  Keyset paging: the primary key of the last row, as text. */
+	keys?: string[] | null,
+	/**  Offset paging (a sort was chosen, or the table has no primary key). */
+	offset: number | null,
+};
+
+/**  Where the next page starts. Opaque to the window: it hands back what the last page gave it. */
+export type PageCursor_Serialize = {
+	/**  Keyset paging: the primary key of the last row, as text. */
+	keys: string[] | null,
+	/**  Offset paging (a sort was chosen, or the table has no primary key). */
+	offset: number | null,
+};
+
+export type PageRequest = PageRequest_Serialize | PageRequest_Deserialize;
+
+export type PageRequest_Deserialize = {
+	schema: string,
+	table: string,
+	/**  A SQL expression for `where`, typed by the user. Empty: no filter. */
+	filter: string,
+	sort: SortKey[],
+	/**  The columns to show; empty: all. */
+	columns: string[],
+	cursor?: PageCursor_Deserialize | null,
+	page_size: number,
+};
+
+export type PageRequest_Serialize = {
+	schema: string,
+	table: string,
+	/**  A SQL expression for `where`, typed by the user. Empty: no filter. */
+	filter: string,
+	sort: SortKey[],
+	/**  The columns to show; empty: all. */
+	columns: string[],
+	cursor: PageCursor_Serialize | null,
+	page_size: number,
 };
 
 export type ProfileTheme = ProfileTheme_Serialize | ProfileTheme_Deserialize;
@@ -2066,6 +2175,107 @@ export type SnippetsAll_Deserialize = {
 export type SnippetsAll_Serialize = {
 	packages: PackageSummary[],
 	snippets: SnippetSummary_Serialize[],
+};
+
+export type SortKey = {
+	column: string,
+	descending: boolean,
+};
+
+export type SqlColumn = SqlColumn_Serialize | SqlColumn_Deserialize;
+
+export type SqlColumn_Deserialize = {
+	name: string,
+	/**  `format_type`: `character varying(40)`, `timestamp with time zone`. */
+	type_name: string,
+	kind: CellKind,
+	nullable: boolean,
+	default?: string | null,
+	/**  Position in the primary key, from 1; `None` when the column is not in it. */
+	pk_position?: number | null,
+};
+
+export type SqlColumn_Serialize = {
+	name: string,
+	/**  `format_type`: `character varying(40)`, `timestamp with time zone`. */
+	type_name: string,
+	kind: CellKind,
+	nullable: boolean,
+	default: string | null,
+	/**  Position in the primary key, from 1; `None` when the column is not in it. */
+	pk_position: number | null,
+};
+
+export type SqlForeignKey = {
+	name: string,
+	columns: string[],
+	schema: string,
+	table: string,
+	target_columns: string[],
+};
+
+export type SqlObject = SqlObject_Serialize | SqlObject_Deserialize;
+
+export type SqlObject_Deserialize = {
+	name: string,
+	kind: ObjectKind,
+	/**  The planner's row estimate (tables and materialized views); `None` when the server has none yet. */
+	estimate?: number | null,
+};
+
+export type SqlObject_Serialize = {
+	name: string,
+	kind: ObjectKind,
+	/**  The planner's row estimate (tables and materialized views); `None` when the server has none yet. */
+	estimate: number | null,
+};
+
+export type SqlPage = SqlPage_Serialize | SqlPage_Deserialize;
+
+export type SqlPage_Deserialize = {
+	columns: SqlColumn_Deserialize[],
+	rows: Cell_Deserialize[][],
+	/**  `None` on the last page. */
+	next?: PageCursor_Deserialize | null,
+	/**  True when rows are matched by primary key (stable while rows change). */
+	keyset: boolean,
+	elapsed_ms: number,
+};
+
+export type SqlPage_Serialize = {
+	columns: SqlColumn_Serialize[],
+	rows: Cell_Serialize[][],
+	/**  `None` on the last page. */
+	next: PageCursor_Serialize | null,
+	/**  True when rows are matched by primary key (stable while rows change). */
+	keyset: boolean,
+	elapsed_ms: number,
+};
+
+export type SqlServerInfo = {
+	engine: string,
+	version: string,
+	database: string,
+	user: string,
+	latency_ms: number,
+};
+
+export type SqlTableInfo = SqlTableInfo_Serialize | SqlTableInfo_Deserialize;
+
+export type SqlTableInfo_Deserialize = {
+	columns: SqlColumn_Deserialize[],
+	/**  Foreign keys of this table, pointing out. */
+	references: SqlForeignKey[],
+	/**  Foreign keys of other tables that point here (`columns` are theirs, `target_columns` ours). */
+	referenced_by: SqlForeignKey[],
+};
+
+export type SqlTableInfo_Serialize = {
+	columns: SqlColumn_Serialize[],
+	/**  Foreign keys of this table, pointing out. */
+	references: SqlForeignKey[],
+	/**  Foreign keys of other tables that point here (`columns` are theirs, `target_columns` ours). */
+	referenced_by: SqlForeignKey[],
 };
 
 /**  What a valid link asked for. */

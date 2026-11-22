@@ -89,6 +89,7 @@ pub struct AppState {
     pub quit: crate::quit::QuitGuard,
     /// Live Redis connections, one per Redis tab (R1). Closed when the vault locks.
     pub redis: crate::redis::RedisManager,
+    pub sql: crate::sql::SqlManager,
 }
 
 impl AppState {
@@ -105,6 +106,7 @@ impl AppState {
             sftp: crate::sftp::SftpManager::default(),
             quit: crate::quit::QuitGuard::default(),
             redis: crate::redis::RedisManager::default(),
+            sql: crate::sql::SqlManager::default(),
         }
     }
 
@@ -158,6 +160,7 @@ impl AppState {
             self.tunnels.stop_all(); // ...and every tunnel
             self.sftp.close_all(); // ...and every file session
             self.redis.close_all(); // ...and every Redis connection
+            self.sql.close_all(); // ...and every SQL connection
         }
         self.touch();
     }

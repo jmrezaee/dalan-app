@@ -38,7 +38,7 @@ use crate::ssh::{
 // ---- the two ways to get a stream (the same two the Redis transport has)
 
 /// Signs in to the `a` container (the bastion) as a person would, trusting its host key.
-async fn sign_in_to_a(h: &Harness) -> Connected {
+pub(crate) async fn sign_in_to_a(h: &Harness) -> Connected {
     let a = crate::testservers::server("a");
     let mut input = host_input("a", a.port.expect("a has a port on this computer"), None);
     input.id = Some(h.host_id.clone());

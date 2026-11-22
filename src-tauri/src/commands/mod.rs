@@ -18,6 +18,7 @@ pub mod session;
 pub mod settings;
 pub mod sftp;
 pub mod snippets;
+pub mod sql;
 pub mod themes;
 pub mod tunnels;
 pub mod vault;

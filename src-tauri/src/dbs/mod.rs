@@ -67,4 +67,4 @@ impl Engine {
 }
 
 #[cfg(test)]
-mod spike;
+pub(crate) mod spike;

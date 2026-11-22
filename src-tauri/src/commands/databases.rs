@@ -77,6 +77,57 @@ pub async fn db_test(state: State<'_, AppState>, input: DatabaseInput) -> AppRes
             "An SRV address is looked up when you open the database, so it can't be tested from here yet.",
         ));
     }
+    if input.engine == Engine::Postgres {
+        // The whole sign-in: the saved password stands in for an empty field (as in the Redis form).
+        let typed = input
+            .password
+            .clone()
+            .filter(|p| !p.is_empty())
+            .map(Zeroizing::new);
+        let saved_id = input.id.clone();
+        let clear = input.clear_password;
+        let saved = match (&typed, saved_id, clear) {
+            (None, Some(id), false) => {
+                state
+                    .with_db_session(move |c, s| store::password(c, s, &id))
+                    .await?
+            }
+            _ => None,
+        };
+        let cfg = crate::sql::SqlConfig {
+            name: input.name.trim().to_string(),
+            engine: input.engine,
+            route: input.route,
+            host_id: input.host_id.clone().filter(|h| !h.is_empty()),
+            address,
+            port,
+            database: input
+                .default_database
+                .clone()
+                .filter(|d| !d.trim().is_empty()),
+            user: input.username.clone().unwrap_or_default(),
+            password: typed.or(saved),
+            tls: crate::dbs::transport::TlsMode::parse(&input.tls)
+                .unwrap_or(crate::dbs::transport::TlsMode::Off),
+            server_name: input.tls_server_name.clone(),
+        };
+        let started = std::time::Instant::now();
+        let info = crate::sql::test(&state.store(), cfg).await?;
+        return Ok(DbTestResult {
+            engine: input.engine,
+            latency_ms: started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32,
+            detail: format!(
+                "Connected · {} · {} as {}",
+                info.version
+                    .split_whitespace()
+                    .take(2)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                info.database,
+                info.user
+            ),
+        });
+    }
     let target = Target {
         address,
         port,

@@ -246,7 +246,7 @@ impl rustls::client::danger::ServerCertVerifier for EncryptOnly {
 }
 
 /// Turns a failed handshake into our codes. A certificate problem is `RedisTlsUntrusted`; the rest is "unreachable".
-fn tls_error(engine: Engine, e: &std::io::Error, name: &str) -> AppError {
+pub(crate) fn tls_error(engine: Engine, e: &std::io::Error, name: &str) -> AppError {
     let cert = e
         .get_ref()
         .and_then(|inner| inner.downcast_ref::<rustls::Error>())

@@ -122,6 +122,27 @@ pub fn get(conn: &Connection, vault_id: &str, id: &str) -> AppResult<DatabaseRow
     .ok_or_else(|| AppError::not_found("That database is no longer saved."))
 }
 
+/// The saved password, for the connection code only. It stays in `Zeroizing` memory (hard rule 1).
+pub fn password(
+    conn: &Connection,
+    s: &VaultSession,
+    id: &str,
+) -> AppResult<Option<zeroize::Zeroizing<String>>> {
+    let secret: Option<String> = conn
+        .query_row(
+            "SELECT password_secret_id FROM databases WHERE id = ?1 AND vault_id = ?2",
+            params![id, s.vault_id],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten();
+    let Some(sid) = secret else { return Ok(None) };
+    let bytes = secrets::get(conn, s, &sid)?;
+    let text = String::from_utf8(bytes.to_vec())
+        .map_err(|_| AppError::internal("a stored password is not text"))?;
+    Ok(Some(zeroize::Zeroizing::new(text)))
+}
+
 /// Checks the form. Redis is saved by its own editor.
 pub fn validate(input: &DatabaseInput) -> AppResult<()> {
     if input.engine == Engine::Redis {
@@ -195,6 +216,14 @@ pub fn validate(input: &DatabaseInput) -> AppResult<()> {
             "An SRV address is one DNS name, with no port.",
         ));
     }
+    Ok(())
+}
+
+pub fn touch_opened(conn: &Connection, vault_id: &str, id: &str) -> AppResult<()> {
+    conn.execute(
+        "UPDATE databases SET last_opened_at = ?1 WHERE id = ?2 AND vault_id = ?3",
+        params![now_ms(), id, vault_id],
+    )?;
     Ok(())
 }
 

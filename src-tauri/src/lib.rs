@@ -26,6 +26,7 @@ pub mod serial;
 pub mod settings;
 pub mod sftp;
 pub mod snippets;
+pub mod sql;
 pub mod ssh;
 pub mod state;
 pub mod system_integration;
@@ -60,6 +61,14 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::databases::saved_list,
             commands::databases::saved_save,
             commands::databases::saved_delete,
+            commands::sql::db_open,
+            commands::sql::db_respond,
+            commands::sql::db_close,
+            commands::sql::sql_objects,
+            commands::sql::sql_table_info,
+            commands::sql::sql_table_page,
+            commands::sql::sql_count,
+            commands::sql::sql_cell,
             commands::redis::redis_db_list,
             commands::redis::redis_db_save,
             commands::redis::redis_db_delete,
