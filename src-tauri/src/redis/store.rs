@@ -1,4 +1,4 @@
-//! Saved Redis databases (S26, S27): the `redis_databases` table. The password lives in `secrets` like every
+//! Saved Redis databases (S26, S27): the Redis rows of the `databases` table. The password lives in `secrets` like every
 //! other password; nothing here ever returns it (hard rule 1), only `has_password`.
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -115,7 +115,9 @@ pub struct RedisDatabaseInput {
     pub key_separator: String,
 }
 
-const COLUMNS: &str = "d.id, d.name, d.environment, d.route, d.host_id, h.label, d.address, d.port, d.kind, d.sentinel_master, d.username, d.password_secret_id IS NOT NULL, d.tls, d.tls_server_name, d.write_mode, d.default_db, d.key_separator, d.last_opened_at";
+// Redis rows live in the shared `databases` table (migration 0007): what only Redis has (kind, Sentinel master, key
+// separator) is in the `options` JSON, and the database index is `default_database` as text.
+const COLUMNS: &str = "d.id, d.name, d.environment, d.route, d.host_id, h.label, d.address, COALESCE(d.port, 6379), COALESCE(json_extract(d.options, '$.kind'), 'single'), json_extract(d.options, '$.sentinel_master'), d.username, d.password_secret_id IS NOT NULL, d.tls <> 'off', d.tls_server_name, d.write_mode, CAST(COALESCE(d.default_database, '0') AS INTEGER), COALESCE(json_extract(d.options, '$.key_separator'), ':'), d.last_opened_at";
 
 fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RedisDatabase> {
     Ok(RedisDatabase {
@@ -142,7 +144,7 @@ fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RedisDatabase> {
 
 pub fn list(conn: &Connection, vault_id: &str) -> AppResult<Vec<RedisDatabase>> {
     let mut st = conn.prepare(&format!(
-        "SELECT {COLUMNS} FROM redis_databases d LEFT JOIN hosts h ON h.id = d.host_id WHERE d.vault_id = ?1 ORDER BY d.name COLLATE NOCASE"
+        "SELECT {COLUMNS} FROM databases d LEFT JOIN hosts h ON h.id = d.host_id WHERE d.vault_id = ?1 AND d.engine = 'redis' ORDER BY d.name COLLATE NOCASE"
     ))?;
     let rows = st.query_map([vault_id], row)?.collect::<Result<_, _>>()?;
     Ok(rows)
@@ -150,7 +152,7 @@ pub fn list(conn: &Connection, vault_id: &str) -> AppResult<Vec<RedisDatabase>> 
 
 pub fn get(conn: &Connection, vault_id: &str, id: &str) -> AppResult<RedisDatabase> {
     conn.query_row(
-        &format!("SELECT {COLUMNS} FROM redis_databases d LEFT JOIN hosts h ON h.id = d.host_id WHERE d.id = ?1 AND d.vault_id = ?2"),
+        &format!("SELECT {COLUMNS} FROM databases d LEFT JOIN hosts h ON h.id = d.host_id WHERE d.id = ?1 AND d.vault_id = ?2 AND d.engine = 'redis'"),
         params![id, vault_id],
         row,
     )
@@ -166,7 +168,7 @@ pub fn password(
 ) -> AppResult<Option<Zeroizing<String>>> {
     let secret: Option<String> = conn
         .query_row(
-            "SELECT password_secret_id FROM redis_databases WHERE id = ?1 AND vault_id = ?2",
+            "SELECT password_secret_id FROM databases WHERE id = ?1 AND vault_id = ?2",
             params![id, s.vault_id],
             |r| r.get(0),
         )
@@ -181,8 +183,7 @@ pub fn password(
 
 /// The names of the databases that go through this host: deleting the host is refused while there are any.
 pub fn names_using_host(conn: &Connection, host_id: &str) -> AppResult<Vec<String>> {
-    let mut st =
-        conn.prepare("SELECT name FROM redis_databases WHERE host_id = ?1 ORDER BY name")?;
+    let mut st = conn.prepare("SELECT name FROM databases WHERE host_id = ?1 ORDER BY name")?;
     let rows = st
         .query_map([host_id], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
@@ -325,7 +326,7 @@ pub fn save_with_master(
     let old_secret: Option<String> = match &input.id {
         Some(existing) => tx
             .query_row(
-                "SELECT password_secret_id FROM redis_databases WHERE id = ?1 AND vault_id = ?2",
+                "SELECT password_secret_id FROM databases WHERE id = ?1 AND vault_id = ?2",
                 params![existing, s.vault_id],
                 |r| r.get(0),
             )
@@ -344,6 +345,14 @@ pub fn save_with_master(
         (None, _, true) => None,
         (None, old, false) => old.clone(),
     };
+    // Owned here so the parameter list can borrow them.
+    let default_db = input.default_db.to_string();
+    let options = serde_json::json!({
+        "kind": input.kind.as_str(),
+        "sentinel_master": clean(&input.sentinel_master),
+        "key_separator": input.key_separator,
+    })
+    .to_string();
     let values = params![
         id,
         s.vault_id,
@@ -353,29 +362,27 @@ pub fn save_with_master(
         host_id,
         input.address.trim(),
         input.port,
-        input.kind.as_str(),
-        clean(&input.sentinel_master),
         clean(&input.username),
         secret_id,
-        input.tls,
+        if input.tls { "verify" } else { "off" },
         clean(&input.tls_server_name),
         input.write_mode.as_str(),
-        input.default_db,
-        input.key_separator,
+        default_db,
+        options,
         now,
     ];
     if input.id.is_some() {
         tx.execute(
-            "UPDATE redis_databases SET name = ?3, environment = ?4, route = ?5, host_id = ?6, address = ?7, port = ?8, kind = ?9,
-               sentinel_master = ?10, username = ?11, password_secret_id = ?12, tls = ?13, tls_server_name = ?14, write_mode = ?15,
-               default_db = ?16, key_separator = ?17, updated_at = ?18 WHERE id = ?1 AND vault_id = ?2",
+            "UPDATE databases SET name = ?3, environment = ?4, route = ?5, host_id = ?6, address = ?7, port = ?8,
+               username = ?9, password_secret_id = ?10, tls = ?11, tls_server_name = ?12, write_mode = ?13,
+               default_database = ?14, options = ?15, updated_at = ?16 WHERE id = ?1 AND vault_id = ?2 AND engine = 'redis'",
             values,
         )?;
     } else {
         tx.execute(
-            "INSERT INTO redis_databases (id, vault_id, name, environment, route, host_id, address, port, kind, sentinel_master, username,
-               password_secret_id, tls, tls_server_name, write_mode, default_db, key_separator, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?18)",
+            "INSERT INTO databases (id, vault_id, engine, name, environment, route, host_id, address, port, username,
+               password_secret_id, tls, tls_server_name, write_mode, default_database, options, created_at, updated_at)
+             VALUES (?1, ?2, 'redis', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16)",
             values,
         )?;
     }
@@ -396,7 +403,7 @@ pub fn set_mode(
     mode: RedisWriteMode,
 ) -> AppResult<RedisDatabase> {
     conn.execute(
-        "UPDATE redis_databases SET write_mode = ?3, updated_at = ?4 WHERE id = ?1 AND vault_id = ?2",
+        "UPDATE databases SET write_mode = ?3, updated_at = ?4 WHERE id = ?1 AND vault_id = ?2",
         params![id, vault_id, mode.as_str(), now_ms()],
     )?;
     get(conn, vault_id, id)
@@ -406,7 +413,7 @@ pub fn delete(conn: &mut Connection, s: &VaultSession, id: &str) -> AppResult<()
     let tx = conn.transaction()?;
     let secrets_of: Option<(Option<String>, Option<String>)> = tx
         .query_row(
-            "SELECT password_secret_id, sentinel_password_secret_id FROM redis_databases WHERE id = ?1 AND vault_id = ?2",
+            "SELECT password_secret_id, extra_secret_id FROM databases WHERE id = ?1 AND vault_id = ?2",
             params![id, s.vault_id],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
@@ -417,7 +424,7 @@ pub fn delete(conn: &mut Connection, s: &VaultSession, id: &str) -> AppResult<()
             "That database is no longer saved.",
         ));
     };
-    tx.execute("DELETE FROM redis_databases WHERE id = ?1", [id])?;
+    tx.execute("DELETE FROM databases WHERE id = ?1", [id])?;
     for sid in [a, b].into_iter().flatten() {
         secrets::delete(&tx, s, &sid)?;
     }
@@ -427,7 +434,7 @@ pub fn delete(conn: &mut Connection, s: &VaultSession, id: &str) -> AppResult<()
 
 pub fn touch_opened(conn: &Connection, vault_id: &str, id: &str) -> AppResult<()> {
     conn.execute(
-        "UPDATE redis_databases SET last_opened_at = ?1 WHERE id = ?2 AND vault_id = ?3",
+        "UPDATE databases SET last_opened_at = ?1 WHERE id = ?2 AND vault_id = ?3",
         params![now_ms(), id, vault_id],
     )?;
     Ok(())

@@ -1,5 +1,7 @@
-//! Shared pieces of the SQL and MongoDB databases (replica/databases/spec.md section 3). D0 only adds the driver
-//! spike; D1 moves the transport, store, gate types and history here out of `redis/`.
+//! Shared pieces of every database engine (replica/databases/spec.md section 3). D1 moved the transport here out of
+//! `redis/`; the store, gate types and history follow as the SQL and MongoDB phases need them.
+
+pub mod transport;
 
 #[cfg(test)]
 mod spike;

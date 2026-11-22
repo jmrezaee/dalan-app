@@ -1,4 +1,4 @@
-//! How a Redis connection reaches its server (spec section 3, "Transport"). Both routes end as one
+//! How a database connection reaches its server (spec section 3, "Transport"). Both routes end as one
 //! `AsyncRead + AsyncWrite` stream that is handed to the Redis client:
 //!   - direct: a TCP connection from this computer;
 //!   - through a host: a `direct-tcpip` channel on an SSH connection to that host, so the server sees the

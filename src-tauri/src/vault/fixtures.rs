@@ -38,7 +38,8 @@ fn migrations_up_to(version: usize) -> Migrations<'static> {
 /// Builds the file for one version: only SQL that version's schema understands.
 fn fill(version: usize, conn: &mut Connection) {
     crate::db::configure(conn).unwrap();
-    migrations_up_to(version).to_latest(conn).unwrap();
+    // The data below is written at schema 6 (the Redis tables); v7 then migrates it, as an app upgrading would.
+    migrations_up_to(version.min(6)).to_latest(conn).unwrap();
 
     let params_kdf = KdfParams::cheap();
     let salt = random_salt();
@@ -111,6 +112,17 @@ fn fill(version: usize, conn: &mut Connection) {
                VALUES ('r1', 'v1', 'cache-prod', 'production', 'host', 'h1', '127.0.0.1', 6379, 'app-ro', 'sec2', 'confirm', 1, 1);
              INSERT INTO redis_databases (id, vault_id, name, route, address, created_at, updated_at) VALUES ('r2', 'v1', 'local', 'direct', 'localhost', 1, 1);
              INSERT INTO redis_history (id, database_id, command_enc, ran_at) VALUES ('rh1', 'r1', x'00', 1);",
+        )
+        .unwrap();
+    }
+    // v7: the databases table. The Redis rows move over keeping their ids; a Postgres row and a saved query are new.
+    if version >= 7 {
+        migrations_up_to(version).to_latest(conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO databases (id, vault_id, engine, name, route, address, port, default_database, username, created_at, updated_at)
+               VALUES ('d1', 'v1', 'postgres', 'shop', 'direct', 'localhost', 5432, 'shop', 'app', 1, 1);
+             INSERT INTO saved_queries (id, vault_id, database_id, engine, kind, name, body_enc, created_at, updated_at)
+               VALUES ('q1', 'v1', 'd1', 'postgres', 'sql', 'open orders', x'00', 1, 1);",
         )
         .unwrap();
     }
@@ -198,6 +210,80 @@ fn every_fixture_upgrades_and_keeps_its_data() {
         let history = crate::history::list(&conn, &s, Some("h1"), None, 10).unwrap();
         assert_eq!(history.len(), 1, "v{v}");
         assert_eq!(history[0].command, "uptime", "v{v}");
+        // 0007: the Redis rows are in `databases` with their ids, secret, mode and options; the old tables are gone.
+        let tables: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name IN ('redis_databases','redis_history')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(tables, 0, "v{v}: the old Redis tables are dropped");
+        if v >= 6 {
+            let (engine, route, host, secret, port, tls, mode, opts): (String, String, Option<String>, Option<String>, i64, String, String, String) = conn
+                .query_row(
+                    "SELECT engine, route, host_id, password_secret_id, port, tls, write_mode, options FROM databases WHERE id = 'r1'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)),
+                )
+                .unwrap_or_else(|e| panic!("v{v}: {e}"));
+            assert_eq!(
+                (
+                    engine.as_str(),
+                    route.as_str(),
+                    host.as_deref(),
+                    secret.as_deref()
+                ),
+                ("redis", "host", Some("h1"), Some("sec2")),
+                "v{v}"
+            );
+            assert_eq!(
+                (port, tls.as_str(), mode.as_str()),
+                (6379, "off", "confirm"),
+                "v{v}"
+            );
+            let opts: serde_json::Value = serde_json::from_str(&opts).unwrap();
+            assert_eq!(
+                (opts["kind"].as_str(), opts["key_separator"].as_str()),
+                (Some("single"), Some(":")),
+                "v{v}"
+            );
+            assert_eq!(
+                secrets::get(&conn, &s, "sec2").unwrap().as_slice(),
+                b"redis-secret",
+                "v{v}"
+            );
+            let kept: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM databases WHERE engine = 'redis'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(kept, 2, "v{v}");
+            let hist: (String, String) = conn
+                .query_row(
+                    "SELECT database_id, kind FROM database_history WHERE id = 'rh1'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(
+                (hist.0.as_str(), hist.1.as_str()),
+                ("r1", "command"),
+                "v{v}"
+            );
+        }
+        if v >= 7 {
+            let q: String = conn
+                .query_row(
+                    "SELECT name FROM saved_queries WHERE database_id = 'd1'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(q, "open orders");
+        }
         drop(conn);
         std::fs::remove_file(&tmp).ok();
     }

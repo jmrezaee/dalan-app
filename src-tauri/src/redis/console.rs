@@ -575,7 +575,7 @@ pub fn remember(conn: &Connection, s: &VaultSession, db_id: &str, line: &str) ->
     }
     let last: Option<(String, Vec<u8>)> = conn
         .query_row(
-            "SELECT id, command_enc FROM redis_history WHERE database_id = ?1 ORDER BY ran_at DESC, rowid DESC LIMIT 1",
+            "SELECT id, body_enc FROM database_history WHERE database_id = ?1 AND kind = 'command' ORDER BY ran_at DESC, rowid DESC LIMIT 1",
             params![db_id],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
@@ -587,11 +587,11 @@ pub fn remember(conn: &Connection, s: &VaultSession, db_id: &str, line: &str) ->
     }
     let id = uuid::Uuid::now_v7().to_string();
     conn.execute(
-        "INSERT INTO redis_history (id, database_id, command_enc, ran_at) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO database_history (id, database_id, kind, body_enc, ran_at) VALUES (?1, ?2, 'command', ?3, ?4)",
         params![id, db_id, seal_command(s, &id, line)?, now_ms()],
     )?;
     conn.execute(
-        "DELETE FROM redis_history WHERE database_id = ?1 AND rowid NOT IN (SELECT rowid FROM redis_history WHERE database_id = ?1 ORDER BY ran_at DESC, rowid DESC LIMIT ?2)",
+        "DELETE FROM database_history WHERE database_id = ?1 AND kind = 'command' AND rowid NOT IN (SELECT rowid FROM database_history WHERE database_id = ?1 AND kind = 'command' ORDER BY ran_at DESC, rowid DESC LIMIT ?2)",
         params![db_id, KEEP_HISTORY],
     )?;
     Ok(())
@@ -600,8 +600,8 @@ pub fn remember(conn: &Connection, s: &VaultSession, db_id: &str, line: &str) ->
 /// The database's history, newest first.
 pub fn history(conn: &Connection, s: &VaultSession, db_id: &str) -> AppResult<Vec<String>> {
     let mut stmt = conn.prepare(
-        "SELECT h.id, h.command_enc FROM redis_history h JOIN redis_databases d ON d.id = h.database_id
-         WHERE h.database_id = ?1 AND d.vault_id = ?2 ORDER BY h.ran_at DESC, h.rowid DESC",
+        "SELECT h.id, h.body_enc FROM database_history h JOIN databases d ON d.id = h.database_id
+         WHERE h.database_id = ?1 AND h.kind = 'command' AND d.vault_id = ?2 ORDER BY h.ran_at DESC, h.rowid DESC",
     )?;
     let rows = stmt.query_map(params![db_id, s.vault_id], |r| {
         Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))
@@ -618,7 +618,7 @@ pub fn history(conn: &Connection, s: &VaultSession, db_id: &str) -> AppResult<Ve
 
 pub fn clear_history(conn: &Connection, s: &VaultSession, db_id: &str) -> AppResult<()> {
     conn.execute(
-        "DELETE FROM redis_history WHERE database_id IN (SELECT id FROM redis_databases WHERE id = ?1 AND vault_id = ?2)",
+        "DELETE FROM database_history WHERE kind = 'command' AND database_id IN (SELECT id FROM databases WHERE id = ?1 AND vault_id = ?2)",
         params![db_id, s.vault_id],
     )?;
     Ok(())
@@ -1070,7 +1070,7 @@ mod tests {
         let conn = open_in_memory().unwrap();
         let s = vault::create(&conn, "correct-horse-staple", KdfParams::cheap()).unwrap();
         conn.execute(
-            "INSERT INTO redis_databases (id, vault_id, name, route, address, created_at, updated_at) VALUES ('d1', ?1, 'cache', 'direct', 'localhost', 0, 0)",
+            "INSERT INTO databases (id, vault_id, engine, name, route, address, created_at, updated_at) VALUES ('d1', ?1, 'redis', 'cache', 'direct', 'localhost', 0, 0)",
             params![s.vault_id],
         )
         .unwrap();
@@ -1091,7 +1091,7 @@ mod tests {
         );
         // At rest nothing is readable.
         let raw: Vec<Vec<u8>> = conn
-            .prepare("SELECT command_enc FROM redis_history")
+            .prepare("SELECT body_enc FROM database_history")
             .unwrap()
             .query_map([], |r| r.get(0))
             .unwrap()

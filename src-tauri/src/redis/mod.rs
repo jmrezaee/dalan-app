@@ -26,7 +26,8 @@ pub mod pubsub;
 pub mod sentinel;
 pub mod server;
 pub mod store;
-pub mod transport;
+// The transport is shared by every engine now (D1); Redis keeps this path for its own code.
+pub use crate::dbs::transport;
 pub mod write;
 
 pub use conn::{RedisEvent, RedisManager};
