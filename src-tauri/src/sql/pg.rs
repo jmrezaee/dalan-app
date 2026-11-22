@@ -728,9 +728,16 @@ impl PgConn {
             ));
             params.push(value.clone());
         }
-        if conds.is_empty() {
+        // The whole key, each column once: a partial key would pick whichever row the server finds first.
+        let key_columns = info
+            .columns
+            .iter()
+            .filter(|c| c.pk_position.is_some())
+            .count();
+        let distinct: std::collections::HashSet<&String> = key.iter().map(|(n, _)| n).collect();
+        if conds.is_empty() || conds.len() != key_columns || distinct.len() != key.len() {
             return Err(AppError::validation(
-                "This table has no key, so one row can't be picked out.",
+                "Pick the row with its whole primary key (this table has none, or the key given is partial).",
             ));
         }
         let sql = format!(
