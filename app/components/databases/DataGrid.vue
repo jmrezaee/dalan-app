@@ -60,6 +60,12 @@ function onKey(e: KeyboardEvent) {
     void navigator.clipboard.writeText(out)
     return
   }
+  // The first arrow key selects the first cell instead of moving from it.
+  if (!props.selected && e.key.startsWith('Arrow')) {
+    e.preventDefault()
+    emit('select', 0, 0)
+    return
+  }
   let { row, col } = s
   switch (e.key) {
     case 'ArrowDown': row++; break

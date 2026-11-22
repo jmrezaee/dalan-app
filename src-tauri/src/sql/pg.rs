@@ -23,6 +23,8 @@ pub const MAX_PAGE: u32 = 1000;
 
 pub struct PgConn {
     client: Client,
+    /// A statement scope began and its ROLLBACK has not been confirmed (an error, or the request was dropped half way).
+    dirty: std::sync::atomic::AtomicBool,
     /// One statement scope at a time: a table page's read-only transaction must not interleave with another's.
     gate: tokio::sync::Mutex<()>,
 }
@@ -129,10 +131,23 @@ impl PgConn {
         Ok((
             PgConn {
                 client,
+                dirty: std::sync::atomic::AtomicBool::new(false),
                 gate: tokio::sync::Mutex::new(()),
             },
             info,
         ))
+    }
+
+    /// Takes the statement scope. If an earlier scope never confirmed its ROLLBACK (the request was dropped, or the
+    /// BEGIN failed), the connection may still be inside a transaction, possibly an aborted one: end it first.
+    async fn scope(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        use std::sync::atomic::Ordering;
+        let guard = self.gate.lock().await;
+        if self.dirty.load(Ordering::SeqCst) {
+            let _ = self.client.batch_execute("ROLLBACK").await;
+            self.dirty.store(false, Ordering::SeqCst);
+        }
+        guard
     }
 
     /// Runs `body` inside a read-only transaction that is always rolled back.
@@ -140,7 +155,10 @@ impl PgConn {
         &self,
         body: impl AsyncFnOnce(&Client) -> Result<T, tokio_postgres::Error>,
     ) -> AppResult<T> {
-        let _scope = self.gate.lock().await;
+        use std::sync::atomic::Ordering;
+        let _scope = self.scope().await;
+        // Marked before anything is sent: if this future is dropped from here on, the next scope cleans up.
+        self.dirty.store(true, Ordering::SeqCst);
         self.client
             .batch_execute(&format!(
                 "BEGIN READ ONLY; SET LOCAL statement_timeout = {STATEMENT_TIMEOUT_MS}"
@@ -149,7 +167,9 @@ impl PgConn {
             .map_err(|e| map_error(&e))?;
         let out = body(&self.client).await;
         // Whatever happened, the transaction ends (an aborted one can only be rolled back).
-        let _ = self.client.batch_execute("ROLLBACK").await;
+        if self.client.batch_execute("ROLLBACK").await.is_ok() {
+            self.dirty.store(false, Ordering::SeqCst);
+        }
         out.map_err(|e| map_error(&e))
     }
 }
@@ -263,6 +283,7 @@ pub struct SqlTableInfo {
 impl PgConn {
     /// The lazy tree: `[]` lists schemas, `[schema]` lists its tables and views.
     pub async fn objects(&self, path: &[String]) -> AppResult<Vec<SqlObject>> {
+        let _scope = self.scope().await;
         match path {
             [] => {
                 let rows = self
@@ -319,6 +340,7 @@ impl PgConn {
     }
 
     pub async fn table_info(&self, schema: &str, table: &str) -> AppResult<SqlTableInfo> {
+        let _scope = self.scope().await;
         let rows = self
             .client
             .query(
@@ -531,10 +553,10 @@ impl PgConn {
             .iter()
             .enumerate()
             .map(|(i, c)| {
-                // Aliased c0, c1, ...: an output column named like a table column would win in ORDER BY, and the
+                // Aliased __c0, __c1, ...: an output column named like a table column would win in ORDER BY, and the
                 // page would be sorted by the text form (1, 10, 100, 2, ...) instead of by the column.
                 format!(
-                    "left({}::text, {}) as \"c{i}\"",
+                    "left({}::text, {}) as \"__c{i}\"",
                     quote(&c.name),
                     super::values::CUT_AT + 1
                 )

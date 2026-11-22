@@ -229,12 +229,19 @@ function setup() {
     if (runs.get(tab.id) === run) tab.loading = false
   }
 
-  /** Apply: the Where box, the sort and the columns start the table again from its first page. */
-  function apply(tab: TableTab) {
+  /**
+   * Apply: the Where box, the sort and the columns start the table again from its first page. If the server or the
+   * filter check refuses, nothing is kept: the table stays on the page, filter, sort and columns it had.
+   */
+  async function apply(tab: TableTab, change: { sort?: { column: string, descending: boolean }[], columns?: string[] } = {}) {
+    const before = { applied: tab.applied, sort: tab.sort, columns: tab.columns, cursors: [...tab.cursors], exact: tab.exact }
     tab.applied = tab.filter.trim()
+    if (change.sort) tab.sort = change.sort
+    if (change.columns) tab.columns = change.columns
     tab.exact = null
     tab.cursors = [null]
-    return loadPage(tab, 0)
+    await loadPage(tab, 0)
+    if (tab.error) Object.assign(tab, before)
   }
   const refresh = (tab: TableTab) => loadPage(tab, tab.page)
   const nextPage = (tab: TableTab) => (tab.next ? loadPage(tab, tab.page + 1) : Promise.resolve())
@@ -243,8 +250,7 @@ function setup() {
   /** Click on a column header: ascending, then descending, then off. */
   function sortBy(tab: TableTab, column: string) {
     const cur = tab.sort[0]
-    tab.sort = !cur || cur.column !== column ? [{ column, descending: false }] : cur.descending ? [] : [{ column, descending: true }]
-    return apply(tab)
+    return apply(tab, { sort: !cur || cur.column !== column ? [{ column, descending: false }] : cur.descending ? [] : [{ column, descending: true }] })
   }
 
   async function countExactly(tab: TableTab) {

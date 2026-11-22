@@ -416,3 +416,46 @@ async fn l3_pg_through_a_host_the_same_pages_come_back() {
     let page = c.table_page(&req("orders")).await.unwrap();
     assert_eq!(page.rows.len(), 500);
 }
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_pg_a_request_dropped_half_way_leaves_the_connection_usable_and_a_partial_key_is_refused(
+) {
+    seed();
+    let c = connect_direct(TlsMode::Off).await.unwrap();
+    // A slow page that the caller gives up on (a tab closed, a stale request): the transaction is left open on the
+    // connection until the next scope ends it.
+    let mut slow = req("orders");
+    slow.filter = "(select pg_sleep(2)) is not null".into();
+    let gave_up =
+        tokio::time::timeout(std::time::Duration::from_millis(150), c.table_page(&slow)).await;
+    assert!(gave_up.is_err(), "the page should still have been running");
+    assert!(
+        c.table_page(&req("orders")).await.is_ok(),
+        "the next request works"
+    );
+    assert_eq!(c.count("d2", "orders", "").await.unwrap(), 1200);
+    // Composite key: both columns are needed to pick a row.
+    let partial = c
+        .cell(
+            "d2",
+            "order_items",
+            &[("order_id".into(), "1".into())],
+            "sku",
+        )
+        .await;
+    assert!(partial.is_err());
+    let whole = c
+        .cell(
+            "d2",
+            "order_items",
+            &[
+                ("order_id".into(), "1".into()),
+                ("line_no".into(), "2".into()),
+            ],
+            "sku",
+        )
+        .await
+        .unwrap();
+    assert_eq!(whole.v.as_deref(), Some("sku-1-2"));
+}

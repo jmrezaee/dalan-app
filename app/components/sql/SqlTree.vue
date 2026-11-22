@@ -28,7 +28,15 @@ function onKey(e: KeyboardEvent, open: () => void) {
   const i = all.indexOf(el)
   if (e.key === 'Enter') { e.preventDefault(); open() }
   else if (e.key === 'ArrowDown') { e.preventDefault(); all[i + 1]?.focus() }
+  else if (e.key === 'Home') { e.preventDefault(); all[0]?.focus() }
+  else if (e.key === 'End') { e.preventDefault(); all.at(-1)?.focus() }
   else if (e.key === 'ArrowUp') { e.preventDefault(); all[i - 1]?.focus() }
+}
+function onSchemaKey(e: KeyboardEvent, s: (typeof store.schemas)[number]) {
+  // → opens a schema and ← closes it, like a tree.
+  if (e.key === 'ArrowRight' && !s.open) { e.preventDefault(); void store.toggleSchema(s, true) }
+  else if (e.key === 'ArrowLeft' && s.open) { e.preventDefault(); void store.toggleSchema(s, false) }
+  else onKey(e, () => store.toggleSchema(s))
 }
 </script>
 
@@ -39,7 +47,7 @@ function onKey(e: KeyboardEvent, open: () => void) {
       <div v-for="s in store.schemas" :key="s.name" role="none">
         <div
           role="treeitem" tabindex="0" :aria-expanded="s.open" class="flex h-7 cursor-default items-center gap-1 rounded-md px-1.5 font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
-          @click="store.toggleSchema(s)" @keydown="onKey($event, () => store.toggleSchema(s))"
+          @click="store.toggleSchema(s)" @keydown="onSchemaKey($event, s)"
         >
           <component :is="s.open ? ChevronDown : ChevronRight" class="size-3.5 text-muted" aria-hidden="true" /><span class="sr-only">Schema </span>{{ s.name }}
         </div>

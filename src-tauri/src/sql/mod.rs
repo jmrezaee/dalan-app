@@ -92,7 +92,11 @@ pub async fn load(store: &Store, db_id: &str) -> AppResult<SqlConfig> {
                 database: d.default_database,
                 user: d.username.unwrap_or_default(),
                 password,
-                tls: TlsMode::parse(&d.tls).unwrap_or(TlsMode::Off),
+                tls: TlsMode::parse(&d.tls).ok_or_else(|| {
+                    AppError::validation(
+                        "This database's TLS setting isn't one of off, require or verify.",
+                    )
+                })?,
                 server_name: d.tls_server_name,
             })
         })

@@ -108,7 +108,7 @@ pub async fn db_test(state: State<'_, AppState>, input: DatabaseInput) -> AppRes
             user: input.username.clone().unwrap_or_default(),
             password: typed.or(saved),
             tls: crate::dbs::transport::TlsMode::parse(&input.tls)
-                .unwrap_or(crate::dbs::transport::TlsMode::Off),
+                .ok_or_else(|| AppError::validation("Pick off, require or verify for TLS."))?,
             server_name: input.tls_server_name.clone(),
         };
         let started = std::time::Instant::now();

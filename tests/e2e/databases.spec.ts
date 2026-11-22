@@ -65,9 +65,10 @@ test.describe('Databases of every engine (S34, S35)', () => {
     expect((await fake.answers()).join('\n')).not.toContain('a-test-password')
     expect((await fake.model()).dbs.find((d: any) => d.name === 'app-prod')).toMatchObject({ engine: 'postgres', has_password: true, tls: 'verify', route: 'host', write_mode: 'read_only' })
 
-    // Opening it says what is coming; editing shows the password as saved.
+    // Opening it opens a SQL tab (D2); editing shows the password as saved.
     await saved.dblclick()
-    await expect(page.getByRole('status').filter({ hasText: 'app-prod is saved' })).toBeVisible()
+    await expect(page.getByTestId('sql-tab-app-prod')).toBeVisible()
+    await page.getByRole('tab', { name: 'Vault' }).click()
     await saved.click({ button: 'right' })
     await page.getByRole('menuitem', { name: 'Edit' }).click()
     await expect(s.getByRole('heading', { name: 'Edit database' })).toBeVisible()
@@ -115,6 +116,9 @@ test.describe('Databases of every engine (S34, S35)', () => {
     await s.getByRole('button', { name: 'Save' }).click()
     await expect(s).toHaveCount(0)
     await expect(row(page, 'shop-docs')).toContainText('Replica set')
+    // Opening a MongoDB database says what is coming: only PostgreSQL opens so far.
+    await row(page, 'shop-docs').dblclick()
+    await expect(page.getByRole('status').filter({ hasText: 'shop-docs is saved' })).toBeVisible()
     expect((await fake.model()).dbs.find((d: any) => d.name === 'shop-docs')).toMatchObject({ has_password: true, options: { replica_set: 'rs0', auth_source: 'admin', srv: false } })
     // The parsed answer never carried the password back.
     expect((await fake.answers()).join('\n')).not.toContain('pa$$')

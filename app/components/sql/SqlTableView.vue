@@ -21,8 +21,7 @@ function toggleColumn(name: string, on: boolean) {
   // Keep the table's own order; every column shown is the same as "all".
   const next = allColumns.value.map(c => c.name).filter(n => cur.has(n))
   if (!next.length) return
-  t.value.columns = next.length === allColumns.value.length ? [] : next
-  void store.apply(t.value)
+  void store.apply(t.value, { columns: next.length === allColumns.value.length ? [] : next })
 }
 
 const first = computed(() => t.value.page * PAGE_SIZE + 1)
@@ -55,12 +54,15 @@ const cellText = computed(() => {
   return raw
 })
 
-/** `col = value` for a jump: numbers and booleans as they are, everything else quoted with its quotes doubled. */
-const lit = (v: string) => (/^-?\d+(\.\d+)?$/.test(v) || v === 'true' || v === 'false' ? v : `'${v.replace(/'/g, '\'\'')}'`)
+/** A value as SQL text by its column's kind: numbers and booleans as they are, everything else quoted with its quotes doubled
+ * (so a text key like 007 stays text). */
+const lit = (v: string, kind: string) => (['int', 'decimal', 'float'].includes(kind) && /^-?\d+(\.\d+)?$/.test(v) ? v : kind === 'bool' && (v === 'true' || v === 'false') ? v : `'${v.replace(/'/g, '\'\'')}'`)
 const q = (n: string) => `"${n.replace(/"/g, '""')}"`
-function valueOf(name: string, row: number) {
+/** The value and kind of a column in a row; nothing when the column isn't shown or its value was cut. */
+function valueOf(name: string, row: number): { v: string, kind: string } | undefined {
   const i = t.value.cols.findIndex(c => c.name === name)
-  return i < 0 ? undefined : t.value.rows[row]?.[i]?.v
+  const c = i < 0 ? undefined : t.value.rows[row]?.[i]
+  return c && c.v !== null && !c.cut ? { v: c.v, kind: t.value.cols[i]!.kind } : undefined
 }
 interface Link { key: string, text: string, action: string, run: () => void }
 const links = computed<Link[]>(() => {
@@ -70,14 +72,14 @@ const links = computed<Link[]>(() => {
   const out: Link[] = []
   for (const fk of info.references) {
     const vals = fk.columns.map(n => valueOf(n, c.row))
-    if (vals.some(v => v == null)) continue
-    const where = fk.columns.map((_, i) => `${q(fk.target_columns[i]!)} = ${lit(vals[i]!)}`).join(' and ')
-    out.push({ key: `o-${fk.name}`, text: `${fk.table} ${vals.join(', ')}`, action: 'Open row', run: () => void store.jump(fk.schema, fk.table, where) })
+    if (vals.some(v => !v)) continue
+    const where = fk.columns.map((_, i) => `${q(fk.target_columns[i]!)} = ${lit(vals[i]!.v, vals[i]!.kind)}`).join(' and ')
+    out.push({ key: `o-${fk.name}`, text: `${fk.table} ${vals.map(v => v!.v).join(', ')}`, action: 'Open row', run: () => void store.jump(fk.schema, fk.table, where) })
   }
   for (const fk of info.referenced_by) {
     const vals = fk.target_columns.map(n => valueOf(n, c.row))
-    if (vals.some(v => v == null)) continue
-    const where = fk.columns.map((n, i) => `${q(n)} = ${lit(vals[i]!)}`).join(' and ')
+    if (vals.some(v => !v)) continue
+    const where = fk.columns.map((n, i) => `${q(n)} = ${lit(vals[i]!.v, vals[i]!.kind)}`).join(' and ')
     out.push({ key: `i-${fk.schema}.${fk.table}.${fk.name}`, text: `${fk.table} rows point here`, action: 'Show them', run: () => void store.jump(fk.schema, fk.table, where) })
   }
   return out

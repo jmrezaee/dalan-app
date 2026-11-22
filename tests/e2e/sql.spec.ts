@@ -114,6 +114,31 @@ test.describe('A PostgreSQL tab (S36)', () => {
     await expect(tab.getByRole('button', { name: 'customers', exact: true })).toHaveCount(0)
   })
 
+  test('F21: a refused Apply keeps the page the table was on, and the first arrow key selects the first cell', async ({ page }) => {
+    await openApp(page, { scenario: 'team', unlocked: true })
+    const tab = await openShop(page)
+    await tab.getByRole('treeitem', { name: 'table orders' }).click()
+    await tab.getByRole('button', { name: 'Next page' }).click()
+    await expect(tab.getByTestId('sql-range')).toContainText('Rows 201–400')
+    await tab.getByLabel('Where').fill('1 = 1; drop table orders')
+    await tab.getByRole('button', { name: 'Apply' }).click()
+    await expect(tab.getByRole('alert')).toContainText('That isn\'t a filter I can use')
+    await expect(tab.getByTestId('sql-range')).toContainText('Rows 201–400')
+    await tab.getByRole('button', { name: 'Next page' }).click()
+    await expect(tab.getByTestId('sql-range')).toContainText('Rows 401–600')
+    const grid = tab.getByRole('grid', { name: 'public.orders rows' })
+    await grid.focus()
+    await grid.press('ArrowDown')
+    await expect(tab.getByRole('complementary', { name: 'Cell' }).getByText('row 401')).toBeVisible()
+    // A tree: → opens a closed schema, ← closes it.
+    const billing = tab.getByRole('treeitem', { name: 'Schema billing' })
+    await billing.focus()
+    await billing.press('ArrowRight')
+    await expect(billing).toHaveAttribute('aria-expanded', 'true')
+    await billing.press('ArrowLeft')
+    await expect(billing).toHaveAttribute('aria-expanded', 'false')
+  })
+
   test('F21: a table with no key says rows can not be matched, and a view opens too', async ({ page }) => {
     await openApp(page, { scenario: 'team', unlocked: true })
     const tab = await openShop(page)
