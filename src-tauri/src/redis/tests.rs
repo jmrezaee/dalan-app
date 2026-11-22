@@ -1,6 +1,6 @@
 //! Redis against the real server in Docker (`scripts/test-servers.sh up`; service `redis` in tests/servers/compose.yml).
 //! Ignored unless asked for, like the SSH real-server tests: `cargo test -- --ignored`.
-//! The direct route uses the published port (6390); the "through a host" route signs in to the `a` container over
+//! The direct route uses the published port (16390); the "through a host" route signs in to the `a` container over
 //! SSH and reaches `redis:6379` from there, which is the path a production database takes.
 
 use std::sync::{Arc, Mutex};
@@ -18,7 +18,7 @@ use crate::hosts;
 use crate::ssh::tests::{harness, host_input};
 use crate::ssh::{PromptAnswer, PromptKind, Prompts, SessionEvent};
 
-const DIRECT_PORT: u16 = 6390;
+const DIRECT_PORT: u16 = 16390;
 const PASSWORD: &str = "test-redis";
 
 fn direct(password: Option<&str>, username: Option<&str>) -> Config {
@@ -68,7 +68,7 @@ async fn l3_redis_direct_signs_in_and_reads_the_servers_details() {
     // Two steps for a direct database, both done, in order.
     let events = seen.lock().unwrap().clone();
     assert!(
-        matches!(&events[0], RedisEvent::Plan { steps } if steps.len() == 2 && steps[0].label == "Reach Redis at 127.0.0.1:6390")
+        matches!(&events[0], RedisEvent::Plan { steps } if steps.len() == 2 && steps[0].label == "Reach Redis at 127.0.0.1:16390")
     );
     let done: Vec<u32> = events
         .iter()
