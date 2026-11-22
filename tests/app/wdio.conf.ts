@@ -17,6 +17,10 @@ export const config: Options.Testrunner & { capabilities: unknown[] } = {
   hostname: '127.0.0.1',
   port: 4444,
   path: '/',
+  // A WebDriver request that gets no answer fails after 30 s. The default is 120 s and three more tries, so one
+  // request that is never answered cost eight minutes before the run went on. Real requests answer in milliseconds.
+  connectionRetryTimeout: 30_000,
+  connectionRetryCount: 0,
   logLevel: 'warn',
   reporters: ['spec'],
   framework: 'mocha',

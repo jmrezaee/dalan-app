@@ -30,7 +30,8 @@ async function caption(text: string, state: 'run' | 'pass' | 'fail') {
   }, text, state).catch(() => {})
 }
 
-export async function step(info: { id: string, flow?: string, screen?: string, caption: string }, body: () => Promise<void>) {
+/** `picture: false` takes no screenshot for this step (see chapter 1: WebKitGTK never answers for that page). */
+export async function step(info: { id: string, flow?: string, screen?: string, caption: string, picture?: boolean }, body: () => Promise<void>) {
   const n = ++stepNumber
   const text = `REAL APP · Chapter ${chapterNumber} · ${chapterTitle} · step ${n}${info.flow ? ` · ${info.flow}` : ''} · ${info.caption}`
   const started = Date.now()
@@ -46,12 +47,17 @@ export async function step(info: { id: string, flow?: string, screen?: string, c
     error = (e instanceof Error ? e.message : String(e)).replace(/\u001b\[[0-9;]*m/g, '').split('\n').filter(Boolean).slice(0, 4).join(' | ')
   }
   await caption(text, error ? 'fail' : 'pass')
-  // The picture without the caption bar.
-  await browser.execute(() => { const h = document.getElementById('dalan-walk-host'); if (h) h.style.display = 'none' })
-  mkdirSync(OUT, { recursive: true })
-  const file = `${info.id}.png`
-  await browser.saveScreenshot(`${OUT}/${file}`).catch(() => {})
-  await browser.execute(() => { const h = document.getElementById('dalan-walk-host'); if (h) h.style.display = '' })
-  appendFileSync(`${OUT}/steps.jsonl`, `${JSON.stringify({ ...info, chapter: chapterNumber, chapterTitle, n, status: error ? 'fail' : 'pass', ms: Date.now() - started, error, shot: file, theme: 'real' })}\n`)
+  // The picture without the caption bar. A picture is a nicety: when it can't be taken (or is turned off for the
+  // step) the step goes on without one, and the gallery says "No screenshot." instead of failing on a missing file.
+  let shot = ''
+  if (info.picture !== false) {
+    await browser.execute(() => { const h = document.getElementById('dalan-walk-host'); if (h) h.style.display = 'none' })
+    mkdirSync(OUT, { recursive: true })
+    const file = `${info.id}.png`
+    if (await browser.saveScreenshot(`${OUT}/${file}`).then(() => true, () => false)) shot = file
+    await browser.execute(() => { const h = document.getElementById('dalan-walk-host'); if (h) h.style.display = '' })
+  }
+  const { picture: _picture, ...rest } = info
+  appendFileSync(`${OUT}/steps.jsonl`, `${JSON.stringify({ ...rest, chapter: chapterNumber, chapterTitle, n, status: error ? 'fail' : 'pass', ms: Date.now() - started, error, shot, theme: 'real' })}\n`)
   if (error) throw original
 }

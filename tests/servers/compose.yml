@@ -86,7 +86,17 @@ services:
       - |
         sleep 3
         cli() { redis-cli -a test-redis --no-auth-warning "$$@"; }
-        if cli -h rc1 -p 7000 cluster info | grep -q 'cluster_state:ok'; then echo "cluster is healthy"; exit 0; fi
+        # Healthy means EVERY node says ok, knows six nodes, and lists none as failed or without an address. (Asking
+        # only rc1 once called a cluster healthy while rc2 said "fail" and rc1 still remembered its old address.)
+        healthy() {
+          for n in rc1 rc2 rc3 rc4 rc5 rc6; do
+            cli -h $$n -p 7000 cluster info | grep -q 'cluster_state:ok' || return 1
+            cli -h $$n -p 7000 cluster info | grep -q 'cluster_known_nodes:6' || return 1
+            cli -h $$n -p 7000 cluster nodes | grep -qE 'fail|noaddr|handshake|disconnected' && return 1
+          done
+          return 0
+        }
+        if healthy; then echo "cluster is healthy"; exit 0; fi
         nodes=""
         for n in rc1 rc2 rc3 rc4 rc5 rc6; do
           cli -h $$n -p 7000 flushall >/dev/null 2>&1 || true
@@ -94,7 +104,7 @@ services:
           nodes="$$nodes $$(getent hosts $$n | cut -d' ' -f1):7000"
         done
         cli --cluster create $$nodes --cluster-replicas 1 --cluster-yes
-        for i in $$(seq 1 30); do cli -h rc1 -p 7000 cluster info | grep -q 'cluster_state:ok' && exit 0; sleep 1; done
+        for i in $$(seq 1 30); do healthy && exit 0; sleep 1; done
         echo "the cluster did not become healthy" >&2; exit 1
 
   # Redis Sentinel (R6): one primary, two replicas, three sentinels watching "mymaster". Also only on this network.

@@ -7,8 +7,9 @@ import { startChapter, step } from './walkStep'
 // the ones that need a real server use `docker restart` and `scripts/test-servers.sh rotate`.
 // Videos and screenshots go to test-results/app and walk-results; the gallery is the same as `pnpm walk`.
 describe('the walkthrough on the real app', function () {
-  // Creating the vault (Argon2 in a debug build, inside a container) has taken from a few seconds to several minutes here.
-  this.timeout(900_000)
+  // The whole walk takes a couple of minutes. A step that hangs fails inside 30 s (see wdio.conf.ts), so this is only
+  // the ceiling for a slow machine.
+  this.timeout(600_000)
 
   const a = servers().a!
   const rot = servers().rot!
@@ -19,7 +20,10 @@ describe('the walkthrough on the real app', function () {
       await $('#mp').waitForDisplayed()
       await $('#mp2').waitForDisplayed()
     })
-    await step({ id: '01-02', flow: 'F10', screen: 'S24', caption: 'Create the vault' }, async () => {
+    // No picture for this step: WebKitGTK in the test container never answers a screenshot of the page that follows
+    // the vault being created (probed 2026-11-22: scripts, title and size answer at once; six screenshots in a row
+    // timed out). It used to cost eight minutes of retries per run for a picture that was never saved.
+    await step({ id: '01-02', flow: 'F10', screen: 'S24', caption: 'Create the vault', picture: false }, async () => {
       await createVault()
     })
   })
