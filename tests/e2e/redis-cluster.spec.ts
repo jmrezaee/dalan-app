@@ -15,6 +15,8 @@ test.describe('editor (S27)', () => {
   test('a Sentinel database lists its sentinels and names its primary; the port follows the kind', async ({ page }) => {
     const fake = await openDatabases(page)
     await page.getByRole('button', { name: 'New database' }).click()
+    await page.getByRole('radio', { name: /Redis/ }).click()
+    await page.getByRole('button', { name: 'Continue' }).click()
     const s = sheet(page)
     await s.getByLabel('Name', { exact: true }).fill('jobs')
     await expect(s.getByLabel('Port')).toHaveValue('6379')
@@ -35,6 +37,8 @@ test.describe('editor (S27)', () => {
   test('a Cluster database takes the address of any node; a list is refused for it', async ({ page }) => {
     const fake = await openDatabases(page)
     await page.getByRole('button', { name: 'New database' }).click()
+    await page.getByRole('radio', { name: /Redis/ }).click()
+    await page.getByRole('button', { name: 'Continue' }).click()
     const s = sheet(page)
     await s.getByLabel('Name', { exact: true }).fill('events')
     await s.getByRole('radio', { name: 'Cluster' }).click()

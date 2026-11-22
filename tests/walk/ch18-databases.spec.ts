@@ -22,6 +22,8 @@ chapter(18, { scenario: 'team' }, async (page, fake) => {
 
   await step(page, { id: '18-02', flow: 'F13', screen: 'S27', caption: 'A new database: tested, then saved; the password never comes back' }, async () => {
     await click(page, page.getByRole('button', { name: 'New database' }))
+    await click(page, page.getByRole('radio', { name: /Redis/ }))
+    await click(page, page.getByRole('button', { name: 'Continue' }))
     const s = page.getByRole('dialog', { name: /database/i })
     await fill(page, s.getByLabel('Name', { exact: true }), 'jobs-staging')
     await fill(page, s.getByLabel('Address'), 'localhost')

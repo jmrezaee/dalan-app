@@ -151,6 +151,20 @@ pub fn save(
             "That query is too long to save (over 1 MB).",
         ));
     }
+    // A kind only makes sense for some engines: SQL for the SQL engines, pipelines and filters for MongoDB.
+    let fits = match input.kind {
+        SavedKind::Sql => matches!(
+            input.engine,
+            Engine::Postgres | Engine::Mysql | Engine::Mariadb
+        ),
+        SavedKind::Pipeline | SavedKind::Filter => input.engine == Engine::Mongodb,
+        SavedKind::Command => matches!(input.engine, Engine::Redis | Engine::Mongodb),
+    };
+    if !fits {
+        return Err(AppError::validation(
+            "That kind of query isn't for this engine.",
+        ));
+    }
     let tx = conn.transaction()?;
     let database_id = clean(&input.database_id);
     if let Some(d) = &database_id {
@@ -298,5 +312,11 @@ mod tests {
             Some("logs")
         );
         assert!(save(&mut conn, &s, input("  ", "select 1")).is_err());
+        let mut wrong = input("z", "{}");
+        wrong.kind = SavedKind::Pipeline;
+        assert!(
+            save(&mut conn, &s, wrong).is_err(),
+            "a pipeline is not for PostgreSQL"
+        );
     }
 }

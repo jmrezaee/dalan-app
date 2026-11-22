@@ -1,0 +1,148 @@
+import { expect, test } from '../support/fixtures'
+import type { Page } from '@playwright/test'
+import { openApp } from './harness'
+
+// D1 of SQL and MongoDB (replica/databases/spec.md): one list for every engine (S34), the engine picker and the
+// per-engine form (S35), connection strings, and the Saved queries list. F20: add a database of any engine, test it.
+const nav = (page: Page) => page.getByRole('navigation', { name: 'Vault' })
+const openDatabases = (page: Page) => nav(page).getByRole('link', { name: /Databases/ }).click()
+const picker = (page: Page) => page.getByTestId('new-database-dialog')
+const sheet = (page: Page) => page.getByTestId('db-form-sheet')
+const row = (page: Page, name: string) => page.getByRole('row', { name: new RegExp(name) })
+
+test.describe('Databases of every engine (S34, S35)', () => {
+  test('S35: the picker offers the engines, with PostgreSQL chosen first, and Escape closes it', async ({ page }) => {
+    await openApp(page, { scenario: 'empty', unlocked: true })
+    await openDatabases(page)
+    await page.getByRole('button', { name: 'New database' }).first().click()
+    const p = picker(page)
+    await expect(p.getByText('Step 1 of 2 · what kind?')).toBeVisible()
+    for (const e of ['PostgreSQL', 'MySQL', 'MariaDB', 'MongoDB', 'Redis']) await expect(p.getByRole('radio', { name: new RegExp(e) })).toBeVisible()
+    await expect(p.getByRole('radio', { name: /PostgreSQL/ })).toHaveAttribute('aria-checked', 'true')
+    await p.getByRole('radio', { name: /PostgreSQL/ }).press('ArrowRight')
+    await expect(p.getByRole('radio', { name: /MySQL/ })).toHaveAttribute('aria-checked', 'true')
+    await page.keyboard.press('Escape')
+    await expect(p).toHaveCount(0)
+  })
+
+  test('F20: a PostgreSQL database through a host is checked, tested and saved; its password never comes back', async ({ page }) => {
+    const fake = await openApp(page, { scenario: 'team', unlocked: true })
+    await openDatabases(page)
+    await page.getByRole('button', { name: 'New database' }).click()
+    await picker(page).getByRole('button', { name: 'Continue' }).click()
+    const s = sheet(page)
+    await expect(s.getByText('Step 2 of 2 · PostgreSQL')).toBeVisible()
+    await expect(s.getByLabel('Port')).toHaveValue('5432')
+    await expect(s.getByRole('radio', { name: /Confirm writes/ })).toHaveAttribute('aria-checked', 'true')
+
+    // Saving with nothing filled in says what is missing, in the form.
+    await s.getByRole('button', { name: 'Save' }).click()
+    await expect(s.getByRole('alert')).toContainText('Give the database a name')
+
+    await s.getByLabel('Name', { exact: true }).fill('app-prod')
+    await s.getByRole('radio', { name: 'Production' }).click()
+    await s.getByRole('radio', { name: 'Through a host' }).click()
+    await s.getByLabel('Host', { exact: true }).click()
+    await page.getByRole('option', { name: 'bastion' }).click()
+    await s.getByLabel('Database', { exact: true }).fill('app')
+    await s.getByLabel('Username').fill('app')
+    await s.locator('#db-pass').fill('a-test-password')
+    await s.getByRole('radio', { name: 'Verify' }).click()
+    await expect(s.getByText('Encrypted, and the certificate must be one this computer trusts.')).toBeVisible()
+    await s.getByRole('radio', { name: /Read-only/ }).click()
+    await s.getByRole('button', { name: 'Test connection' }).click()
+    await expect(s.getByRole('status')).toContainText('Reached')
+    await s.getByRole('button', { name: 'Save' }).click()
+    await expect(s).toHaveCount(0)
+
+    const saved = row(page, 'app-prod')
+    await expect(saved.getByRole('img', { name: 'PostgreSQL' })).toHaveText('PG')
+    await expect(saved).toContainText('127.0.0.1:5432 · app')
+    await expect(saved).toContainText('production')
+    await expect(saved).toContainText('bastion')
+    await expect(saved).toContainText('Read-only')
+    await expect(nav(page).getByRole('link', { name: /Databases/ })).toContainText('7')
+    expect((await fake.answers()).join('\n')).not.toContain('a-test-password')
+    expect((await fake.model()).dbs.find((d: any) => d.name === 'app-prod')).toMatchObject({ engine: 'postgres', has_password: true, tls: 'verify', route: 'host', write_mode: 'read_only' })
+
+    // Opening it says what is coming; editing shows the password as saved.
+    await saved.dblclick()
+    await expect(page.getByRole('status').filter({ hasText: 'app-prod is saved' })).toBeVisible()
+    await saved.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Edit' }).click()
+    await expect(s.getByRole('heading', { name: 'Edit database' })).toBeVisible()
+    await expect(s.getByText('Remove saved password')).toBeVisible()
+  })
+
+  test('S34: the engine chips filter the list and show their counts', async ({ page }) => {
+    await openApp(page, { scenario: 'team', unlocked: true })
+    await openDatabases(page)
+    for (const [engine, name] of [['MySQL', 'legacy-crm'], ['MongoDB', 'shop-docs']] as const) {
+      await page.getByRole('button', { name: 'New database' }).click()
+      await picker(page).getByRole('radio', { name: new RegExp(engine) }).click()
+      await picker(page).getByRole('button', { name: 'Continue' }).click()
+      await sheet(page).getByLabel('Name', { exact: true }).fill(name)
+      await sheet(page).getByLabel(engine === 'MongoDB' ? 'Members' : 'Address').fill(engine === 'MongoDB' ? 'h1:27017,h2:27017' : '10.0.4.8')
+      await sheet(page).getByRole('button', { name: 'Save' }).click()
+      await expect(sheet(page)).toHaveCount(0)
+    }
+    await expect(page.getByRole('button', { name: /^All 8$/ })).toHaveAttribute('aria-pressed', 'true')
+    await page.getByRole('button', { name: /^MongoDB 1$/ }).click()
+    await expect(row(page, 'shop-docs')).toContainText('h1:27017,h2:27017')
+    await expect(row(page, 'legacy-crm')).toHaveCount(0)
+    await page.getByRole('button', { name: /^MySQL \/ MariaDB 1$/ }).click()
+    await expect(row(page, 'legacy-crm')).toBeVisible()
+    await page.getByRole('button', { name: /^Redis 6$/ }).click()
+    await expect(row(page, 'cache-prod')).toBeVisible()
+    await expect(row(page, 'legacy-crm')).toHaveCount(0)
+  })
+
+  test('F20: a pasted connection string fills the form, and its password goes to the vault on save', async ({ page }) => {
+    const fake = await openApp(page, { scenario: 'empty', unlocked: true })
+    await openDatabases(page)
+    await page.getByRole('button', { name: 'New database' }).click()
+    await picker(page).getByLabel(/Or paste a connection string/).fill('mongodb://shopper:pa%24%24@h1:27017,h2:27017/shop?replicaSet=rs0&authSource=admin&tls=true')
+    await picker(page).getByRole('button', { name: 'Continue' }).click()
+    const s = sheet(page)
+    await expect(s.getByText('Step 2 of 2 · MongoDB')).toBeVisible()
+    await expect(s.getByText('Filled from your connection string. Its password goes to the vault when you save.')).toBeVisible()
+    await expect(s.getByLabel('Members')).toHaveValue('h1:27017,h2:27017')
+    await expect(s.getByLabel('Replica set (optional)')).toHaveValue('rs0')
+    await expect(s.getByLabel('Auth source (optional)')).toHaveValue('admin')
+    await expect(s.getByLabel('Username')).toHaveValue('shopper')
+    await expect(s.getByRole('radio', { name: 'Verify' })).toHaveAttribute('aria-checked', 'true')
+    await s.getByLabel('Name', { exact: true }).fill('shop-docs')
+    await s.getByRole('button', { name: 'Save' }).click()
+    await expect(s).toHaveCount(0)
+    await expect(row(page, 'shop-docs')).toContainText('Replica set')
+    expect((await fake.model()).dbs.find((d: any) => d.name === 'shop-docs')).toMatchObject({ has_password: true, options: { replica_set: 'rs0', auth_source: 'admin', srv: false } })
+    // The parsed answer never carried the password back.
+    expect((await fake.answers()).join('\n')).not.toContain('pa$$')
+  })
+
+  test('F20: a connection string that is not one says so', async ({ page }) => {
+    await openApp(page, { scenario: 'empty', unlocked: true })
+    await openDatabases(page)
+    await page.getByRole('button', { name: 'New database' }).click()
+    await picker(page).getByLabel(/Or paste a connection string/).fill('hello there')
+    await picker(page).getByRole('button', { name: 'Continue' }).click()
+    await expect(picker(page).getByRole('alert')).toContainText('That isn\'t a connection string')
+  })
+
+  test('S34: a saved database can be deleted, and Saved queries starts empty with its hint', async ({ page }) => {
+    await openApp(page, { scenario: 'empty', unlocked: true })
+    await openDatabases(page)
+    await page.getByRole('button', { name: 'New database' }).click()
+    await picker(page).getByRole('button', { name: 'Continue' }).click()
+    await sheet(page).getByLabel('Name', { exact: true }).fill('scratch')
+    await sheet(page).getByLabel('Address').fill('localhost')
+    await sheet(page).getByRole('button', { name: 'Save' }).click()
+    await row(page, 'scratch').click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Delete' }).click()
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Delete database' }).click()
+    await expect(page.getByRole('heading', { name: 'No databases yet' })).toBeVisible()
+    await nav(page).getByRole('link', { name: /Saved queries/ }).click()
+    await expect(page.getByRole('heading', { name: 'No saved queries yet' })).toBeVisible()
+    await expect(page.getByText('Save a query with ⌘S and it shows up here for every database of that engine.')).toBeVisible()
+  })
+})

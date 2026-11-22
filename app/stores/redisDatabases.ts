@@ -31,6 +31,8 @@ export const useRedisDatabasesStore = defineStore('redisDatabases', () => {
       dbs.value = [] // locked, or a plain browser
     }
     loaded.value = true
+    // The all-engine list (S34) shows these rows too.
+    await useDatabasesStore().refresh()
   }
 
   /**

@@ -489,4 +489,48 @@ mod tests {
             .unwrap();
         assert_eq!(left, 0);
     }
+
+    #[test]
+    fn each_engines_commands_stop_at_the_other_engines_rows() {
+        use crate::redis::store as rs;
+        let (mut conn, s) = setup();
+        let pg = save(&mut conn, &s, input(Engine::Postgres, "shop"), false).unwrap();
+        // The Redis side can't read, change or delete a PostgreSQL row, nor use its password.
+        assert!(rs::get(&conn, &s.vault_id, &pg.id).is_err());
+        assert!(rs::password(&conn, &s, &pg.id).unwrap().is_none());
+        assert!(rs::delete(&mut conn, &s, &pg.id).is_err());
+        assert!(rs::set_mode(&conn, &s.vault_id, &pg.id, RedisWriteMode::Open).is_err());
+        assert_eq!(
+            get(&conn, &s.vault_id, &pg.id).unwrap().write_mode,
+            RedisWriteMode::Confirm
+        );
+        // And an id of another engine can't be saved over.
+        let mut wrong = input(Engine::Mysql, "shop");
+        wrong.id = Some(pg.id.clone());
+        assert_eq!(
+            save(&mut conn, &s, wrong, false).unwrap_err().code,
+            ErrorCode::NotFound
+        );
+    }
+
+    #[test]
+    fn a_host_used_by_any_engines_database_can_not_be_deleted() {
+        let (mut conn, s) = setup();
+        conn.execute_batch(
+            "INSERT INTO connection_profiles (id, vault_id, created_at, updated_at) VALUES ('p', 'v', 1, 1);",
+        )
+        .ok();
+        let vault_id = s.vault_id.clone();
+        conn.execute("INSERT INTO connection_profiles (id, vault_id, created_at, updated_at) VALUES ('p1', ?1, 1, 1)", [&vault_id]).unwrap();
+        conn.execute("INSERT INTO hosts (id, vault_id, profile_id, label, address, created_at, updated_at) VALUES ('h1', ?1, 'p1', 'bastion', 'b', 1, 1)", [&vault_id]).unwrap();
+        let mut i = input(Engine::Mongodb, "docs");
+        i.route = RedisRoute::Host;
+        i.host_id = Some("h1".into());
+        i.port = None;
+        save(&mut conn, &s, i, false).unwrap();
+        assert_eq!(
+            crate::redis::store::names_using_host(&conn, "h1").unwrap(),
+            ["docs"]
+        );
+    }
 }

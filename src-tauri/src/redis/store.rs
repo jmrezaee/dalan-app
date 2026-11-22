@@ -168,7 +168,7 @@ pub fn password(
 ) -> AppResult<Option<Zeroizing<String>>> {
     let secret: Option<String> = conn
         .query_row(
-            "SELECT password_secret_id FROM databases WHERE id = ?1 AND vault_id = ?2",
+            "SELECT password_secret_id FROM databases WHERE id = ?1 AND vault_id = ?2 AND engine = 'redis'",
             params![id, s.vault_id],
             |r| r.get(0),
         )
@@ -326,7 +326,7 @@ pub fn save_with_master(
     let old_secret: Option<String> = match &input.id {
         Some(existing) => tx
             .query_row(
-                "SELECT password_secret_id FROM databases WHERE id = ?1 AND vault_id = ?2",
+                "SELECT password_secret_id FROM databases WHERE id = ?1 AND vault_id = ?2 AND engine = 'redis'",
                 params![existing, s.vault_id],
                 |r| r.get(0),
             )
@@ -403,7 +403,7 @@ pub fn set_mode(
     mode: RedisWriteMode,
 ) -> AppResult<RedisDatabase> {
     conn.execute(
-        "UPDATE databases SET write_mode = ?3, updated_at = ?4 WHERE id = ?1 AND vault_id = ?2",
+        "UPDATE databases SET write_mode = ?3, updated_at = ?4 WHERE id = ?1 AND vault_id = ?2 AND engine = 'redis'",
         params![id, vault_id, mode.as_str(), now_ms()],
     )?;
     get(conn, vault_id, id)
@@ -413,7 +413,7 @@ pub fn delete(conn: &mut Connection, s: &VaultSession, id: &str) -> AppResult<()
     let tx = conn.transaction()?;
     let secrets_of: Option<(Option<String>, Option<String>)> = tx
         .query_row(
-            "SELECT password_secret_id, extra_secret_id FROM databases WHERE id = ?1 AND vault_id = ?2",
+            "SELECT password_secret_id, extra_secret_id FROM databases WHERE id = ?1 AND vault_id = ?2 AND engine = 'redis'",
             params![id, s.vault_id],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
@@ -434,7 +434,7 @@ pub fn delete(conn: &mut Connection, s: &VaultSession, id: &str) -> AppResult<()
 
 pub fn touch_opened(conn: &Connection, vault_id: &str, id: &str) -> AppResult<()> {
     conn.execute(
-        "UPDATE databases SET last_opened_at = ?1 WHERE id = ?2 AND vault_id = ?3",
+        "UPDATE databases SET last_opened_at = ?1 WHERE id = ?2 AND vault_id = ?3 AND engine = 'redis'",
         params![now_ms(), id, vault_id],
     )?;
     Ok(())

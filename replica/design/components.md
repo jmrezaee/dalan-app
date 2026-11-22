@@ -486,6 +486,33 @@ ConnectSteps (S33 "Connecting")
         label ("Sign in to bastion", "Reach Redis at 127.0.0.1:6379", "Sign in as app-ro"), detail (xs muted: "through bastion", the SSH client's progress line, or why it failed)
   footer: [Cancel] (closes the tab); the list is aria-live="polite" so each finished step is announced
 
+EngineBadge (S34, S35, tabs, Saved queries)
+  Our own two-letter label, never a vendor logo: PG PostgreSQL (ansi-blue), My MySQL (ansi-yellow), Ma MariaDB (ansi-magenta), Mg MongoDB (ansi-green), Rd Redis (ansi-red).
+  Small: 22 × 18, radius sm, 1px border in the colour, mono 10 semibold. Large (picker): 36 × 30, radius 7, mono 13. role="img" with the engine's name as its label.
+
+DatabasesView (S34)
+  Toolbar "Databases" + filter (name, address, host, environment, engine) + [New database]. Chip row under it: All n, Redis n, PostgreSQL n, MySQL / MariaDB n, MongoDB n
+  (aria-pressed; the chosen one is secondary, the rest ghost muted). Table as S26 with the engine badge before the name; Address is host:port · database
+  (MongoDB: the members as written). Kind: Single server, Cluster, Sentinel, Replica set, SRV. Row: Enter opens, double-click opens, ↑/↓ move, right-click Open / Edit / Delete.
+  States: loading (3 skeleton rows), empty ("No databases yet" + [New database]), filtered to nothing ("No database matches …").
+  Opening an engine that has no tab yet says "<name> is saved. Browsing <engine> databases arrives in a later update." in a status line.
+
+NewDatabaseDialog (S35 step 1)
+  Dialog 620 wide: title "New database", "Step 1 of 2 · what kind?", a radiogroup of cards (2 columns; engine badge large + name + one-line note), PostgreSQL chosen first;
+  ←/→/↑/↓ move the choice. Under it a labelled field "Or paste a connection string …" (mono). [Cancel] [Continue]. A string that can't be read shows its sentence as an alert and stays.
+  A readable string skips the choice: Continue opens step 2 filled in (Redis gets the parts; its password is typed in the Redis form).
+
+DbFormSheet (S35 step 2)
+  Sheet 440 wide like S27, header with the small badge, "New database" / "Edit database" and "Step 2 of 2 · <engine>". Fields: Name, Environment (None / Staging / Production),
+  Reach it (Directly / Through a host + Host), Address (MongoDB: Members, or the SRV name with the SRV switch, no port) + Port, Database, Username, Password (saved shows "Saved in the vault"),
+  TLS (Off / Require / Verify with one explaining sentence; Verify shows the certificate name), Writes (the S33 picker). MongoDB adds Replica set and Auth source.
+  Footer: [Test connection] (status line: what was reached and how long, or why not), [Cancel], [Save]. A form filled from a string says so and that its password goes to the vault.
+  Un-marking a saved production database or loosening its mode needs the master password, as in S27.
+
+SavedQueriesView (Saved queries)
+  Toolbar "Saved queries". Table: Name (badge + name), Kind (SQL, Pipeline, Filter, Command), Database ("Any <engine> database" when not tied to one), Folder, delete button.
+  Empty: "No saved queries yet" + "Save a query with ⌘S and it shows up here for every database of that engine."
+
 ShortcutRecorder (S23)
   Input-like button "Press keys…"; shows captured combo as Kbd chips; conflict → danger text "Already used by New tab" + [Replace]
 

@@ -73,8 +73,8 @@ const shownHosts = computed(() => matchingHosts.value.slice(0, HOST_LIMIT))
         <CommandItem value="action sftp files transfer" @select="act('sftp')"><ArrowDownUp />Go to SFTP</CommandItem>
         <CommandItem value="action new sftp tab files transfer" @select="act('new-sftp')"><ArrowDownUp />New SFTP tab</CommandItem>
         <CommandItem value="action keychain keys identities" @select="act('keychain')"><KeyRound />Go to Keychain</CommandItem>
-        <CommandItem value="action new database redis add" @select="act('new-database')"><Plus />New database</CommandItem>
-        <CommandItem value="action databases redis" @select="act('databases')"><Database />Go to Databases</CommandItem>
+        <CommandItem value="action new database add postgres mysql mariadb mongodb redis" @select="act('new-database')"><Plus />New database</CommandItem>
+        <CommandItem value="action databases postgres mysql mariadb mongodb redis" @select="act('databases')"><Database />Go to Databases</CommandItem>
         <CommandItem value="action port forwarding tunnels" @select="act('forwards')"><Waypoints />Go to Port forwarding</CommandItem>
         <CommandItem value="action snippets scripts" @select="act('snippets')"><Code2 />Go to Snippets</CommandItem>
         <CommandItem value="action logs session history" @select="act('logs')"><ScrollText />Go to Logs</CommandItem>

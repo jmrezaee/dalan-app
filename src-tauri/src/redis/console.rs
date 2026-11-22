@@ -601,7 +601,7 @@ pub fn remember(conn: &Connection, s: &VaultSession, db_id: &str, line: &str) ->
 pub fn history(conn: &Connection, s: &VaultSession, db_id: &str) -> AppResult<Vec<String>> {
     let mut stmt = conn.prepare(
         "SELECT h.id, h.body_enc FROM database_history h JOIN databases d ON d.id = h.database_id
-         WHERE h.database_id = ?1 AND h.kind = 'command' AND d.vault_id = ?2 ORDER BY h.ran_at DESC, h.rowid DESC",
+         WHERE h.database_id = ?1 AND h.kind = 'command' AND d.engine = 'redis' AND d.vault_id = ?2 ORDER BY h.ran_at DESC, h.rowid DESC",
     )?;
     let rows = stmt.query_map(params![db_id, s.vault_id], |r| {
         Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))
@@ -618,7 +618,7 @@ pub fn history(conn: &Connection, s: &VaultSession, db_id: &str) -> AppResult<Ve
 
 pub fn clear_history(conn: &Connection, s: &VaultSession, db_id: &str) -> AppResult<()> {
     conn.execute(
-        "DELETE FROM database_history WHERE kind = 'command' AND database_id IN (SELECT id FROM databases WHERE id = ?1 AND vault_id = ?2)",
+        "DELETE FROM database_history WHERE kind = 'command' AND database_id IN (SELECT id FROM databases WHERE id = ?1 AND vault_id = ?2 AND engine = 'redis')",
         params![db_id, s.vault_id],
     )?;
     Ok(())

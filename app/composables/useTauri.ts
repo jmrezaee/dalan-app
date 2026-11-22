@@ -2,7 +2,7 @@
 import { Channel } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { commands } from '~/types/bindings'
-import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
+import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -27,6 +27,15 @@ export function useTauri() {
     quitApp: () => commands.quitApp(),
     quitCancel: () => commands.quitCancel(),
     linksTake: () => commands.linksTake(),
+    dbList: () => unwrap(commands.dbList()),
+    dbSave: (input: DatabaseInput_Deserialize, masterPassword: string | null = null) => unwrap(commands.dbSave(input, masterPassword)),
+    dbDelete: (id: string) => unwrap(commands.dbDelete(id)),
+    dbTest: (input: DatabaseInput_Deserialize) => unwrap(commands.dbTest(input)),
+    dbParseUrl: (url: string) => unwrap(commands.dbParseUrl(url)),
+    dbEngines: () => commands.dbEngines(),
+    savedList: () => unwrap(commands.savedList()),
+    savedSave: (input: SavedQueryInput_Deserialize) => unwrap(commands.savedSave(input)),
+    savedDelete: (id: string) => unwrap(commands.savedDelete(id)),
     redisDbList: () => unwrap(commands.redisDbList()),
     redisDbSave: (input: RedisDatabaseInput_Deserialize, masterPassword: string | null = null) => unwrap(commands.redisDbSave(input, masterPassword)),
     redisDbDelete: (id: string) => unwrap(commands.redisDbDelete(id)),

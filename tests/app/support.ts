@@ -137,6 +137,8 @@ export async function shown(xpath: string, timeout = 20_000): Promise<WebdriverI
 /** Adds a Redis database with the editor (S27): tested first when asked, then saved. */
 export async function addDatabase(d: { name: string, address: string, port?: number, password?: string, throughHost?: string, kind?: 'Cluster' | 'Sentinel', test?: boolean }) {
   await (await shown('//button[contains(normalize-space(.),"New database")]')).click()
+  await (await shown('//*[@role="radio"][contains(normalize-space(.),"Redis")]')).click()
+  await (await shown('//button[normalize-space(.)="Continue"]')).click()
   await type($('#rdb-name'), d.name)
   if (d.kind) await $(`//*[@role="radio"][normalize-space(.)="${d.kind}"]`).click()
   if (d.throughHost) {

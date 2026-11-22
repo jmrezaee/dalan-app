@@ -24,6 +24,8 @@ test('Settings > Databases: the defaults apply to a new database, the scan size 
   await page.getByRole('tab', { name: 'Vault' }).click()
   await page.getByRole('navigation', { name: 'Vault' }).getByRole('link', { name: /Databases/ }).click()
   await page.getByRole('button', { name: 'New database' }).click()
+  await page.getByRole('radio', { name: /Redis/ }).click()
+  await page.getByRole('button', { name: 'Continue' }).click()
   const sheet = page.getByRole('dialog', { name: /database/i })
   await expect(sheet.getByRole('radio', { name: /Read-only/ })).toHaveAttribute('aria-checked', 'true')
   await page.keyboard.press('Escape')
