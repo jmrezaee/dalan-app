@@ -53,7 +53,7 @@ impl CellKind {
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
-pub struct Cell {
+pub struct SqlCell {
     pub kind: CellKind,
     /// The value's text form; `None` for NULL.
     pub v: Option<String>,
@@ -61,11 +61,11 @@ pub struct Cell {
     pub cut: bool,
 }
 
-impl Cell {
+impl SqlCell {
     /// `text` is the server's own text form of the value (`col::text`).
-    pub fn new(kind: CellKind, text: Option<String>) -> Cell {
+    pub fn new(kind: CellKind, text: Option<String>) -> SqlCell {
         match text {
-            None => Cell {
+            None => SqlCell {
                 kind: CellKind::Null,
                 v: None,
                 cut: false,
@@ -77,7 +77,7 @@ impl Cell {
                 } else {
                     t
                 };
-                Cell {
+                SqlCell {
                     kind,
                     v: Some(v),
                     cut,
@@ -99,16 +99,16 @@ mod tests {
         assert_eq!(CellKind::of_pg("timestamptz", "D"), CellKind::Datetime);
         assert_eq!(CellKind::of_pg("_int4", "A"), CellKind::Array);
         assert_eq!(CellKind::of_pg("order_status", "E"), CellKind::Enum);
-        let big = Cell::new(CellKind::Int, Some("9223372036854775807".into()));
+        let big = SqlCell::new(CellKind::Int, Some("9223372036854775807".into()));
         assert_eq!(big.v.as_deref(), Some("9223372036854775807"));
-        assert_eq!(Cell::new(CellKind::Text, None).kind, CellKind::Null);
+        assert_eq!(SqlCell::new(CellKind::Text, None).kind, CellKind::Null);
     }
 
     #[test]
     fn long_text_is_cut_and_marked() {
-        let c = Cell::new(CellKind::Text, Some("x".repeat(CUT_AT + 10)));
+        let c = SqlCell::new(CellKind::Text, Some("x".repeat(CUT_AT + 10)));
         assert!(c.cut);
         assert_eq!(c.v.unwrap().chars().count(), CUT_AT);
-        assert!(!Cell::new(CellKind::Text, Some("short".into())).cut);
+        assert!(!SqlCell::new(CellKind::Text, Some("short".into())).cut);
     }
 }

@@ -95,7 +95,7 @@ function dropTab(ontoKey: string, where: 'before' | 'after' | 'onto') {
   dragKey.value = ''
   if (!key || key === ontoKey) return
   // A Redis tab has no shell to put in a pane: dropping onto or with one only reorders.
-  const isRedis = (k: string) => sessions.sessions.find(t => t.key === k)?.kind === 'redis'
+  const isRedis = (k: string) => ['redis', 'sql'].includes(sessions.sessions.find(t => t.key === k)?.kind ?? '')
   if (where === 'onto' && (isRedis(key) || isRedis(ontoKey))) sessions.moveTab(key, ontoKey, 'after')
   else if (where === 'onto') sessions.mergeTabs(key, ontoKey, hosts.hosts)
   else sessions.moveTab(key, ontoKey, where)
@@ -206,7 +206,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
         :label="s.label"
         :active="sessions.activeKey === s.key"
         :unsaved="s.kind === 'workspace' && s.dirty"
-        :warning="s.kind === 'redis' && redisDatabases.dbs.find(d => d.id === s.dbId)?.environment === 'production'"
+        :warning="(s.kind === 'redis' || s.kind === 'sql') && databasesStore.rows.find(d => d.id === s.dbId)?.environment === 'production'"
         closable
         movable
         :extra="tabMenu(s)"
@@ -220,6 +220,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
         <template #leading>
           <StatusDot v-if="s.kind === 'session'" :status="paneDot(s)" :label="paneDotLabel(s, s.label)" />
           <Database v-else-if="s.kind === 'redis'" class="size-4" aria-hidden="true" />
+          <EngineBadge v-else-if="s.kind === 'sql'" :engine="databasesStore.rows.find(d => d.id === s.dbId)?.engine ?? 'postgres'" />
           <template v-else-if="s.kind === 'workspace'">
             <LayoutGrid class="size-4 text-accent" aria-hidden="true" />
             <StatusDot :status="workspaceDot(s.panes)" :label="`${s.label}: ${workspaceDot(s.panes) === 'idle' ? 'all quiet' : workspaceDot(s.panes) === 'waiting' ? 'a pane is waiting for input' : workspaceDot(s.panes) === 'error' ? 'a pane failed or disconnected' : 'new output'}`" />
@@ -232,6 +233,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
       <!-- Terminals stay mounted (v-show), so scrollback survives switching tabs. -->
       <div v-for="s in sessions.sessions" v-show="sessions.activeKey === s.key" :key="s.key" class="absolute inset-0">
         <WorkspaceView v-if="s.kind === 'workspace'" ref="workspaceView" :ws="s" :active="sessions.activeKey === s.key" @edit-host="editHost" @new-host="newHost" />
+        <SqlTab v-else-if="s.kind === 'sql'" :tab-key="s.key" :db-id="s.dbId" :active="sessions.activeKey === s.key" @close="sessions.close(s)" />
         <RedisTab v-else-if="s.kind === 'redis'" :tab-key="s.key" :db-id="s.dbId" :active="sessions.activeKey === s.key" @close="sessions.close(s)" />
         <SessionPane v-else :session="s" :active="sessions.activeKey === s.key" @edit-host="editHost" @new-host="newHost" />
       </div>

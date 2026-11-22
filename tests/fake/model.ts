@@ -142,6 +142,8 @@ export interface Model {
   /** Saved databases of the other engines (PostgreSQL, MySQL, MariaDB, MongoDB) and the saved queries. */
   dbs: import('../../app/types/bindings').DatabaseRow_Serialize[]
   savedQueries: import('../../app/types/bindings').SavedQuery_Serialize[]
+  /** Open SQL connections (the fake serves the same `shop` schema to every database). */
+  sqlConns: Map<string, { events: number, db: string, closed: boolean }>
   /** Open Redis connections, with the channel their events go to. */
   redisConns: Map<string, { events: number, db: string, closed: boolean, index: number }>
   /** The keys of logical database 0 (see commands/redisKeys.ts). */
@@ -200,6 +202,7 @@ export function createModel(seed: Seed): Model {
     redisDbs: (seed.redisDbs ?? []).map((d): RedisDb => ({ environment: 'none', route: d.host_id ? 'host' : 'direct', host_id: null, port: 6379, kind: 'single', sentinel_master: null, username: null, password: false, tls: false, tls_server_name: null, write_mode: 'confirm', default_db: 0, key_separator: ':', last_opened_at: null, ...d })),
     dbs: [],
     savedQueries: [],
+    sqlConns: new Map(),
     redisConns: new Map(),
     redisKeys: [],
     redisManual: false,

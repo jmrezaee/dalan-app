@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { MAIN_SFTP_TAB, useSftpStore } from '~/stores/sftp'
 import { clearAllRedis, dropRedisStore, useRedisStore } from '~/stores/redis'
+import { clearAllSql, dropSqlStore, useSqlStore } from '~/stores/sql'
 import { toast } from 'vue-sonner'
 import type { AuthMethod, HostSummary, PromptKind, SessionEvent } from '~/types/bindings'
 import { CommandError, useTauri } from '~/composables/useTauri'
@@ -10,7 +11,7 @@ export type SessionStatus = 'connecting' | 'authenticating' | 'ready' | 'disconn
 
 export interface Session {
   /** `new` is the S16 New Tab screen: it has no connection until a host is picked. */
-  kind: 'session' | 'new' | 'workspace' | 'redis'
+  kind: 'session' | 'new' | 'workspace' | 'redis' | 'sql'
   /** Local id for the tab. Stable from the first moment, unlike `id`. */
   key: string
   /** Rust's session id. Empty until `session_open` answers; events can arrive before that. */
@@ -302,6 +303,21 @@ export const useSessionsStore = defineStore('sessions', () => {
     void useRedisStore(sess.key).open(db.id)
   }
 
+  /** A SQL tab for a saved PostgreSQL database (replica/databases/spec.md). One tab per database: opening it again shows that tab. */
+  function openSql(db: { id: string, name: string, address: string, port: number | null }) {
+    const existing = sessions.value.find(s => s.kind === 'sql' && s.dbId === db.id)
+    if (existing) {
+      activeKey.value = existing.key
+      return
+    }
+    const newTab = active.value?.kind === 'new' ? active.value : null
+    const sess = newTab ?? blank()
+    Object.assign(sess, { kind: 'sql', dbId: db.id, label: db.name, address: `${db.address}:${db.port ?? ''}`, status: 'connecting' })
+    if (!newTab) sessions.value.push(sess)
+    activeKey.value = sess.key
+    void useSqlStore(sess.key).open(db.id)
+  }
+
   /** S16. Reuses a New Tab that is already open instead of piling them up. */
   function openNewTab() {
     const existing = sessions.value.find(s => s.kind === 'new')
@@ -497,6 +513,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     if (sess.kind === 'workspace') sess.panes.forEach(dropSession)
     else if (sess.kind === 'session') dropSession(sess)
     else if (sess.kind === 'redis') dropRedisStore(sess.key)
+    else if (sess.kind === 'sql') dropSqlStore(sess.key)
     sessions.value.splice(i, 1)
     if (activeKey.value === sess.key) activeKey.value = sessions.value.at(-1)?.key ?? null
   }
@@ -505,6 +522,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   function clear() {
     for (const k of [...retries.keys()]) clearRetry(k)
     clearAllRedis()
+    clearAllSql()
     sessions.value = []
     extraSftp.value = []
     activeKey.value = null
@@ -512,5 +530,5 @@ export const useSessionsStore = defineStore('sessions', () => {
     pending.clear()
   }
 
-  return { sessions, activeKey, sftpKeys, sftpLabel, openSftpTab, closeSftpTab, active, activeSession, panelOpen, open, openLocal, openNewTab, openRedis, openWorkspace, addPane, closePane, focusPane, setMode, toggleMode, toggleBroadcast, input, activateNth, cycle, rename, moveTab, mergeTabs, attach, detach, write, resize, ack, respond, reconnect, reconnectWith, liveHostIds, workspaceTabs, close, clear, dropped, droppedCard, dismissDropped, reconnectAll }
+  return { sessions, activeKey, sftpKeys, sftpLabel, openSftpTab, closeSftpTab, active, activeSession, panelOpen, open, openLocal, openNewTab, openRedis, openSql, openWorkspace, addPane, closePane, focusPane, setMode, toggleMode, toggleBroadcast, input, activateNth, cycle, rename, moveTab, mergeTabs, attach, detach, write, resize, ack, respond, reconnect, reconnectWith, liveHostIds, workspaceTabs, close, clear, dropped, droppedCard, dismissDropped, reconnectAll }
 })

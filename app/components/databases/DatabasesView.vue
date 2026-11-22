@@ -59,6 +59,10 @@ function open(d: DbRow) {
     if (r) sessions.openRedis(r)
     return
   }
+  if (d.engine === 'postgres') {
+    sessions.openSql(d)
+    return
+  }
   notice.value = `${d.name} is saved. Browsing ${ENGINES[d.engine].label} databases arrives in a later update.`
 }
 function edit(d: DbRow) {
@@ -83,7 +87,7 @@ async function confirmDelete() {
   const d = toDelete.value
   if (!d) return
   // A tab on this database closes with it.
-  const tab = sessions.sessions.find(s => s.kind === 'redis' && s.dbId === d.id)
+  const tab = sessions.sessions.find(s => (s.kind === 'redis' || s.kind === 'sql') && s.dbId === d.id)
   if (tab) sessions.close(tab)
   deleteError.value = await databases.remove(d)
   if (!deleteError.value) {

@@ -4,6 +4,12 @@ export interface Allowed { rule: string, state?: string, selector?: string, reas
 export const ALLOWED: Allowed[] = [
   {
     rule: 'aria-required-children',
+    selector: 'div[role="tablist"]',
+    state: 'S36-sql-table',
+    reason: 'The same app tab bar as below: with no other tab list on screen axe names it by its role instead of its class.',
+  },
+  {
+    rule: 'aria-required-children',
     selector: '.overflow-x-auto',
     reason: 'The tab bar is a tablist whose closable tabs sit next to their own close button. Keyboard users close a tab with the shortcut (Mod+W). Revisit with a roving-tabindex tab list and a Delete key.',
   },

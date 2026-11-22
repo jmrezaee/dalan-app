@@ -54,7 +54,7 @@ export const commands = {
 	/**  "Count exactly": `count(*)` with the same filter. */
 	sqlCount: (connId: string, schema: string, table: string, filter: string) => typedError<number | null, AppError>(__TAURI_INVOKE("sql_count", { connId, schema, table, filter })),
 	/**  One whole cell (the page cut it), for the cell panel. */
-	sqlCell: (connId: string, schema: string, table: string, key: KeyPart[], column: string) => typedError<Cell_Serialize, AppError>(__TAURI_INVOKE("sql_cell", { connId, schema, table, key, column })),
+	sqlCell: (connId: string, schema: string, table: string, key: KeyPart[], column: string) => typedError<SqlCell_Serialize, AppError>(__TAURI_INVOKE("sql_cell", { connId, schema, table, key, column })),
 	/**  S26: the saved databases, by name. */
 	redisDbList: () => typedError<RedisDatabase_Serialize[], AppError>(__TAURI_INVOKE("redis_db_list")),
 	/**
@@ -387,25 +387,7 @@ export type AutoLockWarning = {
 	seconds_left: number,
 };
 
-export type Cell = Cell_Serialize | Cell_Deserialize;
-
 export type CellKind = "null" | "bool" | "int" | "decimal" | "float" | "text" | "bytes" | "json" | "datetime" | "array" | "enum" | "uuid" | "interval" | "unknown";
-
-export type Cell_Deserialize = {
-	kind: CellKind,
-	/**  The value's text form; `None` for NULL. */
-	v?: string | null,
-	/**  The text was cut at `CUT_AT` characters. */
-	cut: boolean,
-};
-
-export type Cell_Serialize = {
-	kind: CellKind,
-	/**  The value's text form; `None` for NULL. */
-	v: string | null,
-	/**  The text was cut at `CUT_AT` characters. */
-	cut: boolean,
-};
 
 export type Choice = "replace" | "keep_both" | "skip";
 
@@ -2182,6 +2164,24 @@ export type SortKey = {
 	descending: boolean,
 };
 
+export type SqlCell = SqlCell_Serialize | SqlCell_Deserialize;
+
+export type SqlCell_Deserialize = {
+	kind: CellKind,
+	/**  The value's text form; `None` for NULL. */
+	v?: string | null,
+	/**  The text was cut at `CUT_AT` characters. */
+	cut: boolean,
+};
+
+export type SqlCell_Serialize = {
+	kind: CellKind,
+	/**  The value's text form; `None` for NULL. */
+	v: string | null,
+	/**  The text was cut at `CUT_AT` characters. */
+	cut: boolean,
+};
+
 export type SqlColumn = SqlColumn_Serialize | SqlColumn_Deserialize;
 
 export type SqlColumn_Deserialize = {
@@ -2234,7 +2234,7 @@ export type SqlPage = SqlPage_Serialize | SqlPage_Deserialize;
 
 export type SqlPage_Deserialize = {
 	columns: SqlColumn_Deserialize[],
-	rows: Cell_Deserialize[][],
+	rows: SqlCell_Deserialize[][],
 	/**  `None` on the last page. */
 	next?: PageCursor_Deserialize | null,
 	/**  True when rows are matched by primary key (stable while rows change). */
@@ -2244,7 +2244,7 @@ export type SqlPage_Deserialize = {
 
 export type SqlPage_Serialize = {
 	columns: SqlColumn_Serialize[],
-	rows: Cell_Serialize[][],
+	rows: SqlCell_Serialize[][],
 	/**  `None` on the last page. */
 	next: PageCursor_Serialize | null,
 	/**  True when rows are matched by primary key (stable while rows change). */

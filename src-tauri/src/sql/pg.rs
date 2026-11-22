@@ -11,7 +11,7 @@ use tokio_postgres::{Client, NoTls};
 use tokio_rustls::rustls;
 use zeroize::Zeroizing;
 
-use super::values::{Cell, CellKind};
+use super::values::{CellKind, SqlCell};
 use crate::dbs::transport::{tls_client_config, BoxStream, TlsMode};
 use crate::error::{AppError, AppResult, ErrorCode};
 
@@ -464,7 +464,7 @@ pub struct PageRequest {
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct SqlPage {
     pub columns: Vec<SqlColumn>,
-    pub rows: Vec<Vec<Cell>>,
+    pub rows: Vec<Vec<SqlCell>>,
     /// `None` on the last page.
     pub next: Option<PageCursor>,
     /// True when rows are matched by primary key (stable while rows change).
@@ -647,7 +647,7 @@ impl PgConn {
                 shown
                     .iter()
                     .enumerate()
-                    .map(|(i, c)| Cell::new(c.kind, r.get::<_, Option<String>>(i)))
+                    .map(|(i, c)| SqlCell::new(c.kind, r.get::<_, Option<String>>(i)))
                     .collect()
             })
             .collect();
@@ -681,7 +681,7 @@ impl PgConn {
         table: &str,
         key: &[(String, String)],
         column: &str,
-    ) -> AppResult<Cell> {
+    ) -> AppResult<SqlCell> {
         let info = self.table_info(schema, table).await?;
         let col = info
             .columns
@@ -730,7 +730,7 @@ impl PgConn {
             .ok_or_else(|| AppError::not_found("That row is gone."))?;
         // The whole value: no cut.
         let text: Option<String> = row.get(0);
-        Ok(Cell {
+        Ok(SqlCell {
             kind: if text.is_some() {
                 col.kind
             } else {

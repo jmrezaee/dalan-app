@@ -2,7 +2,7 @@
 import { Channel } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { commands } from '~/types/bindings'
-import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
+import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -36,6 +36,18 @@ export function useTauri() {
     savedList: () => unwrap(commands.savedList()),
     savedSave: (input: SavedQueryInput_Deserialize) => unwrap(commands.savedSave(input)),
     savedDelete: (id: string) => unwrap(commands.savedDelete(id)),
+    dbOpen: (dbId: string, onEvent: (e: DbEvent_Serialize) => void) => {
+      const events = new Channel<DbEvent_Serialize>()
+      events.onmessage = onEvent
+      return unwrap(commands.dbOpen(dbId, events as never))
+    },
+    dbRespond: (connId: string, promptId: string, answer: PromptAnswer) => unwrap(commands.dbRespond(connId, promptId, answer)),
+    dbClose: (connId: string) => commands.dbClose(connId),
+    sqlObjects: (connId: string, path: string[]) => unwrap(commands.sqlObjects(connId, path)),
+    sqlTableInfo: (connId: string, schema: string, table: string) => unwrap(commands.sqlTableInfo(connId, schema, table)),
+    sqlTablePage: (connId: string, request: PageRequest_Deserialize) => unwrap(commands.sqlTablePage(connId, request)),
+    sqlCount: (connId: string, schema: string, table: string, filter: string) => unwrap(commands.sqlCount(connId, schema, table, filter)),
+    sqlCell: (connId: string, schema: string, table: string, key: { column: string, value: string }[], column: string) => unwrap(commands.sqlCell(connId, schema, table, key, column)),
     redisDbList: () => unwrap(commands.redisDbList()),
     redisDbSave: (input: RedisDatabaseInput_Deserialize, masterPassword: string | null = null) => unwrap(commands.redisDbSave(input, masterPassword)),
     redisDbDelete: (id: string) => unwrap(commands.redisDbDelete(id)),

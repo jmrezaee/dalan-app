@@ -513,6 +513,26 @@ SavedQueriesView (Saved queries)
   Toolbar "Saved queries". Table: Name (badge + name), Kind (SQL, Pipeline, Filter, Command), Database ("Any <engine> database" when not tied to one), Folder, delete button.
   Empty: "No saved queries yet" + "Save a query with ⌘S and it shows up here for every database of that engine."
 
+DataGrid (S36; later S37 results and S44 table view)
+  Shared and virtualised (28 px rows, only the rows near the viewport are drawn). role="grid" with a sticky header: a row-number column (48 px, muted), then one column per field:
+  a primary-key icon, the name, the type (muted), a sort arrow. Click a header to sort (ascending, descending, off); drag its right edge to resize (min 60 px).
+  Cells are mono, one line, cut with …; numbers right-aligned; NULL is muted italic; a booleans in ansi-blue; a cut value ends in …. The selected cell has an accent ring and tint.
+  Keyboard: arrows move, PageUp/PageDown move 10 rows, Home/End the first/last column (⌘ for first/last row), ⌘C copies the cell, ⇧⌘C the row as tab-separated text.
+  Selection is by cell; editing (D4) will add its own states (changed, added, deleted) on the same cells.
+
+SqlTab (S36)
+  Header (h 44): engine badge, name, environment chip, route → address, "· database · PostgreSQL 16.4", latency dot and ms, the write-mode chip (static until D4).
+  Left: SqlTree (256 wide): "Find a table" box, then schemas as treeitems (chevron, name; the usual schema opens first), tables and views under the open one with the planner's row estimate
+  (1.2k, 4.2M). Right: a strip of the open tables (button + its close ×; aria-current marks the shown one), then the table's Data view. Opening a table again shows its tab.
+  Connecting, the host's questions and failures use the S33 cards: Wrong username or password, certificate not trusted, Can't reach PostgreSQL, Connection closed (Reconnect).
+
+SqlTableView (S36 Data view)
+  Toolbar: "Where" + a mono input that takes one SQL condition, the sort chip, a Columns n/m menu (checkboxes; every column is "all"), Apply (primary), Refresh. The condition is checked
+  in Rust (one expression, nothing else) and the page is read in a read-only transaction. A table with no key says "This table has no key, so rows can't be matched safely."
+  Grid + the cell panel (288 wide): column name, type · row, the value (JSON pretty-printed; a cut value loads whole), "Linked": foreign keys out ("customers 2" [Open row]) and in
+  ("order_items rows point here" [Show them]); each opens that table in a new tab with the filter filled in.
+  Footer (h 36): "Rows 1–200 of 1,180 (estimate) · 22 ms", [Count exactly], and Previous / Page n / Next. Empty: "This table has no rows yet." or "No rows match this filter. Clear it?".
+
 ShortcutRecorder (S23)
   Input-like button "Press keys…"; shows captured combo as Kbd chips; conflict → danger text "Already used by New tab" + [Replace]
 

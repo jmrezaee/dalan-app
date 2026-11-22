@@ -11,7 +11,7 @@ use tauri::State;
 
 use crate::error::AppResult;
 use crate::sql::pg::{PageRequest, SqlObject, SqlPage, SqlTableInfo};
-use crate::sql::values::Cell;
+use crate::sql::values::SqlCell;
 use crate::sql::{DbEvent, Emit};
 use crate::ssh::PromptAnswer;
 use crate::state::AppState;
@@ -135,7 +135,7 @@ pub async fn sql_cell(
     table: String,
     key: Vec<KeyPart>,
     column: String,
-) -> AppResult<Cell> {
+) -> AppResult<SqlCell> {
     state.require_unlocked()?;
     let key: Vec<(String, String)> = key.into_iter().map(|k| (k.column, k.value)).collect();
     state

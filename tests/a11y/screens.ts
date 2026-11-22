@@ -32,6 +32,15 @@ const addDb = async (page: Page, engine: string, name: string, address: string) 
   await sheet.waitFor({ state: 'detached' })
 }
 
+/** Adds a PostgreSQL database and opens it in a tab (the fake plays the connection). */
+const sqlTab = async (page: Page) => {
+  await addDb(page, 'PostgreSQL', 'app-prod', 'db.internal')
+  await page.getByRole('row', { name: /app-prod/ }).dblclick()
+  const tab = page.getByTestId('sql-tab-app-prod')
+  await tab.getByRole('tree', { name: 'Schemas and tables' }).waitFor()
+  return tab
+}
+
 /** Opens a saved Redis database in a tab (the fake connects by itself) and, if asked, one of its views. */
 const redisTab = async (page: Page, name: string, view?: 'Console' | 'Pub/Sub' | 'Server') => {
   await vaultNav(page, 'Databases')
@@ -92,6 +101,8 @@ export const SCREENS: ScreenState[] = [
   { id: 'S34-databases-all-engines', scenario: 'team', open: async (p) => { await addDb(p, 'MySQL', 'legacy-crm', '10.0.4.8'); await addDb(p, 'MongoDB', 'shop-docs', 'h1:27017,h2:27017') } },
   { id: 'S35-engine-picker', scenario: 'team', open: async (p) => { await vaultNav(p, 'Databases'); await p.getByRole('button', { name: 'New database' }).click() } },
   { id: 'S35-database-form', scenario: 'team', open: async (p) => { await vaultNav(p, 'Databases'); await p.getByRole('button', { name: 'New database' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('radio', { name: 'Through a host' }).click() } },
+  { id: 'S36-sql-tab-tree', scenario: 'team', open: async (p) => { await sqlTab(p) } },
+  { id: 'S36-sql-table', scenario: 'team', open: async (p) => { const t = await sqlTab(p); await t.getByRole('treeitem', { name: 'table orders' }).click(); await t.getByRole('grid', { name: 'public.orders rows' }).getByRole('gridcell', { name: '1' }).first().click() } },
   { id: 'S34-saved-queries', scenario: 'team', open: async (p) => { await vaultNav(p, 'Saved queries') } },
   // ---- Redis (replica/redis/spec.md): S26 to S33.
   { id: 'S26-databases', scenario: 'team', open: async (p) => { await vaultNav(p, 'Databases') } },
