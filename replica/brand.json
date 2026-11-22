@@ -5,7 +5,7 @@
   "package_name": "dalan-app",
   "repo_name": "dalan-app",
   "product_name": "Dalan",
-  "avoid": ["Termius", "Termius Corporation", "Server Auditor", "ServerAuditor", "Redis Insight", "RedisInsight"],
+  "avoid": ["Termius", "Termius Corporation", "Server Auditor", "ServerAuditor", "Redis Insight", "RedisInsight", "Navicat", "DataGrip", "DBeaver", "MongoDB Compass"],
   "domains": ["termius.com", "docs.termius.com", "account.termius.com"],
   "colors": [],
   "_colors_note": "The original's mark is listed as plain black/white (#000000/#ffffff) by Simple Icons. Those are too generic to sweep for, so no colours are listed. Our accent is turquoise, a different family from the original's monochrome mark."

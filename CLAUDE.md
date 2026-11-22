@@ -19,14 +19,14 @@ A personal desktop SSH client for Mehrdad and his team. It is a clean-room rebui
   - `components.md` holds a spec for every component, with states, keyboard and a11y behaviour, and our own copy.
   - `contrast.py` must report 0 AA failures.
   - `preview.html` / `preview.png` are a visual reference.
-- **UI/UX design canvas:** https://claude.ai/artifact/U8iEwGC82GSXeTKYXdzanJ (private to Mehrdad; open it with the Artifact read action, or ask him for screenshots). It holds 23 artboards covering S01–S25, every connection state, components, foundations and the light theme. Match layouts and copy from it, using tokens, never its inline hex.
+- **UI/UX design canvas:** https://claude.ai/artifact/U8iEwGC82GSXeTKYXdzanJ (private to Mehrdad; open it with the Artifact read action, or ask him for screenshots). It holds the artboards for S01–S47: the core app, every connection state, components, foundations, the light theme and the "Databases" page (Redis, SQL, MongoDB). Match layouts and copy from it, using tokens, never its inline hex.
 - `replica/schema.sql`: SQLite migration `0001_init` (21 tables). It is the source of truth for the DB. Change the schema only by adding a new migration, never by editing 0001 once it has shipped.
 
 ## Stack (do not swap without asking)
 
-- **UI:** Nuxt 4 with `ssr: false` (SPA served by Tauri), TypeScript strict, Pinia, shadcn-vue (Reka UI), Tailwind, `@xterm/xterm` + addons
+- **UI:** Nuxt 4 with `ssr: false` (SPA served by Tauri), TypeScript strict, Pinia, shadcn-vue (Reka UI), Tailwind, `@xterm/xterm` + addons; CodeMirror 6 for SQL, JSON and pipeline editors (from D3)
 - **Desktop:** Tauri 2. **All SSH, SFTP, tunnels, PTY, filesystem, crypto and DB live in Rust** (`src-tauri/`).
-- **Rust crates:** `russh`, `russh-sftp`, `ssh-key`, `portable-pty`, `rusqlite` (bundled) + `rusqlite_migration`, `argon2`, `chacha20poly1305`, `zeroize`, `notify`, `uuid` (v7), `thiserror`, `serde`, `tokio`; for Redis (R1 onward): `redis`, `tokio-rustls`, `rustls-native-certs`
+- **Rust crates:** `russh`, `russh-sftp`, `ssh-key`, `portable-pty`, `rusqlite` (bundled) + `rusqlite_migration`, `argon2`, `chacha20poly1305`, `zeroize`, `notify`, `uuid` (v7), `thiserror`, `serde`, `tokio`; for Redis: `redis`, `tokio-rustls`, `rustls-native-certs`; for SQL and MongoDB (from D0, confirmed by the spike): `tokio-postgres`, `mysql_async`, `mongodb` + `bson`, `sqlparser`
 - **Database:** SQLite, one file in the app data dir, opened only by Rust. `PRAGMA foreign_keys=ON; journal_mode=WAL`.
 - **Package manager:** **pnpm** only. Node **24.12.0**: run `nvm use 24.12.0` before any node/pnpm command.
 - **Dev server port:** 4000 (set `devUrl` in `tauri.conf.json` to match)
@@ -105,14 +105,8 @@ cd src-tauri && cargo clippy -- -D warnings && cargo test
 - **P30 is done:** several SFTP tabs (one store per tab; its hand check is section G in `replica/testing/hand-checks.md`).
 - **The Windows installer is built** (W1 to W3 done, released in v0.1.2; W4 waits for the Windows hand checks in section H of `hand-checks.md`).
 - **L1 (the download page rebuild) is built** (`[h]`): `site/index.html`, `pnpm site:shots`, `tests/site/`; its hand check (the right button and file on a Mac, a Windows PC and a phone) is in `replica/progress.md`.
-- **Next: Redis.** A Databases vault section and Redis tabs (browser, console, Pub/Sub, server, bulk actions, Cluster and Sentinel) with per-database write modes behind one gate in Rust. The spec is `replica/redis/spec.md` (screens **S26–S33**, flows **F13–F19**); the boards are the "Redis" page of the UI/UX design canvas; phases R1 to R7 are in `replica/progress.md`. Start with `go R1`. The second reference app is named only in `replica/`.
-- **R1 (Redis foundations) is built** (`[h]`): the Databases section, the database editor, the Redis tab shell and its connection (direct or through a host, TLS). Its hand check and what is left (visual baselines, the real-server tests) are in `replica/progress.md`.
-- **R2 (the Redis browser's read side) is built** (`[h]`): scan and key tree, key details, a viewer for every type in pages, binary and big values. Its hand check is in `replica/progress.md`.
-- **R3 (the write gate and the editors) is built** (`[h]`): `redis/gate.rs` decides for every command by the database's mode, writes are prepare → confirm → commit once, and every type has its editor. Its hand check and known gaps are in `replica/progress.md`. 
-- **R4 (Console and Server) is built** (`[h]`): console lines are parsed and printed in Rust and pass the gate; `MULTI` queues in Rust; history is encrypted. Its hand check is in `replica/progress.md`.
-- **R5 (Pub/Sub and bulk actions) is built** (`[h]`): a second connection per tab for listening, messages batched with a drop count; bulk preview, typed name, batches of 500, Stop. Its hand check is in `replica/progress.md`.
-- **R6 (Cluster and Sentinel) is built** (`[h]`): our own slot routing behind `Conn` (one server or a cluster), `MOVED`/`ASK`, a scan across nodes, sentinel lookup, the Nodes panel. Its hand check is in `replica/progress.md`.
-- **R7 (Redis hardening) is built** (`[h]`): Settings > Databases, accessibility on every Redis state, walk chapter 18, timing tests, `features.csv` rows. The Docker real-server tests (I1, 26 pass) and the visual baselines (I2) are done. **All of R1 to R7 still wait for I3 to I19 of section I in `replica/testing/hand-checks.md`** (the real window with a real Redis, by hand). The Redis commits are local only.
+- **Redis is built** (R1 to R7, released in v0.2.0; hand checks I3 to I19 are still open). Spec: `replica/redis/spec.md` (S26–S33, F13–F19).
+- **Next: SQL and MongoDB.** PostgreSQL, MySQL, MariaDB and MongoDB join the Databases section, with Redis as the first engine on a shared `databases` table (migration 0007). The spec is `replica/databases/spec.md` (screens **S34–S47**, flows **F20–F30**); the boards are the middle and bottom rows of the "Databases" page of the UI/UX design canvas; phases D0 to D11 are in `replica/progress.md`. Start with `go D0`. The reference apps are named only in `replica/`.
 - **Manual checks:** a phase that needs Mehrdad to test something by hand is not done until he has reported back.
 - **M1 is done when F01, F11 and F12 work against a real server:**
   - unlock
