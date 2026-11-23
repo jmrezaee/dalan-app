@@ -247,12 +247,14 @@ pub enum Parsed {
     /// A command built and checked in Rust (an aggregation that writes, an index, a view, validation rules): sent as
     /// it is, after the gate. `class` is what the gate decides on.
     Raw { class: Class, summary: String, cmd: Document },
+    /// A `Raw` that changes what a filter matches: the gate counts the matches and shows a sample first.
+    Match { class: Class, summary: String, cmd: Document, coll: String, filter: Document },
 }
 
 impl Parsed {
     pub fn class(&self) -> Class {
         match self {
-            Parsed::Raw { class, .. } => *class,
+            Parsed::Raw { class, .. } | Parsed::Match { class, .. } => *class,
             _ => Class::Write,
         }
     }
@@ -294,7 +296,7 @@ pub fn describe(w: &MgWrite) -> String {
         Parsed::Insert(_) => format!("Insert 1 document into {}.{}.", w.db, w.coll),
         Parsed::Replace(id, _) => format!("Replace the document with _id {} in {}.{}.", id.clone().into_relaxed_extjson(), w.db, w.coll),
         Parsed::Delete(id) => format!("Delete the document with _id {} from {}.{}. This can't be undone.", id.clone().into_relaxed_extjson(), w.db, w.coll),
-        Parsed::Raw { summary, .. } => summary.clone(),
+        Parsed::Raw { summary, .. } | Parsed::Match { summary, .. } => summary.clone(),
     }
 }
 
@@ -302,7 +304,7 @@ pub fn describe(w: &MgWrite) -> String {
 pub async fn current(c: &MongoConn, w: &MgWrite) -> AppResult<Option<Document>> {
     let id = match &w.op {
         Parsed::Replace(id, _) | Parsed::Delete(id) => id.clone(),
-        Parsed::Insert(_) | Parsed::Raw { .. } => return Ok(None),
+        Parsed::Insert(_) | Parsed::Raw { .. } | Parsed::Match { .. } => return Ok(None),
     };
     let r = c.command(&w.db, doc! { "find": &w.coll, "filter": { "_id": id }, "limit": 1_i64, "singleBatch": true }).await?;
     Ok(r.get_document("cursor").map(|c| names(c, "firstBatch")).unwrap_or_default().into_iter().next())
@@ -313,14 +315,8 @@ pub async fn current(c: &MongoConn, w: &MgWrite) -> AppResult<Option<Document>> 
 pub async fn run(c: &MongoConn, w: &MgWrite) -> AppResult<u32> {
     let (db, coll) = (&w.db, &w.coll);
     match &w.op {
-        Parsed::Raw { cmd, .. } => {
-            let r = c.command(db, cmd.clone()).await?;
-            // An aggregation that writes ($out, $merge) leaves a cursor: let it go.
-            if let Some(Bson::Int64(id)) = r.get_document("cursor").ok().and_then(|c| c.get("id")) {
-                if *id != 0 {
-                    let _ = c.command(db, doc! { "killCursors": coll, "cursors": [*id] }).await;
-                }
-            }
+        Parsed::Raw { .. } | Parsed::Match { .. } => {
+            run_reply(c, w).await?;
             Ok(1)
         }
         Parsed::Insert(d) => {
@@ -344,6 +340,35 @@ pub async fn run(c: &MongoConn, w: &MgWrite) -> AppResult<u32> {
             Ok(n)
         }
     }
+}
+
+/// Runs a held command (`Raw` or `Match`) and returns the server's reply.
+pub async fn run_reply(c: &MongoConn, w: &MgWrite) -> AppResult<Document> {
+    let (Parsed::Raw { cmd, .. } | Parsed::Match { cmd, .. }) = &w.op else {
+        return Err(AppError::internal("run_reply is for held commands"));
+    };
+    let r = c.command(&w.db, cmd.clone()).await?;
+    // An aggregation that writes ($out, $merge) leaves a cursor: let it go.
+    if let Some(Bson::Int64(id)) = r.get_document("cursor").ok().and_then(|c| c.get("id")) {
+        if *id != 0 {
+            let _ = c.command(&w.db, doc! { "killCursors": &w.coll, "cursors": [*id] }).await;
+        }
+    }
+    Ok(r)
+}
+
+/// How many documents a filter matches, and up to three of them (canonical JSON), for a confirmation.
+pub async fn match_preview(c: &MongoConn, db: &str, coll: &str, filter: &Document) -> AppResult<(f64, Vec<String>)> {
+    let r = c.command(db, doc! { "count": coll, "query": filter.clone() }).await?;
+    let n = match r.get("n") {
+        Some(Bson::Int32(i)) => f64::from(*i),
+        Some(Bson::Int64(i)) => *i as f64,
+        Some(Bson::Double(d)) => *d,
+        _ => 0.0,
+    };
+    let r = c.command(db, doc! { "find": coll, "filter": filter.clone(), "limit": 3_i64, "singleBatch": true }).await?;
+    let sample = r.get_document("cursor").map(|c| names(c, "firstBatch")).unwrap_or_default().iter().map(canonical).collect();
+    Ok((n, sample))
 }
 
 fn matched(r: &Document, none: &str) -> AppResult<u32> {

@@ -47,6 +47,10 @@ export const commands = {
 	mgCount: (connId: string, db: string, coll: string, filter: string) => typedError<MgCount, AppError>(__TAURI_INVOKE("mg_count", { connId, db, coll, filter })),
 	/**  One whole document by `_id` in canonical extended JSON, for the editor. */
 	mgDocGet: (connId: string, db: string, coll: string, id: string) => typedError<string, AppError>(__TAURI_INVOKE("mg_doc_get", { connId, db, coll, id })),
+	/**  One shell line. Reads run at once; a change is parsed, classified and held like every other change. */
+	mgShell: (connId: string, db: string, line: string) => typedError<MgShellResult_Serialize, AppError>(__TAURI_INVOKE("mg_shell", { connId, db, line })),
+	/**  Runs what `mg_shell` held, after the mode is asked again (and the database's name, for a dangerous command). */
+	mgShellCommit: (connId: string, pendingId: string, typedName: string | null) => typedError<ShellReply_Serialize, AppError>(__TAURI_INVOKE("mg_shell_commit", { connId, pendingId, typedName })),
 	/**  The output of the pipeline up to a stage. Reads only: a `$out` or `$merge` ends the run before it. */
 	mgAggregate: (connId: string, request: MgAggRequest_Deserialize) => typedError<MgAggResult, AppError>(__TAURI_INVOKE("mg_aggregate", { connId, request })),
 	/**  Holds a pipeline that ends in `$out` or `$merge` (a write) for its confirmation. */
@@ -1829,6 +1833,24 @@ export type MgSchema_Serialize = {
 	truncated: boolean,
 };
 
+export type MgShellResult = MgShellResult_Serialize | MgShellResult_Deserialize;
+
+export type MgShellResult_Deserialize = {
+	/**  The database the next command runs in (`use` changes it). */
+	db: string,
+	reply?: ShellReply_Deserialize | null,
+	/**  Set when the gate holds the command for a confirmation. */
+	pending?: MgPending_Deserialize | null,
+};
+
+export type MgShellResult_Serialize = {
+	/**  The database the next command runs in (`use` changes it). */
+	db: string,
+	reply: ShellReply_Serialize | null,
+	/**  Set when the gate holds the command for a confirmation. */
+	pending: MgPending_Serialize | null,
+};
+
 /**  One stage as the builder holds it: the operator (`$match`) and its argument as extended JSON text. */
 export type MgStage = {
 	op: string,
@@ -2807,6 +2829,21 @@ export type SftpOpened = {
 	/**  The folder a new pane starts in. */
 	home: string,
 	label: string,
+};
+
+/**  What the shell prints: one block of text per document or value. */
+export type ShellReply = ShellReply_Serialize | ShellReply_Deserialize;
+
+/**  What the shell prints: one block of text per document or value. */
+export type ShellReply_Deserialize = {
+	blocks: string[],
+	note?: string | null,
+};
+
+/**  What the shell prints: one block of text per document or value. */
+export type ShellReply_Serialize = {
+	blocks: string[],
+	note: string | null,
 };
 
 export type SnippetInput = SnippetInput_Serialize | SnippetInput_Deserialize;

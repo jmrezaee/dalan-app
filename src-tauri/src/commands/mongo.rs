@@ -10,6 +10,7 @@ use crate::dbs::gate::{self, decide, Decision};
 use crate::error::AppResult;
 use crate::mongo::aggregate::{self, CodeLanguage, MgAggRequest, MgAggResult, MgStage};
 use crate::mongo::schema::{self, MgIndex, MgIndexOp, MgSchema, MgValidation, MgValidationCheck};
+use crate::mongo::shell::{self, ShellReply};
 use crate::mongo::docs::{self, MgCount, MgDocOp, MgFindRequest, MgNode, MgPage, MgWrite, Parsed};
 use crate::sql;
 use crate::state::AppState;
@@ -60,7 +61,7 @@ pub struct MgPending {
 }
 
 /// Holds a parsed write under the gate: refused in a Read-only database, otherwise kept for one confirmation.
-async fn hold(state: &AppState, conn_id: &str, write: MgWrite) -> AppResult<MgPending> {
+async fn hold(state: &AppState, conn_id: &str, mut write: MgWrite) -> AppResult<MgPending> {
     let db_id = state.sql.db_id(conn_id)?;
     let target = sql::gate_target(&state.store(), &db_id).await?;
     let class = write.op.class();
@@ -69,7 +70,15 @@ async fn hold(state: &AppState, conn_id: &str, write: MgWrite) -> AppResult<MgPe
         return Err(gate::read_only_error(&target.name));
     }
     let conn = state.sql.mongo(conn_id).await?;
-    let sample = docs::current(&conn, &write).await?.map(|d| docs::canonical(&d));
+    let mut sample = docs::current(&conn, &write).await?.map(|d| docs::canonical(&d));
+    // A change by filter says how many documents it reaches and shows a few of them.
+    if let Parsed::Match { coll, filter, summary, .. } = &mut write.op {
+        let (n, shown) = docs::match_preview(&conn, &write.db, coll, filter).await?;
+        summary.push_str(&format!(" It matches {} document{} now.", n as u64, if n as u64 == 1 { "" } else { "s" }));
+        if !shown.is_empty() {
+            sample = Some(shown.join("\n"));
+        }
+    }
     let summary = docs::describe(&write);
     let id = state.sql.mongo_pending.put(conn_id, class, write)?;
     Ok(MgPending { id, db_name: target.name, environment: target.environment, summary, sample, level: if decision == Decision::Typed { "typed".into() } else { "confirm".into() } })
@@ -188,4 +197,61 @@ pub async fn mg_validation_prepare(state: State<'_, AppState>, conn_id: String, 
     state.require_unlocked()?;
     let op = schema::validation_command(&coll, &validator, &level, &action)?;
     hold(&state, &conn_id, MgWrite { db, coll, op }).await
+}
+
+// ---- Shell (S47)
+
+#[derive(Serialize, Type)]
+pub struct MgShellResult {
+    /// The database the next command runs in (`use` changes it).
+    pub db: String,
+    pub reply: Option<ShellReply>,
+    /// Set when the gate holds the command for a confirmation.
+    pub pending: Option<MgPending>,
+}
+
+/// One shell line. Reads run at once; a change is parsed, classified and held like every other change.
+#[tauri::command]
+#[specta::specta]
+pub async fn mg_shell(state: State<'_, AppState>, conn_id: String, db: String, line: String) -> AppResult<MgShellResult> {
+    state.require_unlocked()?;
+    let stmt = shell::parse(&line)?;
+    if let shell::Stmt::Use(name) = &stmt {
+        return Ok(MgShellResult { db: name.clone(), reply: Some(ShellReply { blocks: vec![format!("switched to db {name}")], note: None }), pending: None });
+    }
+    let plan = shell::plan(&stmt, &db)?;
+    let db_id = state.sql.db_id(&conn_id)?;
+    let target = sql::gate_target(&state.store(), &db_id).await?;
+    match decide(target.mode, plan.class) {
+        Decision::Refuse => Err(gate::read_only_error(&target.name)),
+        Decision::Run => {
+            let reply = shell::execute(&*state.sql.mongo(&conn_id).await?, &plan).await?;
+            Ok(MgShellResult { db, reply: Some(reply), pending: None })
+        }
+        Decision::Confirm | Decision::Typed => {
+            let op = match plan.matches.clone() {
+                Some((coll, filter)) => Parsed::Match { class: plan.class, summary: plan.summary.clone(), cmd: plan.cmd.clone(), coll, filter },
+                None => Parsed::Raw { class: plan.class, summary: plan.summary.clone(), cmd: plan.cmd.clone() },
+            };
+            let coll = plan.cmd.get_str(plan.cmd.keys().next().map_or("", String::as_str)).unwrap_or("").to_string();
+            let pending = hold(&state, &conn_id, MgWrite { db: plan.db.clone(), coll, op }).await?;
+            Ok(MgShellResult { db, reply: None, pending: Some(pending) })
+        }
+    }
+}
+
+/// Runs what `mg_shell` held, after the mode is asked again (and the database's name, for a dangerous command).
+#[tauri::command]
+#[specta::specta]
+pub async fn mg_shell_commit(state: State<'_, AppState>, conn_id: String, pending_id: String, typed_name: Option<String>) -> AppResult<ShellReply> {
+    state.require_unlocked()?;
+    let db_id = state.sql.db_id(&conn_id)?;
+    let target = sql::gate_target(&state.store(), &db_id).await?;
+    let class = state.sql.mongo_pending.peek_class(&conn_id, &pending_id)?;
+    gate::approve(target.mode, class, &target.name, typed_name.as_deref())?;
+    let (write, _) = state.sql.mongo_pending.take(&conn_id, &pending_id)?;
+    let target = sql::gate_target(&state.store(), &db_id).await?;
+    gate::approve(target.mode, class, &target.name, typed_name.as_deref())?;
+    let reply = docs::run_reply(&*state.sql.mongo(&conn_id).await?, &write).await?;
+    Ok(shell::reply_of(&shell::Shape::Doc, reply))
 }

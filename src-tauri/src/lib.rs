@@ -66,6 +66,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::mongo::mg_find,
             commands::mongo::mg_count,
             commands::mongo::mg_doc_get,
+            commands::mongo::mg_shell,
+            commands::mongo::mg_shell_commit,
             commands::mongo::mg_aggregate,
             commands::mongo::mg_agg_prepare,
             commands::mongo::mg_view_prepare,

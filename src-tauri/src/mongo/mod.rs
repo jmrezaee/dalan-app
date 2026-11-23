@@ -6,3 +6,4 @@ pub mod conn;
 pub mod docs;
 pub mod aggregate;
 pub mod schema;
+pub mod shell;
