@@ -39,6 +39,19 @@ export const commands = {
 	savedList: () => typedError<SavedQuery_Serialize[], AppError>(__TAURI_INVOKE("saved_list")),
 	savedSave: (input: SavedQueryInput_Deserialize) => typedError<SavedQuery_Serialize, AppError>(__TAURI_INVOKE("saved_save", { input })),
 	savedDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("saved_delete", { id })),
+	/**  `[]` lists databases, `[db]` its collections and views. */
+	mgTree: (connId: string, path: string[]) => typedError<MgNode[], AppError>(__TAURI_INVOKE("mg_tree", { connId, path })),
+	/**  One page of documents. */
+	mgFind: (connId: string, request: MgFindRequest) => typedError<MgPage, AppError>(__TAURI_INVOKE("mg_find", { connId, request })),
+	/**  The collection's size (an estimate with no filter) or the exact number of matches. */
+	mgCount: (connId: string, db: string, coll: string, filter: string) => typedError<MgCount, AppError>(__TAURI_INVOKE("mg_count", { connId, db, coll, filter })),
+	/**  One whole document by `_id` in canonical extended JSON, for the editor. */
+	mgDocGet: (connId: string, db: string, coll: string, id: string) => typedError<string, AppError>(__TAURI_INVOKE("mg_doc_get", { connId, db, coll, id })),
+	/**  Parses and holds one document write. A Read-only database refuses here, before anything is held. */
+	mgDocPrepare: (connId: string, db: string, coll: string, op: MgDocOp) => typedError<MgPending_Serialize, AppError>(__TAURI_INVOKE("mg_doc_prepare", { connId, db, coll, op })),
+	/**  Runs what `mg_doc_prepare` held, once, after the mode is asked again. */
+	mgDocCommit: (connId: string, pendingId: string) => typedError<number, AppError>(__TAURI_INVOKE("mg_doc_commit", { connId, pendingId })),
+	mgDocDiscard: (connId: string, pendingId: string) => typedError<null, AppError>(__TAURI_INVOKE("mg_doc_discard", { connId, pendingId })),
 	/**  Opens a SQL tab's connection. Returns at once; the steps, the host's questions and the result arrive on `events`. */
 	dbOpen: (dbId: string, events: Channel<DbEvent_Deserialize>) => typedError<DbOpened, AppError>(__TAURI_INVOKE("db_open", { dbId, events })),
 	/**  The answer to a host's question asked while a SQL tab opens (host key, password, passphrase, 2FA). */
@@ -1620,6 +1633,72 @@ export type LogSummary_Serialize = {
 	size_bytes: number | null,
 	bookmarked: boolean,
 	comment: string | null,
+};
+
+export type MgCount = {
+	n: number | null,
+	/**  `true` when it is the collection's metadata estimate (no filter), not a count. */
+	estimate: boolean,
+};
+
+export type MgDoc = {
+	/**  The `_id` in canonical extended JSON: how an edit or delete finds this document again. */
+	id: string,
+	/**  Relaxed extended JSON for the views (cut when huge: then it is not valid JSON, and `cut` is set). */
+	relaxed: string,
+	cut: boolean,
+};
+
+/**  What a write to one document does (S44's editor, delete, and "new document"). */
+export type MgDocOp = { kind: "insert"; doc: string } | 
+/**  Replace the document with this `_id` by the edited one. */
+{ kind: "replace"; id: string; doc: string } | { kind: "delete"; id: string };
+
+export type MgFindRequest = {
+	db: string,
+	coll: string,
+	filter: string,
+	project: string,
+	sort: string,
+	skip: number,
+	limit: number,
+	/**  A collation document, e.g. `{"locale":"en","strength":2}`; empty for none. */
+	collation: string,
+};
+
+export type MgNode = {
+	name: string,
+	/**  `database`, `collection` or `view`. */
+	kind: string,
+};
+
+export type MgPage = {
+	docs: MgDoc[],
+	/**  There may be more after this page (the cursor still had documents). */
+	more: boolean,
+	took_ms: number,
+};
+
+export type MgPending = MgPending_Serialize | MgPending_Deserialize;
+
+export type MgPending_Deserialize = {
+	id: string,
+	db_name: string,
+	environment: string,
+	/**  What will happen, in words. */
+	summary: string,
+	/**  The document as it is now (canonical JSON), for a replace or delete: "Show sample". */
+	sample?: string | null,
+};
+
+export type MgPending_Serialize = {
+	id: string,
+	db_name: string,
+	environment: string,
+	/**  What will happen, in words. */
+	summary: string,
+	/**  The document as it is now (canonical JSON), for a replace or delete: "Show sample". */
+	sample: string | null,
 };
 
 export type ObjectKind = "schema" | "table" | "view" | "matview" | "foreign";

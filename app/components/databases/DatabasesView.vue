@@ -63,7 +63,7 @@ function open(d: DbRow) {
     sessions.openSql(d)
     return
   }
-  notice.value = `${d.name} is saved. Browsing ${ENGINES[d.engine].label} databases arrives in a later update.`
+  sessions.openMongo(d)
 }
 function edit(d: DbRow) {
   if (d.engine === 'redis') {

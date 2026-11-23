@@ -2,7 +2,7 @@
 import { Channel } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { commands } from '~/types/bindings'
-import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, SqlRunEvent_Serialize, RunMode, TxnAction, GridEdits_Deserialize, StructureOp_Deserialize, TableRef, ActivityView, SessionAction, ExportFormat, TransferProgress, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
+import type { MgDocOp, MgFindRequest, AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, SqlRunEvent_Serialize, RunMode, TxnAction, GridEdits_Deserialize, StructureOp_Deserialize, TableRef, ActivityView, SessionAction, ExportFormat, TransferProgress, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -43,6 +43,13 @@ export function useTauri() {
     },
     dbRespond: (connId: string, promptId: string, answer: PromptAnswer) => unwrap(commands.dbRespond(connId, promptId, answer)),
     dbClose: (connId: string) => commands.dbClose(connId),
+    mgTree: (connId: string, path: string[]) => unwrap(commands.mgTree(connId, path)),
+    mgFind: (connId: string, request: MgFindRequest) => unwrap(commands.mgFind(connId, request)),
+    mgCount: (connId: string, db: string, coll: string, filter: string) => unwrap(commands.mgCount(connId, db, coll, filter)),
+    mgDocGet: (connId: string, db: string, coll: string, id: string) => unwrap(commands.mgDocGet(connId, db, coll, id)),
+    mgDocPrepare: (connId: string, db: string, coll: string, op: MgDocOp) => unwrap(commands.mgDocPrepare(connId, db, coll, op)),
+    mgDocCommit: (connId: string, pendingId: string) => unwrap(commands.mgDocCommit(connId, pendingId)),
+    mgDocDiscard: (connId: string, pendingId: string) => unwrap(commands.mgDocDiscard(connId, pendingId)),
     sqlObjects: (connId: string, path: string[]) => unwrap(commands.sqlObjects(connId, path)),
     sqlTableInfo: (connId: string, schema: string, table: string) => unwrap(commands.sqlTableInfo(connId, schema, table)),
     sqlTablePage: (connId: string, request: PageRequest_Deserialize) => unwrap(commands.sqlTablePage(connId, request)),

@@ -251,6 +251,9 @@ pub async fn connect(
     if matches!(cfg.engine, Engine::Mysql | Engine::Mariadb) {
         return connect_my(&cfg, stream, reopen, ssh, &emit, reach).await;
     }
+    if cfg.engine == Engine::Mongodb {
+        return connect_mongo(&cfg, stream, reopen, ssh, &emit, reach).await;
+    }
     let server_name = cfg
         .server_name
         .clone()
@@ -317,6 +320,34 @@ async fn connect_my(
     Ok(Opened { db: Db::My(Arc::new(mydb::MyDb::new(conn))), info, ssh, opener })
 }
 
+/// The MongoDB sign-in on the stream the route gave. Documents need no editor connections, so the opener refuses.
+async fn connect_mongo(
+    cfg: &Arc<SqlConfig>,
+    stream: transport::BoxStream,
+    reopen: Reopen,
+    ssh: Option<Arc<Connected>>,
+    emit: &Emit,
+    reach: u32,
+) -> AppResult<Opened> {
+    let server_name = cfg.server_name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| cfg.address.clone());
+    let login = crate::mongo::conn::MongoLogin { user: cfg.user.clone(), password: cfg.password.clone(), auth_db: cfg.auth_source.clone().filter(|a| !a.is_empty()).unwrap_or_else(|| "admin".into()), tls: cfg.tls, server_name };
+    let (conn, info) = match crate::mongo::conn::MongoConn::connect(stream, login, reopen).await {
+        Ok(v) => v,
+        Err(e) => {
+            step(emit, reach + 1, RedisStepState::Failed, Some(e.message.clone()));
+            return Err(e);
+        }
+    };
+    step(emit, reach + 1, RedisStepState::Done, None);
+    let opener: Opener = Arc::new(|| Box::pin(async { Err(AppError::validation("MongoDB tabs don't open editor connections.")) }));
+    let version = match &info.replica_set {
+        Some(set) => format!("{} (replica set {set}{})", info.version, if info.is_primary { ", primary" } else { "" }),
+        None => info.version.clone(),
+    };
+    let info = SqlServerInfo { engine: "mongodb".into(), version, database: cfg.database.clone().unwrap_or_else(|| "admin".into()), user: info.user, latency_ms: info.latency_ms };
+    Ok(Opened { db: Db::Mongo(Arc::new(conn)), info, ssh, opener })
+}
+
 /// "Test connection" for a SQL database: the whole sign-in, then closed. A host that needs an answer from the user
 /// is not asked here.
 pub async fn test(store: &Store, cfg: SqlConfig) -> AppResult<SqlServerInfo> {
@@ -361,6 +392,7 @@ async fn run(
             match db {
                 Db::Pg(c) => *live.conn.lock().await = Some(c),
                 Db::My(c) => *live.my.lock().await = Some(c),
+                Db::Mongo(c) => *live.mongo.lock().await = Some(c),
             }
             emit(DbEvent::Ready { info });
             // Hold the SSH connection until the tab closes (backups use it too).
@@ -396,6 +428,7 @@ pub struct Opened {
 enum Db {
     Pg(Arc<PgConn>),
     My(Arc<mydb::MyDb>),
+    Mongo(Arc<crate::mongo::conn::MongoConn>),
 }
 
 async fn attempt(
@@ -429,6 +462,8 @@ struct Live {
     conn: tokio::sync::Mutex<Option<Arc<PgConn>>>,
     /// MySQL and MariaDB tabs hold this instead.
     my: tokio::sync::Mutex<Option<Arc<mydb::MyDb>>>,
+    /// MongoDB tabs hold this.
+    mongo: tokio::sync::Mutex<Option<Arc<crate::mongo::conn::MongoConn>>>,
     opener: tokio::sync::Mutex<Option<Opener>>,
     /// The SSH connection to the route's last host, for tools that run there (backup, restore).
     ssh: tokio::sync::Mutex<Option<Arc<Connected>>>,
@@ -521,6 +556,8 @@ pub struct SqlManager {
     /// Running exports, backups and restores by id, so Stop can reach them.
     pub transfers: Mutex<HashMap<String, Arc<AtomicBool>>>,
     pub grid_pending: crate::dbs::gate::PendingStore<Vec<grid::GridStatement>>,
+    /// MongoDB document writes held for their confirmation.
+    pub mongo_pending: crate::dbs::gate::PendingStore<crate::mongo::docs::MgWrite>,
     conns: Mutex<HashMap<String, Arc<Live>>>,
 }
 
@@ -547,6 +584,7 @@ impl SqlManager {
             cancel,
             conn: tokio::sync::Mutex::new(None),
             my: tokio::sync::Mutex::new(None),
+            mongo: tokio::sync::Mutex::new(None),
         });
         self.conns
             .lock()
@@ -573,6 +611,11 @@ impl SqlManager {
                 "This database isn't connected right now.",
             )
         })
+    }
+
+    /// The MongoDB connection of a tab. Errors for another engine's tab or while still connecting.
+    pub async fn mongo(&self, conn_id: &str) -> AppResult<Arc<crate::mongo::conn::MongoConn>> {
+        self.get(conn_id)?.mongo.lock().await.clone().ok_or_else(|| AppError::new(ErrorCode::DbUnreachable, "This database isn't connected right now."))
     }
 
     /// The MySQL or MariaDB connection of a tab, `None` for a PostgreSQL tab.
@@ -699,6 +742,7 @@ impl SqlManager {
     pub fn close(&self, conn_id: &str) {
         self.pending.drop_conn(conn_id);
         self.grid_pending.drop_conn(conn_id);
+        self.mongo_pending.drop_conn(conn_id);
         self.session_pending.drop_conn(conn_id);
         self.import_pending.drop_conn(conn_id);
         if let Ok(mut f) = self.import_files.lock() {

@@ -116,9 +116,9 @@ test.describe('Databases of every engine (S34, S35)', () => {
     await s.getByRole('button', { name: 'Save' }).click()
     await expect(s).toHaveCount(0)
     await expect(row(page, 'shop-docs')).toContainText('Replica set')
-    // Opening a MongoDB database says what is coming: only PostgreSQL opens so far.
+    // Opening a MongoDB database opens its tab (D8).
     await row(page, 'shop-docs').dblclick()
-    await expect(page.getByRole('status').filter({ hasText: 'shop-docs is saved' })).toBeVisible()
+    await expect(page.getByTestId('mongo-tab-shop-docs').getByRole('tree', { name: 'Databases and collections' })).toBeVisible()
     expect((await fake.model()).dbs.find((d: any) => d.name === 'shop-docs')).toMatchObject({ has_password: true, options: { replica_set: 'rs0', auth_source: 'admin', srv: false } })
     // The parsed answer never carried the password back.
     expect((await fake.answers()).join('\n')).not.toContain('pa$$')

@@ -41,6 +41,15 @@ const sqlTab = async (page: Page) => {
   return tab
 }
 
+/** Adds a MongoDB database and opens it in a tab. */
+const mongoTab = async (page: Page) => {
+  await addDb(page, 'MongoDB', 'docs-prod', 'mongo.internal:27017')
+  await page.getByRole('row', { name: /docs-prod/ }).dblclick()
+  const tab = page.getByTestId('mongo-tab-docs-prod')
+  await tab.getByRole('tree', { name: 'Databases and collections' }).waitFor()
+  return tab
+}
+
 /** Opens a saved Redis database in a tab (the fake connects by itself) and, if asked, one of its views. */
 const redisTab = async (page: Page, name: string, view?: 'Console' | 'Pub/Sub' | 'Server') => {
   await vaultNav(page, 'Databases')
@@ -101,6 +110,11 @@ export const SCREENS: ScreenState[] = [
   { id: 'S34-databases-all-engines', scenario: 'team', open: async (p) => { await addDb(p, 'MySQL', 'legacy-crm', '10.0.4.8'); await addDb(p, 'MongoDB', 'shop-docs', 'h1:27017,h2:27017') } },
   { id: 'S35-engine-picker', scenario: 'team', open: async (p) => { await vaultNav(p, 'Databases'); await p.getByRole('button', { name: 'New database' }).click() } },
   { id: 'S35-database-form', scenario: 'team', open: async (p) => { await vaultNav(p, 'Databases'); await p.getByRole('button', { name: 'New database' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('radio', { name: 'Through a host' }).click() } },
+  { id: 'S44-mongo-tree', scenario: 'team', open: async (p) => { await mongoTab(p) } },
+  { id: 'S44-mongo-docs', scenario: 'team', open: async (p) => { const t = await mongoTab(p); await t.getByTestId('mongo-coll-customers').click(); await t.getByTestId('mongo-doc').first().waitFor() } },
+  { id: 'S44-mongo-table', scenario: 'team', open: async (p) => { const t = await mongoTab(p); await t.getByTestId('mongo-coll-customers').click(); await t.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Table' }).click(); await t.getByRole('table', { name: 'Documents as a table' }).waitFor() } },
+  { id: 'S44-mongo-editor', scenario: 'team', open: async (p) => { const t = await mongoTab(p); await t.getByTestId('mongo-coll-customers').click(); await t.getByRole('button', { name: 'Edit document 1', exact: true }).click(); await p.getByTestId('mongo-editor-dialog').waitFor() } },
+  { id: 'S44-mongo-review', scenario: 'team', open: async (p) => { const t = await mongoTab(p); await t.getByTestId('mongo-coll-customers').click(); await t.getByRole('button', { name: 'Delete document 2', exact: true }).click(); await p.getByTestId('mongo-review').waitFor() } },
   { id: 'S36-sql-tab-tree', scenario: 'team', open: async (p) => { await sqlTab(p) } },
   { id: 'S36-sql-table', scenario: 'team', open: async (p) => { const t = await sqlTab(p); await t.getByRole('treeitem', { name: 'table orders' }).click(); await t.getByRole('grid', { name: 'public.orders rows' }).getByRole('gridcell', { name: '1' }).first().click() } },
   { id: 'S37-sql-editor', scenario: 'team', open: async (p) => { const t = await sqlTab(p); await t.getByRole('button', { name: 'New query' }).click(); const box = t.getByRole('textbox', { name: /SQL$/ }); await box.click(); await p.keyboard.insertText('select * from customers'); await t.getByTestId('sql-run').click(); await t.getByRole('button', { name: /Result 1/ }).waitFor() } },

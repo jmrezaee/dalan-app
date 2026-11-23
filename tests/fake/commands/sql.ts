@@ -97,8 +97,8 @@ const exportsDone: string[] = []
 const importHeld = new Map<string, number>()
 const restoreHeld = new Map<string, boolean>()
 
-const LABEL: Record<string, string> = { postgres: 'PostgreSQL', mysql: 'MySQL', mariadb: 'MariaDB' }
-const VERSION: Record<string, string> = { postgres: 'PostgreSQL 16.4 on x86_64-pc-linux-gnu', mysql: 'MySQL 8.4.2', mariadb: 'MariaDB 11.4.2' }
+const LABEL: Record<string, string> = { postgres: 'PostgreSQL', mysql: 'MySQL', mariadb: 'MariaDB', mongodb: 'MongoDB' }
+const VERSION: Record<string, string> = { postgres: 'PostgreSQL 16.4 on x86_64-pc-linux-gnu', mysql: 'MySQL 8.4.2', mariadb: 'MariaDB 11.4.2', mongodb: 'MongoDB 7.0.14' }
 
 const table = (name: string) => TABLES[name] ?? fail('not_found', `There is no table public.${name} (it may have been dropped).`)
 const cell = (c: SqlColumn_Serialize, v: string | null): Cell_Serialize => (v === null ? { kind: 'null', v: null, cut: false } : { kind: c.kind, v, cut: false })

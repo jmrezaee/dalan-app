@@ -3,3 +3,4 @@
 //! channel), TLS wrapped around it as MongoDB wants, SCRAM sign-in, and commands as BSON documents.
 
 pub mod conn;
+pub mod docs;

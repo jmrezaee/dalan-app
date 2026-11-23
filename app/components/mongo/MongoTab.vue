@@ -1,0 +1,105 @@
+<script setup lang="ts">
+// A MongoDB tab (S44 shell, S33 states): the header, connecting, the host's questions, failures, the tree and the
+// open collections. The tab stays mounted while another tab shows, so its connection and tables carry on.
+import { CircleAlert, FileJson, Lock, ShieldCheck, Unlock, X } from '@lucide/vue'
+import { cn } from '@/lib/utils'
+import { ENGINES } from '~/utils/engines'
+
+const props = defineProps<{ tabKey: string, dbId: string, active: boolean }>()
+const emit = defineEmits<{ close: [] }>()
+const store = useMongoStore(props.tabKey)
+const databases = useDatabasesStore()
+const hosts = useHostsStore()
+
+const db = computed(() => databases.rows.find(d => d.id === props.dbId) ?? null)
+const name = computed(() => db.value?.name ?? 'this database')
+const routeText = computed(() => {
+  const d = db.value
+  if (!d || d.route === 'direct') return 'Direct'
+  const host = hosts.hosts.find(h => h.id === d.host_id)
+  const via = (host?.effective_jump_host_ids ?? []).map(id => hosts.hosts.find(h => h.id === id)?.label).filter(Boolean)
+  return [...via, d.host_label ?? 'a host'].join(' → ')
+})
+const MODE = { read_only: { label: 'Read-only', icon: Lock }, confirm: { label: 'Confirm writes', icon: ShieldCheck }, open: { label: 'Open', icon: Unlock } } as const
+const mode = computed(() => MODE[db.value?.write_mode ?? 'confirm'])
+const version = computed(() => store.info?.version.split(' ').slice(0, 2).join(' ') ?? '')
+
+const failure = computed(() => {
+  const e = store.error
+  if (store.status !== 'failed' || !e) return null
+  const edit = { label: 'Edit database', run: () => { if (db.value) databases.editing = db.value } }
+  const again = { label: 'Try again', run: () => store.retry() }
+  if (e.code === 'db_auth_failed') return { title: 'Wrong username or password', text: e.message, action: edit }
+  if (e.code === 'db_tls_untrusted') return { title: 'This server\'s certificate isn\'t trusted', text: e.message, action: edit }
+  if (e.code === 'db_unreachable') return { title: `Can't reach ${db.value ? ENGINES[db.value.engine].label : 'the database'}`, text: e.message, action: again }
+  if (e.code === 'not_found') return { title: 'This database is no longer saved', text: 'It was deleted. Close this tab.', action: { label: 'Close tab', run: () => emit('close') } }
+  return { title: 'Couldn\'t open this database', text: e.message, action: e.code === 'validation' ? edit : again }
+})
+const promptHost = computed(() => {
+  const k = store.prompt?.kind
+  return k && 'host' in k ? k.host : (db.value?.host_label ?? '')
+})
+
+function onTabKey(e: KeyboardEvent, i: number) {
+  const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0
+  if (!d) return
+  e.preventDefault()
+  const next = store.tabs[(i + d + store.tabs.length) % store.tabs.length]
+  if (next) { store.activeTab = next.id; nextTick(() => document.getElementById(`${props.tabKey}-tab-${next.id}`)?.focus()) }
+}
+</script>
+
+<template>
+  <div class="flex size-full flex-col bg-bg" :data-testid="tid(`mongo-tab-${name}`)">
+    <header class="flex h-11 shrink-0 items-center gap-3 border-b border-border px-4">
+      <EngineBadge v-if="db" :engine="db.engine" />
+      <h1 class="text-sm font-medium">{{ name }}</h1>
+      <span v-if="db && db.environment !== 'none'" :class="cn('inline-flex h-5 items-center rounded-full border px-2 text-2xs font-medium', db.environment === 'production' ? 'border-warning/40 text-warning' : 'border-border text-muted')">{{ db.environment }}</span>
+      <span class="truncate text-xs text-muted">{{ routeText }}<template v-if="db"> → {{ db.address }}<template v-if="db.port">:{{ db.port }}</template></template></span>
+      <span v-if="store.info" class="truncate text-xs text-muted">· {{ store.info.database }} · {{ version }}</span>
+      <span v-if="store.info" class="ml-auto flex items-center gap-1.5 text-xs text-muted" title="How long the first answer took"><span class="size-2 rounded-full bg-success" aria-hidden="true" />{{ store.info.latency_ms }} ms</span>
+      <span v-else class="ml-auto" />
+      <span class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted" :title="'Writes: ' + mode.label"><component :is="mode.icon" class="size-3.5" aria-hidden="true" />{{ mode.label }}</span>
+    </header>
+
+    <div v-if="store.status === 'ready'" class="flex min-h-0 flex-1">
+      <MongoTree :tab-key="tabKey" />
+      <section class="flex min-w-0 flex-1 flex-col" aria-label="Collections">
+        <div role="group" aria-label="Open collections" class="flex h-9 shrink-0 overflow-x-auto border-b border-border">
+          <div v-for="(t, i) in store.tabs" :key="t.id" :class="cn('flex shrink-0 items-center border-r border-border text-sm text-muted', store.activeTab === t.id && 'bg-bg text-text shadow-[inset_0_2px_0_var(--color-accent)]')">
+            <button
+              :id="`${tabKey}-tab-${t.id}`" type="button" :aria-current="store.activeTab === t.id ? 'true' : undefined"
+              class="h-full cursor-default pl-3 pr-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" @click="store.activeTab = t.id" @keydown="onTabKey($event, i)"
+            >
+              {{ t.db }}.{{ t.coll }}
+            </button>
+            <button type="button" class="mr-1.5 grid size-5 place-items-center rounded hover:bg-surface-hover" :aria-label="`Close ${t.coll}`" @click="store.closeColl(t.id)"><X class="size-3" aria-hidden="true" /></button>
+          </div>
+        </div>
+        <template v-for="t in store.tabs" :key="t.id">
+          <MongoCollection v-show="store.activeTab === t.id" :tab-key="tabKey" :tab-data="t" />
+        </template>
+        <EmptyState v-if="!store.tabs.length" :icon="FileJson" title="Open a collection" text="Pick a collection from the list. Reads run at once; changes show what they will do and ask first." />
+      </section>
+    </div>
+
+    <main v-else class="grid min-h-0 flex-1 place-items-center overflow-auto p-6">
+      <div v-if="store.prompt" class="w-[420px] max-w-full rounded-lg border border-border bg-surface p-4" role="alertdialog" :aria-label="`${promptHost} needs an answer`">
+        <h2 class="mb-1 text-base font-semibold">Opening {{ name }}</h2>
+        <p class="mb-3 text-sm text-muted">{{ promptHost }} needs an answer before Dalan can reach the database.</p>
+        <PromptPanel :kind="store.prompt.kind" :host="promptHost" @reply="store.respond" />
+      </div>
+      <ConnectSteps v-else-if="store.status === 'connecting'" :name="name" :steps="store.steps" @cancel="emit('close')" />
+      <div v-else-if="failure" class="flex w-[460px] max-w-full items-center gap-2.5 rounded-lg border border-border bg-surface px-3 py-2.5" role="alert" :data-testid="tid('mongo-failed')">
+        <CircleAlert class="size-4 shrink-0 text-danger" aria-hidden="true" />
+        <span class="min-w-0 flex-1"><b class="font-medium">{{ failure.title }}</b><br><span class="text-xs text-muted">{{ failure.text }}</span></span>
+        <Button variant="secondary" size="sm" data-autofocus @click="failure.action.run()">{{ failure.action.label }}</Button>
+      </div>
+      <div v-else-if="store.status === 'closed'" class="flex w-[460px] max-w-full items-center gap-2.5 rounded-lg border border-border bg-surface px-3 py-2.5" role="status">
+        <CircleAlert class="size-4 shrink-0 text-danger" aria-hidden="true" />
+        <span class="min-w-0 flex-1"><b class="font-medium">Connection closed</b><br><span class="text-xs text-muted">The server hung up, or the host's connection ended.</span></span>
+        <Button variant="secondary" size="sm" @click="store.retry()">Reconnect</Button>
+      </div>
+    </main>
+  </div>
+</template>

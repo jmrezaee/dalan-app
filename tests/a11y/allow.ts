@@ -5,6 +5,24 @@ export const ALLOWED: Allowed[] = [
   {
     rule: 'aria-required-children',
     selector: 'div[role="tablist"]',
+    state: 'S44-mongo-tree',
+    reason: 'The same app tab bar as in S36-sql-table.',
+  },
+  {
+    rule: 'aria-required-children',
+    selector: 'div[role="tablist"]',
+    state: 'S44-mongo-docs',
+    reason: 'The same app tab bar as in S36-sql-table.',
+  },
+  {
+    rule: 'aria-required-children',
+    selector: 'div[role="tablist"]',
+    state: 'S44-mongo-table',
+    reason: 'The same app tab bar as in S36-sql-table.',
+  },
+  {
+    rule: 'aria-required-children',
+    selector: 'div[role="tablist"]',
     state: 'S36-sql-table',
     reason: 'The same app tab bar as below: with no other tab list on screen axe names it by its role instead of its class.',
   },
