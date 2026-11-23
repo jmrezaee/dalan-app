@@ -847,3 +847,109 @@ async fn l3_pg_a_failed_transaction_is_rolled_back_not_committed_and_grid_handle
     let p = pieces_for("update d2.e4 set qty = pg_terminate_backend(0) where id = 1", RunMode::All, None).unwrap();
     assert!(c.preview(&p).await.unwrap()[0].as_deref().unwrap().starts_with("Not tried out"));
 }
+
+// ---- D5: structure, explain, diagram
+
+use super::structure::StructureOp;
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_pg_structure_lists_columns_keys_indexes_and_a_ddl() {
+    seed();
+    let c = connect_direct(TlsMode::Off).await.unwrap();
+    let s = c.structure("d2", "orders").await.unwrap();
+    assert_eq!(s.columns[0].name, "id");
+    assert!(s.columns.iter().any(|c| c.name == "total" && c.type_name == "numeric(12,2)" && c.nullable));
+    assert!(s.constraints.iter().any(|c| c.kind == "p" && c.columns == ["id"]));
+    let fk = s.constraints.iter().find(|c| c.kind == "f").expect("a foreign key");
+    assert!(fk.definition.contains("REFERENCES d2.customers(id)") && fk.columns == ["customer_id"]);
+    assert!(s.indexes.iter().any(|i| i.primary && i.unique) && s.stats.table_bytes > 0);
+    assert!(s.ddl.starts_with("create table \"d2\".\"orders\" (") && s.ddl.contains("constraint") && s.ddl.contains("not null"));
+    assert_eq!(c.structure("d2", "nope").await.unwrap_err().code, ErrorCode::NotFound);
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_pg_a_structure_change_applies_in_one_transaction_and_a_failure_undoes_all_of_it() {
+    seed();
+    let c = connect_direct(TlsMode::Off).await.unwrap();
+    let add = |n: &str| StructureOp::AddColumn { name: n.into(), type_name: "integer".into(), nullable: true, default: Some("0".into()) };
+    let (stmts, _) = super::structure::statements("d2", "e5", &[add("extra"), StructureOp::CreateIndex { name: "e5_extra_idx".into(), columns: vec!["extra".into()], unique: false }], None).unwrap();
+    c.structure_commit(&stmts).await.unwrap();
+    let s = c.structure("d2", "e5").await.unwrap();
+    assert!(s.columns.iter().any(|c| c.name == "extra" && c.default.as_deref() == Some("0")));
+    assert!(s.indexes.iter().any(|i| i.name == "e5_extra_idx"));
+    // The second statement fails (the column exists): the first one is undone too.
+    let (stmts, _) = super::structure::statements("d2", "e5", &[add("second"), add("extra")], None).unwrap();
+    let err = c.structure_commit(&stmts).await.unwrap_err();
+    assert!(err.message.contains("already exists"), "{}", err.message);
+    assert!(!c.structure("d2", "e5").await.unwrap().columns.iter().any(|c| c.name == "second"));
+    // Rename, change type, drop.
+    let ops = [
+        StructureOp::RenameColumn { from: "extra".into(), to: "bonus".into() },
+        StructureOp::ChangeType { column: "bonus".into(), type_name: "bigint".into() },
+        StructureOp::DropIndex { name: "e5_extra_idx".into() },
+        StructureOp::DropColumn { name: "bonus".into() },
+    ];
+    let (stmts, _) = super::structure::statements("d2", "e5", &ops, None).unwrap();
+    c.structure_commit(&stmts).await.unwrap();
+    assert!(!c.structure("d2", "e5").await.unwrap().columns.iter().any(|c| c.name == "bonus"));
+    // A caught-up catalog: completion sees the change.
+    assert!(!c.catalog(false).await.unwrap().tables.iter().any(|t| t.name == "e5" && t.columns.contains(&"bonus".to_string())));
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_pg_explain_plans_and_analyze_times_a_read_without_changing_anything() {
+    seed();
+    let c = connect_direct(TlsMode::Off).await.unwrap();
+    let plain = c.explain("select * from d2.orders where status = 'open'", false, 30_000).await.unwrap();
+    assert!(!plain.analyzed && plain.root.est_rows > 0.0 && plain.root.actual_rows.is_none());
+    let timed = c.explain("select o.id, c.name from d2.orders o join d2.customers c on c.id = o.customer_id where o.total > 100", true, 30_000).await.unwrap();
+    assert!(timed.analyzed && timed.execution_ms.is_some() && timed.root.actual_rows.is_some() && timed.root.pct.is_some());
+    let mut stack = vec![&timed.root];
+    let mut names = Vec::new();
+    while let Some(n) = stack.pop() {
+        names.push(n.name.clone());
+        stack.extend(n.children.iter());
+    }
+    assert!(names.iter().any(|n| n.contains("orders")) && names.iter().any(|n| n.contains("customers")), "{names:?}");
+    // Even a function that writes can't, inside the read-only transaction.
+    assert!(c.explain("select d2.bump()", true, 30_000).await.is_err());
+    assert_eq!(scalar(&c, "select count(*) from d2.log").await, "0");
+    assert_eq!(scalar(&c, "select 1").await, "1");
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_pg_the_diagram_walks_foreign_keys_out_from_a_table() {
+    seed();
+    let c = connect_direct(TlsMode::Off).await.unwrap();
+    let d = c.diagram(&[("d2".into(), "orders".into())], 1).await.unwrap();
+    let names: Vec<&str> = d.tables.iter().map(|t| t.name.as_str()).collect();
+    assert!(names.contains(&"orders") && names.contains(&"customers") && names.contains(&"order_items"), "{names:?}");
+    assert!(d.edges.iter().any(|e| e.from_table == "orders" && e.to_table == "customers" && e.from_columns == ["customer_id"] && e.to_columns == ["id"]));
+    let orders = d.tables.iter().find(|t| t.name == "orders").unwrap();
+    assert!(orders.columns.iter().any(|c| c.name == "id" && c.pk) && orders.columns.iter().any(|c| c.name == "customer_id" && c.fk));
+    assert!(d.total_tables >= 3);
+    assert_eq!(c.diagram(&[("d2".into(), "customers".into())], 0).await.unwrap().tables.len(), 1);
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_pg_explain_inside_a_manual_transaction_leaves_it_open_and_unchanged() {
+    seed();
+    let c = connect_direct(TlsMode::Off).await.unwrap();
+    c.txn_begin().await.unwrap();
+    run_w(&c, "update d2.e4 set qty = 11 where id = 1").await;
+    let plan = c.explain("select * from d2.e4", true, 30_000).await.unwrap();
+    assert!(plan.analyzed);
+    // A function that writes can't, even here.
+    assert!(c.explain("select d2.bump()", true, 30_000).await.is_err());
+    // The transaction is still open with its change, and reads in it see that change.
+    let st = c.txn_state().await.unwrap();
+    assert!(st.active && !st.failed, "{st:?}");
+    assert_eq!(scalar(&c, "select qty from d2.e4 where id = 1").await, "11");
+    c.txn_end(false).await.unwrap();
+    assert_eq!(scalar(&c, "select qty from d2.e4 where id = 1").await, "10");
+}

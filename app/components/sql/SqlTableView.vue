@@ -10,6 +10,14 @@ import { PAGE_SIZE, type TableTab } from '~/stores/sql'
 const props = defineProps<{ tabKey: string, tab: TableTab }>()
 const store = useSqlStore(props.tabKey)
 const t = computed(() => props.tab)
+const VIEWS = [
+  { id: 'data', label: 'Data', count: null },
+  { id: 'structure', label: 'Structure', count: null },
+  { id: 'indexes', label: 'Indexes', count: () => t.value.structure?.indexes.length ?? '' },
+  { id: 'keys', label: 'Foreign keys', count: () => t.value.structure?.constraints.filter(c => c.kind === 'f').length ?? '' },
+  { id: 'triggers', label: 'Triggers', count: () => t.value.structure?.triggers.length ?? '' },
+  { id: 'ddl', label: 'DDL', count: null },
+] as const
 
 const sort = computed(() => t.value.sort[0] ?? null)
 const allColumns = computed(() => t.value.info?.columns ?? [])
@@ -93,6 +101,14 @@ const links = computed<Link[]>(() => {
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col" :data-testid="tid(`sql-table-${t.table}`)">
+    <div role="group" aria-label="View" class="flex h-9 shrink-0 items-center gap-0.5 border-b border-border px-2">
+      <button
+        v-for="v in VIEWS" :key="v.id" type="button" :aria-current="t.view === v.id ? 'true' : undefined"
+        :class="['h-7 cursor-default rounded-md px-2.5 text-sm text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-accent', t.view === v.id && 'bg-surface-hover text-text']" @click="store.setView(t, v.id)"
+      >{{ v.label }}<span v-if="v.count" class="ml-1 text-2xs text-muted">{{ v.count() }}</span></button>
+    </div>
+    <SqlStructureView v-if="t.view !== 'data'" :tab-key="tabKey" :tab="t" />
+    <div v-show="t.view === 'data'" class="flex min-h-0 flex-1 flex-col">
     <form class="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3" @submit.prevent="store.apply(t)">
       <label :for="`sql-where-${tabKey}-${t.id}`" class="text-xs text-muted">Where</label>
       <Input :id="`sql-where-${tabKey}-${t.id}`" v-model="t.filter" class="h-7 flex-1 font-mono text-xs" placeholder="status = 'open' and total > 100" autocomplete="off" spellcheck="false" :aria-invalid="!!t.error && !!t.filter" />
@@ -159,5 +175,6 @@ const links = computed<Link[]>(() => {
         <IconButton label="Next page" :disabled="!t.next || t.loading || changes > 0" @click="store.nextPage(t)"><ChevronRight /></IconButton>
       </span>
     </footer>
+    </div>
   </div>
 </template>

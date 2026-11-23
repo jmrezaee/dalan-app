@@ -75,6 +75,25 @@ export const commands = {
 	/**  "Commit": runs what `sql_grid_prepare` held, in one transaction, after the mode is asked again. */
 	sqlGridCommit: (connId: string, pendingId: string) => typedError<number, AppError>(__TAURI_INVOKE("sql_grid_commit", { connId, pendingId })),
 	sqlGridDiscard: (connId: string, pendingId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_grid_discard", { connId, pendingId })),
+	/**  A table's columns, constraints, indexes, triggers and DDL (S38). */
+	sqlStructure: (connId: string, schema: string, table: string) => typedError<TableStructure_Serialize, AppError>(__TAURI_INVOKE("sql_structure", { connId, schema, table })),
+	/**
+	 *  Turns the operations into statements and holds them for the review. Read-only databases refuse here; dropping or
+	 *  rewriting asks for the database's name.
+	 */
+	sqlStructurePrepare: (connId: string, schema: string, table: string, ops: StructureOp_Deserialize[]) => typedError<StructurePending, AppError>(__TAURI_INVOKE("sql_structure_prepare", { connId, schema, table, ops })),
+	/**  "Apply": the held statements, in one transaction, after the mode and (if dangerous) the name are checked. */
+	sqlStructureCommit: (connId: string, pendingId: string, typedName: string | null) => typedError<null, AppError>(__TAURI_INVOKE("sql_structure_commit", { connId, pendingId, typedName })),
+	sqlStructureDiscard: (connId: string, pendingId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_structure_discard", { connId, pendingId })),
+	/**  The plan of the statement at the cursor (or the selection). `analyze` runs it, so it only works for reads. */
+	sqlExplain: (connId: string, editorId: string, text: string, mode: RunMode, cursor: number | null, analyze: boolean, timeoutMs: number) => typedError<ExplainPlan_Serialize, AppError>(__TAURI_INVOKE("sql_explain", { connId, editorId, text, mode, cursor, analyze, timeoutMs })),
+	/**  Tables and foreign keys, `steps` hops out from the tables given (S40). */
+	sqlDiagram: (connId: string, tables: TableRef[], steps: number) => typedError<Diagram, AppError>(__TAURI_INVOKE("sql_diagram", { connId, tables, steps })),
+	/**
+	 *  Writes a file the person picks with the system's save dialog (the diagram's SVG or PNG; later exports). The
+	 *  window never touches the file system: it hands Rust the bytes. Returns the path, or `None` when cancelled.
+	 */
+	sqlSaveExport: (suggestedName: string, data: number[]) => typedError<string | null, AppError>(__TAURI_INVOKE("sql_save_export", { suggestedName, data })),
 	/**  Stop: the running statement is cancelled by the server (a second connection), and no further statement starts. */
 	sqlCancel: (connId: string, editorId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_cancel", { connId, editorId })),
 	/**  The editor tab closed. */
@@ -630,6 +649,39 @@ export type DbUrlFields_Serialize = {
 	options: DbOptions_Serialize,
 };
 
+export type Diagram = {
+	tables: DiagramTable[],
+	edges: DiagramEdge[],
+	total_tables: number,
+};
+
+export type DiagramColumn = {
+	name: string,
+	type_name: string,
+	pk: boolean,
+	fk: boolean,
+};
+
+export type DiagramEdge = {
+	name: string,
+	from_schema: string,
+	from_table: string,
+	from_columns: string[],
+	to_schema: string,
+	to_table: string,
+	to_columns: string[],
+	on_delete: string,
+	on_update: string,
+	/**  Some index starts with the key's first column. */
+	indexed: boolean,
+};
+
+export type DiagramTable = {
+	schema: string,
+	name: string,
+	columns: DiagramColumn[],
+};
+
 /**  Which app opens the downloaded copy. */
 export type EditApp = 
 /**  The system's default app for the file type. */
@@ -718,6 +770,26 @@ export type ErrorCode = "locked" | "wrong_password" | "too_many_attempts" |
 "sql_no_key" | 
 /**  A manual transaction is open on this editor. */
 "sql_in_transaction" | "internal";
+
+export type ExplainPlan = ExplainPlan_Serialize | ExplainPlan_Deserialize;
+
+export type ExplainPlan_Deserialize = {
+	root: PlanNode_Deserialize,
+	analyzed: boolean,
+	planning_ms?: number | null,
+	execution_ms?: number | null,
+	buffers_read?: number | null,
+	hint?: PlanHint | null,
+};
+
+export type ExplainPlan_Serialize = {
+	root: PlanNode_Serialize,
+	analyzed: boolean,
+	planning_ms: number | null,
+	execution_ms: number | null,
+	buffers_read: number | null,
+	hint: PlanHint | null,
+};
 
 export type FailKind = "error" | "timeout" | "cancelled";
 
@@ -932,6 +1004,12 @@ export type GroupSummary_Serialize = {
 	group_count: number,
 	/**  What the group gets from its own ancestors. */
 	inherited: Inherited_Serialize,
+};
+
+export type HintAction = {
+	label: string,
+	/**  SQL to open in the editor (never run from here). */
+	sql: string,
 };
 
 export type HistoryEntry = {
@@ -1477,6 +1555,41 @@ export type PendingStatement_Serialize = {
 	class: Class,
 	/**  What the server says it would do ("This will change 3 rows."), when it could be asked. */
 	note: string | null,
+};
+
+export type PlanHint = {
+	text: string,
+	actions: HintAction[],
+};
+
+export type PlanNode = PlanNode_Serialize | PlanNode_Deserialize;
+
+export type PlanNode_Deserialize = {
+	/**  `Seq Scan on orders o`. */
+	name: string,
+	/**  The condition or key that matters: `filter: …`, `group by …`. */
+	detail?: string | null,
+	est_rows: number | null,
+	actual_rows?: number | null,
+	/**  This node's own time, children not counted (ms), and its share of the whole. */
+	self_ms?: number | null,
+	pct?: number | null,
+	total_ms?: number | null,
+	children: PlanNode_Deserialize[],
+};
+
+export type PlanNode_Serialize = {
+	/**  `Seq Scan on orders o`. */
+	name: string,
+	/**  The condition or key that matters: `filter: …`, `group by …`. */
+	detail: string | null,
+	est_rows: number | null,
+	actual_rows: number | null,
+	/**  This node's own time, children not counted (ms), and its share of the whole. */
+	self_ms: number | null,
+	pct: number | null,
+	total_ms: number | null,
+	children: PlanNode_Serialize[],
 };
 
 export type ProfileTheme = ProfileTheme_Serialize | ProfileTheme_Deserialize;
@@ -2494,6 +2607,85 @@ export type SshTarget_Serialize = {
 	port: number,
 };
 
+export type StructureColumn = StructureColumn_Serialize | StructureColumn_Deserialize;
+
+export type StructureColumn_Deserialize = {
+	name: string,
+	type_name: string,
+	nullable: boolean,
+	default?: string | null,
+	/**  `generated always as identity`, `generated by default as identity`, or `generated (stored)`. */
+	generated?: string | null,
+};
+
+export type StructureColumn_Serialize = {
+	name: string,
+	type_name: string,
+	nullable: boolean,
+	default: string | null,
+	/**  `generated always as identity`, `generated by default as identity`, or `generated (stored)`. */
+	generated: string | null,
+};
+
+export type StructureConstraint = {
+	name: string,
+	/**  `p` primary key, `f` foreign key, `u` unique, `c` check, `x` exclusion. */
+	kind: string,
+	definition: string,
+	columns: string[],
+};
+
+export type StructureIndex = {
+	name: string,
+	definition: string,
+	unique: boolean,
+	primary: boolean,
+	bytes: number | null,
+	scans: number | null,
+};
+
+/**  One change to a table. Names are quoted; `type_name` and `default` are checked by `safe_expr`. */
+export type StructureOp = StructureOp_Serialize | StructureOp_Deserialize;
+
+/**  One change to a table. Names are quoted; `type_name` and `default` are checked by `safe_expr`. */
+export type StructureOp_Deserialize = { op: "add_column"; name: string; type_name: string; nullable: boolean; default?: string | null } | { op: "drop_column"; name: string } | { op: "rename_column"; from: string; to: string } | { op: "change_type"; column: string; type_name: string } | { op: "set_nullable"; column: string; nullable: boolean } | { op: "set_default"; column: string; default?: string | null } | { op: "create_index"; name: string; columns: string[]; unique: boolean } | { op: "drop_index"; name: string } | { op: "drop_constraint"; name: string } | { op: "add_foreign_key"; name: string; columns: string[]; ref_schema: string; ref_table: string; ref_columns: string[]; on_delete?: string | null };
+
+/**  One change to a table. Names are quoted; `type_name` and `default` are checked by `safe_expr`. */
+export type StructureOp_Serialize = { op: "add_column"; name: string; type_name: string; nullable: boolean; default: string | null } | { op: "drop_column"; name: string } | { op: "rename_column"; from: string; to: string } | { op: "change_type"; column: string; type_name: string } | { op: "set_nullable"; column: string; nullable: boolean } | { op: "set_default"; column: string; default: string | null } | { op: "create_index"; name: string; columns: string[]; unique: boolean } | { op: "drop_index"; name: string } | { op: "drop_constraint"; name: string } | { op: "add_foreign_key"; name: string; columns: string[]; ref_schema: string; ref_table: string; ref_columns: string[]; on_delete: string | null };
+
+export type StructurePending = {
+	id: string,
+	level: PendingLevel,
+	db_name: string,
+	environment: string,
+	statements: string[],
+	warnings: string[],
+};
+
+export type StructureStats = StructureStats_Serialize | StructureStats_Deserialize;
+
+export type StructureStats_Deserialize = {
+	rows_estimate?: number | null,
+	table_bytes: number | null,
+	index_bytes: number | null,
+	/**  Epoch milliseconds of the last (auto)vacuum. */
+	last_vacuum?: number | null,
+};
+
+export type StructureStats_Serialize = {
+	rows_estimate: number | null,
+	table_bytes: number | null,
+	index_bytes: number | null,
+	/**  Epoch milliseconds of the last (auto)vacuum. */
+	last_vacuum: number | null,
+};
+
+export type StructureTrigger = {
+	name: string,
+	definition: string,
+	enabled: boolean,
+};
+
 export type Suggestion = {
 	command: string,
 	/**  The model asked a question instead of giving a command (the text after `# `). */
@@ -2533,6 +2725,31 @@ export type SystemIntegration_Serialize = {
 	/**  `"user"` (installed for this person) or `"allusers"`, from the installer's saved choices. */
 	edition: string | null,
 	install_dir: string | null,
+};
+
+export type TableRef = {
+	schema: string,
+	table: string,
+};
+
+export type TableStructure = TableStructure_Serialize | TableStructure_Deserialize;
+
+export type TableStructure_Deserialize = {
+	stats: StructureStats_Deserialize,
+	columns: StructureColumn_Deserialize[],
+	constraints: StructureConstraint[],
+	indexes: StructureIndex[],
+	triggers: StructureTrigger[],
+	ddl: string,
+};
+
+export type TableStructure_Serialize = {
+	stats: StructureStats_Serialize,
+	columns: StructureColumn_Serialize[],
+	constraints: StructureConstraint[],
+	indexes: StructureIndex[],
+	triggers: StructureTrigger[],
+	ddl: string,
 };
 
 /**  A tag and how many servers use it (the Tags menu). */

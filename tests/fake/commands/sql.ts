@@ -4,7 +4,7 @@
 import { fail, type Handlers } from '../types'
 import type { SqlCell_Serialize as Cell_Serialize, SqlColumn_Serialize, SqlTableInfo_Serialize } from '../../../app/types/bindings'
 
-type Keys = 'dbOpen' | 'dbRespond' | 'dbClose' | 'sqlObjects' | 'sqlTableInfo' | 'sqlTablePage' | 'sqlCount' | 'sqlCell' | 'sqlRun' | 'sqlRunCommit' | 'sqlRunDiscard' | 'sqlTxn' | 'sqlGridPrepare' | 'sqlGridCommit' | 'sqlGridDiscard' | 'sqlCancel' | 'sqlEditorClose' | 'sqlCatalog' | 'sqlFormat' | 'sqlHistory' | 'sqlHistoryClear'
+type Keys = 'dbOpen' | 'dbRespond' | 'dbClose' | 'sqlObjects' | 'sqlTableInfo' | 'sqlTablePage' | 'sqlCount' | 'sqlCell' | 'sqlStructure' | 'sqlStructurePrepare' | 'sqlStructureCommit' | 'sqlStructureDiscard' | 'sqlExplain' | 'sqlDiagram' | 'sqlSaveExport' | 'sqlRun' | 'sqlRunCommit' | 'sqlRunDiscard' | 'sqlTxn' | 'sqlGridPrepare' | 'sqlGridCommit' | 'sqlGridDiscard' | 'sqlCancel' | 'sqlEditorClose' | 'sqlCatalog' | 'sqlFormat' | 'sqlHistory' | 'sqlHistoryClear'
 
 const col = (name: string, type_name: string, kind: SqlColumn_Serialize['kind'], pk: number | null = null, nullable = true): SqlColumn_Serialize =>
   ({ name, type_name, kind, nullable: pk === null && nullable, default: null, pk_position: pk })
@@ -61,6 +61,27 @@ function decide(mode: string, c: Cls) {
   return c === 'schema' ? 'confirm' : 'typed'
 }
 const affectedOf = (t: string) => (classOf(t) === 'schema' ? 0 : /\bwhere\b/i.test(t) ? 1 : 50)
+
+const structHeld = new Map<string, any[]>()
+const tableKey = (t: string) => t
+
+/** Statement text for one structure operation (the fake only shows it; Rust builds the real ones). */
+function opSql(schema: string, tname: string, o: any) {
+  const T = `"${schema}"."${tname}"`
+  switch (o.op) {
+    case 'add_column': return `alter table ${T} add column "${o.name}" ${o.type_name}${o.default ? ` default ${o.default}` : ''}${o.nullable ? '' : ' not null'}`
+    case 'drop_column': return `alter table ${T} drop column "${o.name}"`
+    case 'rename_column': return `alter table ${T} rename column "${o.from}" to "${o.to}"`
+    case 'change_type': return `alter table ${T} alter column "${o.column}" type ${o.type_name} using "${o.column}"::${o.type_name}`
+    case 'set_nullable': return `alter table ${T} alter column "${o.column}" ${o.nullable ? 'drop' : 'set'} not null`
+    case 'set_default': return `alter table ${T} alter column "${o.column}" ${o.default ? `set default ${o.default}` : 'drop default'}`
+    case 'create_index': return `create ${o.unique ? 'unique ' : ''}index "${o.name}" on ${T} (${o.columns.map((c: string) => `"${c}"`).join(', ')})`
+    case 'drop_index': return `drop index "${schema}"."${o.name}"`
+    case 'drop_constraint': return `alter table ${T} drop constraint "${o.name}"`
+    default: return `alter table ${T} add constraint "${o.name}" foreign key (${o.columns.join(', ')}) references "${o.ref_schema}"."${o.ref_table}" (${o.ref_columns.join(', ')})`
+  }
+}
+const extraIndexes = new Map<string, { name: string, definition: string, unique: boolean }[]>()
 
 const table = (name: string) => TABLES[name] ?? fail('not_found', `There is no table public.${name} (it may have been dropped).`)
 const cell = (c: SqlColumn_Serialize, v: string | null): Cell_Serialize => (v === null ? { kind: 'null', v: null, cut: false } : { kind: c.kind, v, cut: false })
@@ -146,6 +167,89 @@ async function runPieces(a: any, ch: number, send: (c: number, m: unknown) => vo
 }
 
 export const sql: Pick<Handlers, Keys> = {
+  sqlStructure: (a) => {
+    const t = table(a.table)
+    const pk = t.cols.filter(c => c.pk_position).map(c => c.name)
+    const fks = FKS[a.table]?.references ?? []
+    const constraints = [
+      ...(pk.length ? [{ name: `${a.table}_pkey`, kind: 'p', definition: `PRIMARY KEY (${pk.join(', ')})`, columns: pk }] : []),
+      ...fks.map(f => ({ name: f.name, kind: 'f', definition: `FOREIGN KEY (${f.columns.join(', ')}) REFERENCES ${f.schema}.${f.table}(${f.target_columns.join(', ')})`, columns: f.columns })),
+    ]
+    const indexes = [
+      ...(pk.length ? [{ name: `${a.table}_pkey`, definition: `CREATE UNIQUE INDEX ${a.table}_pkey ON ${a.schema}.${a.table} USING btree (${pk.join(', ')})`, unique: true, primary: true, bytes: 16384, scans: 1200 }] : []),
+      ...(extraIndexes.get(tableKey(a.table)) ?? []).map(i => ({ ...i, primary: false, bytes: 8192, scans: 0 })),
+    ]
+    const columns = t.cols.map(c => ({ name: c.name, type_name: c.type_name, nullable: c.nullable, default: c.default, generated: null }))
+    const ddl = `create table "${a.schema}"."${a.table}" (\n${columns.map(c => `  "${c.name}" ${c.type_name}${c.nullable ? '' : ' not null'}`).join(',\n')}\n);\n`
+    return { stats: { rows_estimate: t.estimate, table_bytes: 1_048_576, index_bytes: 65_536, last_vacuum: Date.now() - 2 * 3_600_000 }, columns, constraints, indexes, triggers: [], ddl }
+  },
+  sqlStructurePrepare: (a, { m }) => {
+    const c = m.sqlConns.get(a.connId)
+    const db = c && m.dbs.find(d => d.id === c.db)
+    if (db?.write_mode === 'read_only') fail('db_read_only_mode', `${db.name} is read-only in Dalan. Nothing was sent.`)
+    if (!a.ops.length) fail('validation', 'There are no changes to apply.')
+    const statements = a.ops.map((o: any) => opSql(a.schema, a.table, o))
+    const typed = a.ops.some((o: any) => ['drop_column', 'change_type', 'drop_index'].includes(o.op))
+    const warnings = a.ops.flatMap((o: any) => (o.op === 'change_type' ? [`Changing the type of ${o.column} locks the table while it is rewritten.`] : o.op === 'drop_column' ? [`Dropping ${o.name} deletes everything stored in it.`] : []))
+    const id = `struct-${structHeld.size + 1}-${Date.now()}`
+    structHeld.set(id, a.ops.map((o: any) => ({ ...o, __table: a.table, __typed: typed })))
+    return { id, level: typed ? 'typed' : 'confirm', db_name: db!.name, environment: db!.environment, statements, warnings }
+  },
+  sqlStructureCommit: (a, { m }) => {
+    const ops = structHeld.get(a.pendingId)
+    structHeld.delete(a.pendingId)
+    if (!ops) fail('db_confirm_needed', 'That confirmation was already used or isn\'t for this tab. Nothing was sent.')
+    const c = m.sqlConns.get(a.connId)!
+    const db = m.dbs.find(d => d.id === c.db)!
+    if (ops[0].__typed && a.typedName !== db.name) fail('db_confirm_needed', 'The name doesn\'t match the database\'s name. Nothing was sent.')
+    const t = TABLES[ops[0].__table]!
+    for (const o of ops) {
+      if (o.op === 'add_column') { const old = t.rows; t.cols.push(col(o.name, o.type_name, 'text')); t.rows = () => old().map(r => [...r, o.default ?? null]) }
+      if (o.op === 'drop_column') { const i = t.cols.findIndex(x => x.name === o.name); const old = t.rows; t.cols.splice(i, 1); t.rows = () => old().map(r => r.filter((_, k) => k !== i)) }
+      if (o.op === 'change_type') { const x = t.cols.find(c => c.name === o.column); if (x) x.type_name = o.type_name }
+      if (o.op === 'rename_column') { const x = t.cols.find(c => c.name === o.from); if (x) x.name = o.to }
+      if (o.op === 'create_index') extraIndexes.set(tableKey(ops[0].__table), [...(extraIndexes.get(tableKey(ops[0].__table)) ?? []), { name: o.name, definition: `CREATE INDEX ${o.name} ON public.${ops[0].__table} USING btree (${o.columns.join(', ')})`, unique: o.unique }])
+      if (o.op === 'drop_index') extraIndexes.set(tableKey(ops[0].__table), (extraIndexes.get(tableKey(ops[0].__table)) ?? []).filter(i => i.name !== o.name))
+    }
+    return null
+  },
+  sqlStructureDiscard: (a) => {
+    structHeld.delete(a.pendingId)
+    return null
+  },
+  sqlExplain: (a) => {
+    const first = split(a.text)[0]?.text ?? ''
+    if (a.analyze && classOf(first) !== 'read') fail('validation', 'Explain analyze runs the statement, so it only works for reads. Use plain Explain for a change.')
+    const heavy = /orders/i.test(first)
+    const node = (name: string, detail: string | null, est: number, got: number | null, self: number | null, pct: number | null, children: any[] = []) => ({ name, detail, est_rows: est, actual_rows: a.analyze ? got : null, self_ms: a.analyze ? self : null, pct: a.analyze ? pct : null, total_ms: a.analyze ? self : null, children })
+    const root = node('Limit', null, 50, 50, 0.4, 0.5, [node('Hash Join', 'c.id = o.customer_id', 31200, 30877, 6.8, 8, [
+      node('Seq Scan on orders o', heavy ? 'filter: status = \'paid\'' : null, 1200, 30877, 61, 75),
+      node('Hash', null, 18412, 18412, 4.9, 6, [node('Seq Scan on customers c', null, 18412, 18412, 4.9, 6)]),
+    ])])
+    const hint = heavy && a.analyze ? { text: 'The scan on orders reads every row and takes 75% of the time. The planner expected 1200 rows and got 30877: statistics look stale. An index on orders (status) would let it skip the rest.', actions: [{ label: 'Open ANALYZE orders', sql: 'analyze "public"."orders"' }, { label: 'Open an index draft', sql: 'create index on "public"."orders" ("status")' }] } : null
+    return { root, analyzed: a.analyze, planning_ms: 0.3, execution_ms: a.analyze ? 81.1 : null, buffers_read: a.analyze ? 2140 : null, hint }
+  },
+  sqlDiagram: (a) => {
+    const start = a.tables.map((t: any) => t.table)
+    const edges: any[] = []
+    for (const [from, f] of Object.entries(FKS)) for (const r of f.references) edges.push({ name: r.name, from_schema: 'public', from_table: from, from_columns: r.columns, to_schema: 'public', to_table: r.table, to_columns: r.target_columns, on_delete: 'restrict', on_update: 'no action', indexed: true })
+    const seen = new Set<string>(start)
+    let frontier = [...start]
+    for (let i = 0; i < a.steps; i++) {
+      const next: string[] = []
+      for (const e of edges) for (const [x, y] of [[e.from_table, e.to_table], [e.to_table, e.from_table]]) if (frontier.includes(x) && !seen.has(y)) { seen.add(y); next.push(y) }
+      frontier = next
+    }
+    const names = [...seen].filter(n => TABLES[n])
+    return {
+      tables: names.map(n => ({ schema: 'public', name: n, columns: TABLES[n]!.cols.map(c => ({ name: c.name, type_name: c.type_name, pk: !!c.pk_position, fk: edges.some(e => e.from_table === n && e.from_columns.includes(c.name)) })) })),
+      edges: edges.filter(e => names.includes(e.from_table) && names.includes(e.to_table)), total_tables: Object.keys(TABLES).length,
+    }
+  },
+  sqlSaveExport: (a, { tag }) => {
+    tag(`export:${a.suggestedName}:${a.data.length}`)
+    return `/tmp/${a.suggestedName}`
+  },
   dbOpen: (a, { m, id, channel, send }) => {
     const d = m.dbs.find(x => x.id === a.dbId)
     if (!d) fail('not_found', 'That database is no longer saved.')

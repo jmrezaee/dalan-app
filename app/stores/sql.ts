@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { PendingRun, TxnState, GridPending, SqlCatalog, SqlRunEvent_Serialize, RunMode, SqlCell_Serialize as Cell, DbEvent_Serialize, PageCursor_Serialize, PromptKind, RedisStepState, SqlColumn_Serialize as SqlColumn, SqlObject_Serialize as SqlObject, SqlServerInfo, SqlTableInfo_Serialize as SqlTableInfo } from '~/types/bindings'
+import type { Diagram, ExplainPlan_Serialize as ExplainPlan, StructureOp_Deserialize as StructureOp, StructurePending, TableStructure_Serialize as TableStructure, PendingRun, TxnState, GridPending, SqlCatalog, SqlRunEvent_Serialize, RunMode, SqlCell_Serialize as Cell, DbEvent_Serialize, PageCursor_Serialize, PromptKind, RedisStepState, SqlColumn_Serialize as SqlColumn, SqlObject_Serialize as SqlObject, SqlServerInfo, SqlTableInfo_Serialize as SqlTableInfo } from '~/types/bindings'
 import { useTauri } from '~/composables/useTauri'
 
 export type SqlStatus = 'connecting' | 'ready' | 'failed' | 'closed'
@@ -40,7 +40,19 @@ export interface TableTab {
   deleted: number[]
   /** The commit review the gate holds, and what went wrong with it. */
   review: { pending: GridPending, error: string, busy: boolean } | null
+  /** Which view of the table shows (S38): the data, or its structure. */
+  view: 'data' | 'structure' | 'indexes' | 'keys' | 'triggers' | 'ddl'
+  structure: TableStructure | null
+  structureError: string
+  /** Changes waiting for Review and apply (the typed diff), and the review the gate holds. */
+  ops: StructureOp[]
+  structureReview: { pending: StructurePending, error: string, busy: boolean } | null
 }
+
+/** The plan of the statement last explained in a query tab (S39). */
+export interface PlanState { state: 'loading' | 'ready' | 'failed', analyze: boolean, plan: ExplainPlan | null, error: string, statement: string }
+/** A diagram tab (S40). */
+export interface DiagramTab { id: string, title: string, start: string[], steps: number, keysOnly: boolean, data: Diagram | null, loading: boolean, error: string }
 
 /** One statement's answer in the query editor (S37). Rows arrive in batches while `state` is `running`. */
 export interface ResultSet {
@@ -55,7 +67,7 @@ export interface ResultSet {
   selected: { row: number, col: number } | null
 }
 export interface QueryMessage { kind: 'info' | 'error' | 'refused', text: string, statement?: string }
-export type QueryView = `r${number}` | 'messages' | 'history' | 'saved'
+export type QueryView = `r${number}` | 'messages' | 'history' | 'saved' | 'explain'
 /** A query tab (S37). It keeps its text, results and messages while another tab shows. */
 export interface QueryTab {
   id: string
@@ -77,6 +89,7 @@ export interface QueryTab {
   txn: TxnState | null
   /** A change the gate holds for the person's answer (S42). */
   pending: PendingRun | null
+  plan: PlanState | null
   /** The tab's × was pressed with a transaction open: asking what to do with it. */
   closeAsk: boolean
 }
@@ -105,6 +118,8 @@ function setup() {
   /** Tables and columns for completion; read when the first editor opens. */
   const catalog = ref<SqlCatalog | null>(null)
   const history = ref<string[]>([])
+  const diagrams = ref<DiagramTab[]>([])
+  let diagramCount = 0
 
   const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : (e as { message?: string })?.message ?? fallback)
 
@@ -155,6 +170,7 @@ function setup() {
     schemas.value = []
     tabs.value = []
     queries.value = []
+    diagrams.value = []
     catalog.value = null
     activeTab.value = ''
     try {
@@ -226,7 +242,7 @@ function setup() {
     }
     const tab = reactive<TableTab>({
       id, schema, table: o.name, kind: o.kind, info: null, filter: '', applied: '', sort: [], columns: [], cols: [], rows: [], cursors: [null], page: 0, next: null,
-      keyset: false, loading: false, error: '', elapsedMs: null, estimate: o.estimate ?? null, exact: null, selected: null, full: null, edits: {}, deleted: [], review: null,
+      keyset: false, loading: false, error: '', elapsedMs: null, estimate: o.estimate ?? null, exact: null, selected: null, full: null, edits: {}, deleted: [], review: null, view: 'data', structure: null, structureError: '', ops: [], structureReview: null,
     })
     tabs.value.push(tab)
     activeTab.value = id
@@ -421,6 +437,111 @@ function setup() {
     if (r) await api.sqlGridDiscard(connId.value, r.pending.id).catch(() => {})
   }
 
+  // ---- Structure (S38, F24)
+  async function setView(tab: TableTab, view: TableTab['view']) {
+    tab.view = view
+    if (view !== 'data' && !tab.structure) await loadStructure(tab)
+  }
+  async function loadStructure(tab: TableTab) {
+    tab.structureError = ''
+    try {
+      tab.structure = await api.sqlStructure(connId.value, tab.schema, tab.table)
+    }
+    catch (e) {
+      tab.structureError = message(e, 'Couldn\'t read this table\'s structure.')
+    }
+  }
+  const addOp = (tab: TableTab, op: StructureOp) => { tab.ops.push(op) }
+  const removeOp = (tab: TableTab, i: number) => { tab.ops.splice(i, 1) }
+  /** The held statements, shown in the review dialog. */
+  async function reviewStructure(tab: TableTab) {
+    try {
+      tab.structureReview = { pending: await api.sqlStructurePrepare(connId.value, tab.schema, tab.table, tab.ops), error: '', busy: false }
+    }
+    catch (e) {
+      tab.structureError = message(e, 'Couldn\'t prepare the changes.')
+    }
+  }
+  async function applyStructure(tab: TableTab, typed: string | null) {
+    const r = tab.structureReview
+    if (!r || r.busy) return
+    r.busy = true
+    r.error = ''
+    try {
+      await api.sqlStructureCommit(connId.value, r.pending.id, typed)
+      tab.structureReview = null
+      tab.ops = []
+      // The tree, the columns and completion all changed.
+      tab.structure = null
+      tab.info = await api.sqlTableInfo(connId.value, tab.schema, tab.table).catch(() => tab.info)
+      await loadStructure(tab)
+      void loadCatalog(true)
+      // What the old columns meant is gone: start the data again from its first page.
+      Object.assign(tab, { edits: {}, deleted: [], filter: '', applied: '', sort: [], columns: [], cursors: [null], exact: null })
+      await loadPage(tab, 0)
+    }
+    catch (e) {
+      r.error = message(e, 'Couldn\'t apply the changes.')
+      r.busy = false
+    }
+  }
+  async function cancelStructure(tab: TableTab) {
+    const r = tab.structureReview
+    tab.structureReview = null
+    if (r) await api.sqlStructureDiscard(connId.value, r.pending.id).catch(() => {})
+  }
+  /** "Copy as migration": the statements, without applying them (the gate still has to allow the change). */
+  async function migrationText(tab: TableTab) {
+    const p = await api.sqlStructurePrepare(connId.value, tab.schema, tab.table, tab.ops)
+    await api.sqlStructureDiscard(connId.value, p.id).catch(() => {})
+    return p.statements.map(x => `${x};`).join('\n')
+  }
+
+  // ---- Explain (S39, F25)
+  async function explain(q: QueryTab, analyze: boolean, selected = '') {
+    if (!connId.value) return
+    const text = selected || q.text
+    if (!text.trim()) return
+    q.plan = { state: 'loading', analyze, plan: null, error: '', statement: '' }
+    q.view = 'explain'
+    try {
+      const plan = await api.sqlExplain(connId.value, editorId(q), text, selected ? 'selection' : 'current', selected ? null : q.cursor, analyze, q.timeoutS * 1000)
+      q.plan = { state: 'ready', analyze, plan, error: '', statement: '' }
+    }
+    catch (e) {
+      q.plan = { state: 'failed', analyze, plan: null, error: message(e, 'Couldn\'t explain that.'), statement: '' }
+    }
+  }
+
+  // ---- Diagram (S40)
+  async function openDiagram(schema?: string, table?: string) {
+    const start = schema && table ? [`${schema}.${table}`] : []
+    const n = ++diagramCount
+    const d = reactive<DiagramTab>({ id: `d${n}`, title: table ? `Diagram · ${table}` : `Diagram ${n}`, start, steps: 1, keysOnly: false, data: null, loading: false, error: '' })
+    diagrams.value.push(d)
+    activeTab.value = d.id
+    if (start.length) await loadDiagram(d)
+  }
+  async function loadDiagram(d: DiagramTab) {
+    if (!d.start.length) return
+    d.loading = true
+    d.error = ''
+    try {
+      d.data = await api.sqlDiagram(connId.value, d.start.map((x) => { const [schema, ...t] = x.split('.'); return { schema: schema!, table: t.join('.') } }), d.steps)
+    }
+    catch (e) {
+      d.error = message(e, 'Couldn\'t draw the diagram.')
+    }
+    d.loading = false
+  }
+  function closeDiagram(id: string) {
+    const i = diagrams.value.findIndex(d => d.id === id)
+    if (i < 0) return
+    diagrams.value.splice(i, 1)
+    if (activeTab.value === id) activeTab.value = diagrams.value[Math.min(i, diagrams.value.length - 1)]?.id ?? queries.value[0]?.id ?? tabs.value[0]?.id ?? ''
+  }
+  const saveExport = (name: string, bytes: Uint8Array) => api.sqlSaveExport(name, Array.from(bytes))
+
   /** Opens `schema.table` filtered by a foreign key's values: "Open row" and "Show them". */
   async function jump(schema: string, table: string, where: string) {
     await openTable(schema, { name: table, kind: 'table', estimate: null })
@@ -437,7 +558,7 @@ function setup() {
     const n = ++queryCount
     const q = reactive<QueryTab>({
       id: `q${n}`, title: title ?? `Query ${n}`, text, saved: savedId ? text : '', savedId, cursor: 0, running: false, results: [], messages: [], view: 'messages',
-      limit: 1000, timeoutS: 30, totalMs: null, manual: false, txn: null, pending: null, closeAsk: false,
+      limit: 1000, timeoutS: 30, totalMs: null, manual: false, txn: null, pending: null, plan: null, closeAsk: false,
     })
     queries.value.push(q)
     activeTab.value = q.id
@@ -638,7 +759,7 @@ function setup() {
     q.title = row.name
   }
 
-  return { dbId, connId, status, steps, prompt, info, error, schemas, treeFilter, tabs, activeTab, current, changeCount, setCell, toggleDelete, discardEdits, review, commitReview, cancelReview, queries, catalog, history, newQuery, closeQuery, requestCloseQuery, finishAndClose, openTransactions, confirmRun, discardRun, txn, setManual, loadCatalog, run, stop, format, loadHistory, clearHistory, save, open, retry, respond, close, toggleSchema, openTable, closeTable, loadPage, apply, refresh, nextPage, prevPage, sortBy, countExactly, select, keyOf, jump }
+  return { dbId, connId, status, steps, prompt, info, error, schemas, treeFilter, tabs, activeTab, current, setView, loadStructure, addOp, removeOp, reviewStructure, applyStructure, cancelStructure, migrationText, explain, diagrams, openDiagram, loadDiagram, closeDiagram, saveExport, changeCount, setCell, toggleDelete, discardEdits, review, commitReview, cancelReview, queries, catalog, history, newQuery, closeQuery, requestCloseQuery, finishAndClose, openTransactions, confirmRun, discardRun, txn, setManual, loadCatalog, run, stop, format, loadHistory, clearHistory, save, open, retry, respond, close, toggleSchema, openTable, closeTable, loadPage, apply, refresh, nextPage, prevPage, sortBy, countExactly, select, keyOf, jump }
 }
 
 // One store per SQL tab, like the Redis tabs: each has its own connection, tree and open tables.

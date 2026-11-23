@@ -28,6 +28,13 @@ function runSelection() {
 }
 const runMain = () => { const s = editor.value?.selected() ?? ''; void run(s ? 'selection' : 'current', s) }
 
+// ---- Explain (S39)
+function explainNow(analyze: boolean) {
+  const sel = editor.value?.selected() ?? ''
+  void store.explain(q.value, analyze, sel)
+}
+function openInEditor(sqlText: string) { store.newQuery(sqlText, 'Draft') }
+
 // ---- Limit and timeout: plain numbers, kept in range
 const limitText = ref(String(q.value.limit))
 const timeoutText = ref(String(q.value.timeoutS))
@@ -107,6 +114,8 @@ onMounted(() => { if (!databases.savedLoaded) void databases.refreshSaved() })
       <Button v-else size="sm" variant="destructive" :data-testid="tid('sql-stop')" @click="store.stop(q)"><Square />Stop</Button>
       <Button variant="secondary" size="sm" :disabled="q.running" @click="runSelection">Run selection</Button>
       <Button variant="secondary" size="sm" :disabled="q.running" @click="run('all')">Run all</Button>
+      <Button variant="secondary" size="sm" :disabled="q.running" :data-testid="tid('sql-explain')" @click="explainNow(false)">Explain</Button>
+      <Button variant="ghost" size="sm" :disabled="q.running" :data-testid="tid('sql-explain-analyze')" title="Runs the statement (a read) inside a transaction that is rolled back, and times each step" @click="explainNow(true)">Explain analyze</Button>
       <Button variant="ghost" size="sm" @click="store.format(q)">Format</Button>
       <Button variant="ghost" size="sm" @click="save()"><Save />Save</Button>
       <Button variant="secondary" size="sm" :aria-pressed="q.manual" :disabled="q.running || !!q.txn?.active" :title="q.manual ? 'Statements wait for Commit' : 'Each statement commits on its own'" :data-testid="tid('sql-manual')" @click="store.setManual(q, !q.manual)">{{ q.manual ? 'Manual' : 'Auto-commit' }}</Button>
@@ -157,7 +166,7 @@ onMounted(() => { if (!databases.savedLoaded) void databases.refreshSaved() })
         <span class="text-muted">· {{ r.state === 'running' ? `${fmt(r.rows.length)} rows…` : r.state === 'failed' ? 'failed' : `${fmt(r.rows.length)} ${r.rows.length === 1 ? 'row' : 'rows'}${r.elapsedMs !== null ? ` · ${r.elapsedMs} ms` : ''}` }}</span>
       </button>
       <button
-        v-for="v in (['messages', 'history', 'saved'] as const)" :key="v" type="button" :aria-current="q.view === v ? 'true' : undefined"
+        v-for="v in (q.plan ? (['messages', 'history', 'saved', 'explain'] as const) : (['messages', 'history', 'saved'] as const))" :key="v" type="button" :aria-current="q.view === v ? 'true' : undefined"
         :class="cn('flex shrink-0 cursor-default items-center gap-1.5 border-r border-border px-3 text-xs capitalize text-muted outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent', q.view === v && 'bg-bg text-text shadow-[inset_0_2px_0_var(--color-accent)]')"
         @click="show(v)"
       >
@@ -203,6 +212,8 @@ onMounted(() => { if (!databases.savedLoaded) void databases.refreshSaved() })
         </div>
         <p v-if="q.totalMs !== null && q.messages.length > 1" class="text-xs text-muted">Total {{ q.totalMs }} ms</p>
       </div>
+
+      <SqlPlanView v-else-if="q.view === 'explain' && q.plan" :plan="q.plan" @open="openInEditor" @rerun="(a: boolean) => explainNow(a)" />
 
       <div v-else-if="q.view === 'history'" class="min-w-0 flex-1 overflow-auto p-2 text-sm">
         <div v-if="store.history.length" class="mb-1 flex justify-end"><Button variant="ghost" size="xs" @click="store.clearHistory()"><Trash2 />Clear history</Button></div>

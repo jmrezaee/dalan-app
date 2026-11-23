@@ -291,6 +291,8 @@ pub fn classify(sql: &str) -> Class {
             if second == Some("SYSTEM")
                 || (matches!(second, Some("ROLE" | "USER")) && has("PASSWORD"))
                 || (second != Some("TYPE") && has("TYPE"))
+                // Dropping a column throws its data away.
+                || (has("DROP") && has("COLUMN"))
             {
                 Class::Dangerous
             } else {
@@ -434,6 +436,8 @@ mod tests {
             ("alter table t alter column a type bigint", Dangerous),
             ("alter table t alter column a set data type text", Dangerous),
             ("vacuum full t", Dangerous),
+            ("alter table t drop column c", Dangerous),
+            ("alter table t add column c int", Schema),
             ("cluster t", Dangerous),
             ("alter system set work_mem = '1GB'", Dangerous),
             ("create role r password 'x'", Dangerous),

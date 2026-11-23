@@ -3,8 +3,11 @@
 //! "Connecting" card), and keeping the open connections by id so a tab's commands find theirs.
 
 pub mod classify;
+pub mod explain;
+pub mod diagram;
 pub mod grid;
 pub mod pg;
+pub mod structure;
 pub mod run;
 #[cfg(test)]
 mod tests;
@@ -371,6 +374,8 @@ pub struct SqlManager {
     /// Scripts held for the gate's answer, by id (bound to their connection).
     pub pending: crate::dbs::gate::PendingStore<run::HeldRun>,
     /// Grid edits held for the commit review.
+    /// Structure changes held for the review.
+    pub structure_pending: crate::dbs::gate::PendingStore<Vec<String>>,
     pub grid_pending: crate::dbs::gate::PendingStore<Vec<grid::GridStatement>>,
     conns: Mutex<HashMap<String, Arc<Live>>>,
 }
@@ -473,6 +478,7 @@ impl SqlManager {
     pub fn close(&self, conn_id: &str) {
         self.pending.drop_conn(conn_id);
         self.grid_pending.drop_conn(conn_id);
+        self.structure_pending.drop_conn(conn_id);
         let live = self.conns.lock().ok().and_then(|mut m| m.remove(conn_id));
         if let Some(live) = live {
             live.prompts.cancel_all_pub();

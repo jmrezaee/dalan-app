@@ -2,7 +2,7 @@
 import { Channel } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { commands } from '~/types/bindings'
-import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, SqlRunEvent_Serialize, RunMode, TxnAction, GridEdits_Deserialize, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
+import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, SqlRunEvent_Serialize, RunMode, TxnAction, GridEdits_Deserialize, StructureOp_Deserialize, TableRef, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -63,6 +63,13 @@ export function useTauri() {
     sqlGridPrepare: (connId: string, edits: GridEdits_Deserialize) => unwrap(commands.sqlGridPrepare(connId, edits)),
     sqlGridCommit: (connId: string, pendingId: string) => unwrap(commands.sqlGridCommit(connId, pendingId)),
     sqlGridDiscard: (connId: string, pendingId: string) => unwrap(commands.sqlGridDiscard(connId, pendingId)),
+    sqlStructure: (connId: string, schema: string, table: string) => unwrap(commands.sqlStructure(connId, schema, table)),
+    sqlStructurePrepare: (connId: string, schema: string, table: string, ops: StructureOp_Deserialize[]) => unwrap(commands.sqlStructurePrepare(connId, schema, table, ops)),
+    sqlStructureCommit: (connId: string, pendingId: string, typedName: string | null) => unwrap(commands.sqlStructureCommit(connId, pendingId, typedName)),
+    sqlStructureDiscard: (connId: string, pendingId: string) => unwrap(commands.sqlStructureDiscard(connId, pendingId)),
+    sqlExplain: (connId: string, editorId: string, text: string, mode: RunMode, cursor: number | null, analyze: boolean, timeoutMs: number) => unwrap(commands.sqlExplain(connId, editorId, text, mode, cursor, analyze, timeoutMs)),
+    sqlDiagram: (connId: string, tables: TableRef[], steps: number) => unwrap(commands.sqlDiagram(connId, tables, steps)),
+    sqlSaveExport: (suggestedName: string, data: number[]) => unwrap(commands.sqlSaveExport(suggestedName, data)),
     sqlCancel: (connId: string, editorId: string) => unwrap(commands.sqlCancel(connId, editorId)),
     sqlEditorClose: (connId: string, editorId: string) => unwrap(commands.sqlEditorClose(connId, editorId)),
     sqlCatalog: (connId: string, refresh: boolean) => unwrap(commands.sqlCatalog(connId, refresh)),

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The object tree of a SQL tab (S36): schemas, opened lazily, and each one's tables and views with the planner's row
 // estimate. The search box filters what is already loaded. Enter or double-click opens a table.
-import { ChevronDown, ChevronRight, Eye, Plus, Table2 } from '@lucide/vue'
+import { ChevronDown, ChevronRight, Eye, Plus, Share2, Table2 } from '@lucide/vue'
 import { Input } from '@/components/ui/input'
 import type { SqlObject_Serialize as SqlObject } from '~/types/bindings'
 
@@ -69,5 +69,6 @@ function onSchemaKey(e: KeyboardEvent, s: (typeof store.schemas)[number]) {
       <p v-if="!store.schemas.length" class="px-3 py-2 text-xs text-muted" aria-busy="true">Reading the schemas…</p>
     </div>
     <button type="button" class="flex h-9 shrink-0 cursor-default items-center gap-2 border-t border-border px-3 text-sm text-muted outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" :data-testid="tid('sql-new-query')" @click="store.newQuery()"><Plus class="size-4" aria-hidden="true" />New query</button>
+    <button type="button" class="flex h-9 shrink-0 cursor-default items-center gap-2 border-t border-border px-3 text-sm text-muted outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" :data-testid="tid('sql-new-diagram')" @click="store.openDiagram(store.current?.schema, store.current?.table)"><Share2 class="size-4" aria-hidden="true" />Diagram</button>
   </nav>
 </template>

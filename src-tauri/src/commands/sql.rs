@@ -18,7 +18,11 @@ use crate::redis::store::RedisWriteMode;
 use crate::sql::classify::{classify, Class, Piece};
 use crate::sql::run::{pieces_for, HeldRun, RunMode, RunOpts, SqlCatalog, SqlRunEvent, TxnState};
 use crate::sql;
+use crate::sql::diagram::Diagram;
+use crate::sql::explain::ExplainPlan;
 use crate::sql::grid::GridEdits;
+use crate::sql::structure::{StructureOp, TableStructure};
+use tauri_plugin_dialog::DialogExt;
 use crate::sql::values::SqlCell;
 use crate::sql::{DbEvent, Emit};
 use crate::ssh::PromptAnswer;
@@ -485,4 +489,159 @@ pub async fn sql_grid_commit(
 pub fn sql_grid_discard(state: State<'_, AppState>, conn_id: String, pending_id: String) -> AppResult<()> {
     let _ = state.sql.grid_pending.take(&conn_id, &pending_id);
     Ok(())
+}
+
+/// A table's columns, constraints, indexes, triggers and DDL (S38).
+#[tauri::command]
+#[specta::specta]
+pub async fn sql_structure(
+    state: State<'_, AppState>,
+    conn_id: String,
+    schema: String,
+    table: String,
+) -> AppResult<TableStructure> {
+    state.require_unlocked()?;
+    state.sql.pg(&conn_id).await?.structure(&schema, &table).await
+}
+
+#[derive(Serialize, Type)]
+pub struct StructurePending {
+    pub id: String,
+    pub level: PendingLevel,
+    pub db_name: String,
+    pub environment: String,
+    pub statements: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+/// Turns the operations into statements and holds them for the review. Read-only databases refuse here; dropping or
+/// rewriting asks for the database's name.
+#[tauri::command]
+#[specta::specta]
+pub async fn sql_structure_prepare(
+    state: State<'_, AppState>,
+    conn_id: String,
+    schema: String,
+    table: String,
+    ops: Vec<StructureOp>,
+) -> AppResult<StructurePending> {
+    state.require_unlocked()?;
+    let db_id = state.sql.db_id(&conn_id)?;
+    let target = sql::gate_target(&state.store(), &db_id).await?;
+    if decide(target.mode, Class::Schema) == Decision::Refuse {
+        return Err(gate::read_only_error(&target.name));
+    }
+    let pg = state.sql.pg(&conn_id).await?;
+    let rows = pg.structure(&schema, &table).await?.stats.rows_estimate;
+    let (statements, warnings) = sql::structure::statements(&schema, &table, &ops, rows)?;
+    let class = statements.iter().map(|s| classify(s)).max().unwrap_or(Class::Schema);
+    let decision = decide(target.mode, class);
+    let id = state.sql.structure_pending.put(&conn_id, class, statements.clone())?;
+    Ok(StructurePending {
+        id,
+        level: if decision == Decision::Typed { PendingLevel::Typed } else { PendingLevel::Confirm },
+        db_name: target.name,
+        environment: target.environment,
+        statements,
+        warnings,
+    })
+}
+
+/// "Apply": the held statements, in one transaction, after the mode and (if dangerous) the name are checked.
+#[tauri::command]
+#[specta::specta]
+pub async fn sql_structure_commit(
+    state: State<'_, AppState>,
+    conn_id: String,
+    pending_id: String,
+    typed_name: Option<String>,
+) -> AppResult<()> {
+    state.require_unlocked()?;
+    let class = state.sql.structure_pending.peek_class(&conn_id, &pending_id)?;
+    let db_id = state.sql.db_id(&conn_id)?;
+    let target = sql::gate_target(&state.store(), &db_id).await?;
+    gate::approve(target.mode, class, &target.name, typed_name.as_deref())?;
+    let (stmts, _) = state.sql.structure_pending.take(&conn_id, &pending_id)?;
+    state.sql.pg(&conn_id).await?.structure_commit(&stmts).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn sql_structure_discard(state: State<'_, AppState>, conn_id: String, pending_id: String) -> AppResult<()> {
+    let _ = state.sql.structure_pending.take(&conn_id, &pending_id);
+    Ok(())
+}
+
+/// The plan of the statement at the cursor (or the selection). `analyze` runs it, so it only works for reads.
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::too_many_arguments)]
+pub async fn sql_explain(
+    state: State<'_, AppState>,
+    conn_id: String,
+    editor_id: String,
+    text: String,
+    mode: RunMode,
+    cursor: Option<u32>,
+    analyze: bool,
+    timeout_ms: u32,
+) -> AppResult<ExplainPlan> {
+    state.require_unlocked()?;
+    let pieces = pieces_for(&text, mode, cursor)?;
+    let piece = pieces.first().ok_or_else(|| crate::error::AppError::validation("There is nothing to explain."))?;
+    if analyze && classify(&piece.text) != Class::Read {
+        return Err(crate::error::AppError::validation(
+            "Explain analyze runs the statement, so it only works for reads. Use plain Explain for a change.",
+        ));
+    }
+    let editor = state.sql.editor(&conn_id, &editor_id).await?;
+    editor.conn.explain(&piece.text, analyze, timeout_ms.clamp(1000, 3_600_000)).await
+}
+
+#[derive(serde::Deserialize, Type)]
+pub struct TableRef {
+    pub schema: String,
+    pub table: String,
+}
+
+/// Tables and foreign keys, `steps` hops out from the tables given (S40).
+#[tauri::command]
+#[specta::specta]
+pub async fn sql_diagram(
+    state: State<'_, AppState>,
+    conn_id: String,
+    tables: Vec<TableRef>,
+    steps: u32,
+) -> AppResult<Diagram> {
+    state.require_unlocked()?;
+    let start: Vec<(String, String)> = tables.into_iter().map(|t| (t.schema, t.table)).collect();
+    state.sql.pg(&conn_id).await?.diagram(&start, steps).await
+}
+
+/// Writes a file the person picks with the system's save dialog (the diagram's SVG or PNG; later exports). The
+/// window never touches the file system: it hands Rust the bytes. Returns the path, or `None` when cancelled.
+#[tauri::command]
+#[specta::specta]
+pub async fn sql_save_export(
+    app: tauri::AppHandle,
+    suggested_name: String,
+    data: Vec<u8>,
+) -> AppResult<Option<String>> {
+    // A diagram is kilobytes; this is a ceiling against a runaway caller.
+    if data.len() > 64 * 1024 * 1024 {
+        return Err(crate::error::AppError::validation("That file is too big to export from here."));
+    }
+    let dialog_app = app.clone();
+    let name = suggested_name.replace(['/', '\\'], "-");
+    let picked = tokio::task::spawn_blocking(move || dialog_app.dialog().file().set_file_name(&name).blocking_save_file())
+        .await
+        .map_err(|e| crate::error::AppError::internal(e.to_string()))?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked
+        .into_path()
+        .map_err(|_| crate::error::AppError::validation("That location can't be used."))?;
+    std::fs::write(&path, data).map_err(|e| crate::error::AppError::internal(format!("Couldn't write the file: {e}")))?;
+    Ok(Some(path.display().to_string()))
 }

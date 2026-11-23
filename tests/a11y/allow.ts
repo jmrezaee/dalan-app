@@ -22,6 +22,24 @@ export const ALLOWED: Allowed[] = [
   },
   {
     rule: 'aria-required-children',
+    selector: 'div[role="tablist"]',
+    state: 'S38-sql-structure',
+    reason: 'The same app tab bar as in S36-sql-table.',
+  },
+  {
+    rule: 'aria-required-children',
+    selector: 'div[role="tablist"]',
+    state: 'S39-sql-explain',
+    reason: 'The same app tab bar as in S36-sql-table.',
+  },
+  {
+    rule: 'aria-required-children',
+    selector: 'div[role="tablist"]',
+    state: 'S40-sql-diagram',
+    reason: 'The same app tab bar as in S36-sql-table.',
+  },
+  {
+    rule: 'aria-required-children',
     selector: '.overflow-x-auto',
     reason: 'The tab bar is a tablist whose closable tabs sit next to their own close button. Keyboard users close a tab with the shortcut (Mod+W). Revisit with a roving-tabindex tab list and a Delete key.',
   },
