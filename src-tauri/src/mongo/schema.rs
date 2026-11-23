@@ -112,7 +112,6 @@ pub fn summarise(docs: &[Document]) -> MgSchema {
     let truncated = acc.len() > MAX_FIELDS;
     let mut fields: Vec<MgField> = acc
         .into_iter()
-        .take(MAX_FIELDS)
         .map(|(path, a)| {
             let mut types: Vec<MgType> = a.types.into_iter().map(|(n, c)| MgType { name: n.into(), count: c }).collect();
             types.sort_by(|x, y| y.count.cmp(&x.count).then(x.name.cmp(&y.name)));
@@ -121,6 +120,8 @@ pub fn summarise(docs: &[Document]) -> MgSchema {
         .collect();
     // `_id` first, then by how common the field is, then by name.
     fields.sort_by(|a, b| (b.path == "_id").cmp(&(a.path == "_id")).then(b.present.cmp(&a.present)).then(a.path.cmp(&b.path)));
+    // The most common fields are kept, not the first in alphabet.
+    fields.truncate(MAX_FIELDS);
     MgSchema { sampled: docs.len() as u32, fields, truncated }
 }
 
@@ -230,11 +231,16 @@ pub fn index_command(coll: &str, op: &MgIndexOp) -> AppResult<Parsed> {
             if !p.is_empty() {
                 spec.insert("partialFilterExpression", p);
             }
-            Ok(Parsed::Raw { class: Class::Schema, summary: format!("Create the index {label} on {coll}{}.", if *unique { " (unique: duplicates will be refused)" } else { "" }), cmd: doc! { "createIndexes": coll, "indexes": [spec] } })
+            let notes: Vec<String> = [unique.then(|| "unique: duplicates will be refused".to_string()), ttl_seconds.map(|t| format!("documents expire after {t} s")), (!partial.trim().is_empty()).then(|| "partial".to_string())].into_iter().flatten().collect();
+            Ok(Parsed::Raw { class: Class::Schema, summary: format!("Create the index {label} on {coll}{}.", if notes.is_empty() { String::new() } else { format!(" ({})", notes.join("; ")) }), cmd: doc! { "createIndexes": coll, "indexes": [spec] } })
         }
         MgIndexOp::Drop { name } => {
             if name == "_id_" {
                 return Err(AppError::validation("The _id index can't be dropped."));
+            }
+            // `*` would drop every index at once.
+            if name.trim().is_empty() || name.contains('*') {
+                return Err(AppError::validation("Name one index to drop."));
             }
             Ok(Parsed::Raw { class: Class::Dangerous, summary: format!("Drop the index {name} on {coll}. Queries that used it get slower."), cmd: doc! { "dropIndexes": coll, "index": name.clone() } })
         }
@@ -327,6 +333,8 @@ mod tests {
         assert!(index_command("o", &MgIndexOp::Create { keys: "{}".into(), name: String::new(), unique: false, sparse: false, ttl_seconds: None, partial: String::new() }).is_err());
         assert!(matches!(index_command("o", &MgIndexOp::Drop { name: "a_1".into() }).unwrap(), Parsed::Raw { class: Class::Dangerous, .. }));
         assert!(index_command("o", &MgIndexOp::Drop { name: "_id_".into() }).is_err());
+        assert!(index_command("o", &MgIndexOp::Drop { name: "*".into() }).is_err());
+        assert!(index_command("o", &MgIndexOp::Drop { name: " ".into() }).is_err());
         assert!(matches!(validation_command("o", r#"{"qty":{"$gt":0}}"#, "strict", "error").unwrap(), Parsed::Raw { class: Class::Schema, .. }));
         assert!(validation_command("o", "{}", "loose", "error").is_err());
     }

@@ -42,6 +42,19 @@ pub struct MgAggResult {
 
 const WRITES: [&str; 2] = ["$out", "$merge"];
 
+fn is_write(op: &str) -> bool {
+    WRITES.iter().any(|w| w.eq_ignore_ascii_case(op))
+}
+
+/// A write stage hiding inside another stage's argument ($facet, $lookup and $unionWith take sub-pipelines).
+fn hides_write(b: &Bson) -> bool {
+    match b {
+        Bson::Document(d) => d.iter().any(|(k, v)| is_write(k) || hides_write(v)),
+        Bson::Array(a) => a.iter().any(hides_write),
+        _ => false,
+    }
+}
+
 fn stage_doc(s: &MgStage) -> AppResult<Document> {
     if !s.op.starts_with('$') || s.op.len() < 2 || s.op.contains(char::is_whitespace) {
         return Err(AppError::validation(format!("\"{}\" isn't a stage name. Stages look like $match or $group.", s.op)));
@@ -60,10 +73,15 @@ pub fn pipeline(stages: &[MgStage], upto: Option<u32>, preview: bool) -> AppResu
         if !s.enabled {
             continue;
         }
-        if preview && WRITES.contains(&s.op.as_str()) {
+        if preview && is_write(&s.op) {
             return Ok((out, true));
         }
-        out.push(stage_doc(s)?);
+        let d = stage_doc(s)?;
+        // Only a top-level $out/$merge is a write the gate can show; one inside another stage is refused outright.
+        if !is_write(&s.op) && d.values().any(hides_write) {
+            return Err(AppError::validation(format!("The {} stage contains $out or $merge. Those are only allowed as a stage of their own, at the end.", s.op)));
+        }
+        out.push(d);
     }
     Ok((out, false))
 }
@@ -105,7 +123,7 @@ pub async fn run(c: &MongoConn, req: &MgAggRequest) -> AppResult<MgAggResult> {
 /// only a read and needs no hold (the caller uses `run`).
 pub fn write_command(req: &MgAggRequest) -> AppResult<Parsed> {
     let (stages, _) = pipeline(&req.stages, None, false)?;
-    let target = stages.iter().find_map(|d| WRITES.iter().find_map(|w| d.get(w).map(|v| (*w, v.clone()))));
+    let target = stages.iter().find_map(|d| WRITES.iter().find_map(|w| d.iter().find(|(k, _)| k.eq_ignore_ascii_case(w)).map(|(_, v)| (*w, v.clone()))));
     let Some((op, arg)) = target else {
         return Err(AppError::validation("This pipeline doesn't end in $out or $merge, so there is nothing to confirm. Run it to see the output."));
     };
@@ -124,7 +142,7 @@ pub fn view_command(db: &str, coll: &str, name: &str, stages: &[MgStage]) -> App
         return Err(AppError::validation("Give the view a name without $ and not starting with system."));
     }
     let (p, _) = pipeline(stages, None, false)?;
-    if p.iter().any(|d| WRITES.iter().any(|w| d.contains_key(*w))) {
+    if p.iter().any(|d| d.keys().any(|k| is_write(k))) {
         return Err(AppError::validation("A view can't end in $out or $merge."));
     }
     Ok(Parsed::Raw { class: Class::Schema, summary: format!("Create the view {name} on {db}.{coll} with {} stage{}.", p.len(), if p.len() == 1 { "" } else { "s" }), cmd: doc! { "create": name, "viewOn": coll, "pipeline": p } })
@@ -143,13 +161,17 @@ pub enum CodeLanguage {
 /// their types when the other program reads it.
 pub fn code(coll: &str, stages: &[MgStage], language: CodeLanguage) -> AppResult<String> {
     let (p, _) = pipeline(stages, None, false)?;
-    let json = serde_json::to_string_pretty(&Bson::Array(p.into_iter().map(Bson::Document).collect()).into_canonical_extjson()).unwrap_or_default();
+    let value = Bson::Array(p.into_iter().map(Bson::Document).collect()).into_canonical_extjson();
+    let json = serde_json::to_string_pretty(&value).unwrap_or_default();
+    // The pipeline goes into the pasted code as one quoted string (a JSON string literal is valid JS and Python), so
+    // nothing in a value can end the string or start code, and escapes mean the same thing in every language.
+    let text = serde_json::to_string(&value.to_string()).unwrap_or_default();
     let q = serde_json::to_string(coll).unwrap_or_default();
     Ok(match language {
         CodeLanguage::Json => json,
-        CodeLanguage::Mongosh => format!("db.getCollection({q}).aggregate(EJSON.parse(`\n{json}\n`)).toArray()"),
-        CodeLanguage::Node => format!("import {{ EJSON }} from \"bson\"\n\nconst pipeline = EJSON.parse(`\n{json}\n`)\nconst docs = await db.collection({q}).aggregate(pipeline).toArray()"),
-        CodeLanguage::Python => format!("from bson import json_util\n\npipeline = json_util.loads(\"\"\"\n{json}\n\"\"\")\ndocs = list(db[{q}].aggregate(pipeline))"),
+        CodeLanguage::Mongosh => format!("db.getCollection({q}).aggregate(EJSON.parse({text})).toArray()"),
+        CodeLanguage::Node => format!("import {{ EJSON }} from \"bson\"\n\nconst pipeline = EJSON.parse({text})\nconst docs = await db.collection({q}).aggregate(pipeline).toArray()"),
+        CodeLanguage::Python => format!("from bson import json_util\n\npipeline = json_util.loads({text})\ndocs = list(db[{q}].aggregate(pipeline))"),
     })
 }
 
@@ -179,6 +201,30 @@ mod tests {
         assert!(matches!(&w, Parsed::Raw { class: Class::Write, summary, .. } if summary.contains("totals")));
         assert!(view_command("d", "c", "v", &[st("$out", r#""x""#, true)]).is_err());
         assert!(matches!(view_command("d", "c", "v", &[st("$match", "{}", true)]).unwrap(), Parsed::Raw { class: Class::Schema, .. }));
+    }
+
+    #[test]
+    fn a_write_hidden_in_another_stage_is_refused_and_casing_does_not_help() {
+        let nested = [st("$facet", r#"{"a":[{"$match":{}},{"$out":"x"}]}"#, true)];
+        assert!(pipeline(&nested, None, true).unwrap_err().message.contains("$out or $merge"));
+        let lookup = [st("$lookup", r#"{"from":"c","pipeline":[{"$merge":{"into":"x"}}],"as":"j"}"#, true)];
+        assert!(pipeline(&lookup, None, false).is_err());
+        // `$Out` is a write for the gate (the server would refuse it, but the gate does not rely on that).
+        assert_eq!(pipeline(&[st("$Out", r#""x""#, true)], None, true).unwrap(), (vec![], true));
+        assert!(view_command("d", "c", "v", &[st("$MERGE", "{}", true)]).is_err());
+    }
+
+    #[test]
+    fn code_cannot_be_broken_out_of() {
+        let s = [st("$match", r#"{"note":"a`b${process.exit()}\\ \"q\" \n"}"#, true)];
+        for l in [CodeLanguage::Mongosh, CodeLanguage::Node, CodeLanguage::Python] {
+            let c = code("o\"rders", &s, l).unwrap();
+            // The text is one string literal: its parsed value is the compact pipeline, whatever it holds.
+            let lit = c.lines().find(|l| l.contains("$match")).unwrap();
+            let start = lit.find("parse(").or_else(|| lit.find("loads(")).unwrap() + lit[lit.find("parse(").or_else(|| lit.find("loads(")).unwrap()..].find('(').unwrap() + 1;
+            let parsed: String = serde_json::Deserializer::from_str(&lit[start..]).into_iter::<String>().next().unwrap().unwrap_or_else(|e| panic!("{l:?}: {e}: {lit}"));
+            assert!(parsed.contains("process.exit()"));
+        }
     }
 
     #[test]

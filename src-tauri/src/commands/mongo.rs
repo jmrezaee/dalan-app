@@ -94,6 +94,8 @@ pub async fn mg_doc_commit(state: State<'_, AppState>, conn_id: String, pending_
     let class = state.sql.mongo_pending.peek_class(&conn_id, &pending_id)?;
     gate::approve(target.mode, class, &target.name, typed_name.as_deref())?;
     let (write, _) = state.sql.mongo_pending.take(&conn_id, &pending_id)?;
+    // The mode is asked again after the hold is used up: it may have changed while the dialog was open.
+    let target = sql::gate_target(&state.store(), &db_id).await?;
     gate::approve(target.mode, class, &target.name, typed_name.as_deref())?;
     docs::run(&*state.sql.mongo(&conn_id).await?, &write).await
 }

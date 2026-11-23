@@ -50,6 +50,14 @@ watch(() => t.value.review?.pending.id, () => { showSample.value = false })
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col" :data-testid="tid(`mongo-collection-${tab.coll}`)">
+    <div role="group" aria-label="Section" class="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
+      <Button type="button" size="sm" :variant="tab.section === 'documents' ? 'secondary' : 'ghost'" :class="tab.section === 'documents' ? '' : 'text-muted'" :aria-pressed="tab.section === 'documents'" @click="tab.section = 'documents'">Documents</Button>
+      <Button type="button" size="sm" :variant="tab.section === 'aggregate' ? 'secondary' : 'ghost'" :class="tab.section === 'aggregate' ? '' : 'text-muted'" :aria-pressed="tab.section === 'aggregate'" :data-testid="tid('mongo-section-aggregate')" @click="tab.section = 'aggregate'">Aggregate</Button>
+      <Button type="button" size="sm" :variant="tab.section === 'schema' ? 'secondary' : 'ghost'" :class="tab.section === 'schema' ? '' : 'text-muted'" :aria-pressed="tab.section === 'schema'" :data-testid="tid('mongo-section-schema')" @click="store.openSchema(tab)">Schema</Button>
+    </div>
+    <MongoAggregate v-if="tab.section === 'aggregate'" :tab-key="tabKey" :tab-data="tab" />
+    <MongoSchema v-else-if="tab.section === 'schema'" :tab-key="tabKey" :tab-data="tab" />
+    <template v-if="tab.section === 'documents'">
     <form class="grid shrink-0 grid-cols-[1fr_1fr] gap-2 border-b border-border p-2 lg:grid-cols-[2fr_1fr_1fr_1fr_auto]" aria-label="Query" @submit.prevent="store.apply(tab)">
       <label class="flex flex-col gap-0.5 text-2xs text-muted">Filter
         <Input v-model="tab.filter" class="h-7 font-mono text-xs text-text" placeholder="{ &quot;status&quot;: &quot;open&quot; }" autocomplete="off" spellcheck="false" aria-label="Filter" :data-testid="tid('mongo-filter')" />
@@ -130,6 +138,8 @@ watch(() => t.value.review?.pending.id, () => { showSample.value = false })
       <Button type="button" size="icon-sm" variant="ghost" aria-label="Next page" :disabled="!tab.more || tab.loading" @click="store.nextPage(tab)"><ChevronRight class="size-4" aria-hidden="true" /></Button>
     </div>
 
+    </template>
+
     <Dialog v-model:open="editorOpen">
       <DialogContent v-if="tab.editor" class="flex h-[80vh] flex-col gap-3 sm:max-w-[720px]" :data-testid="tid('mongo-editor-dialog')">
         <DialogHeader>
@@ -159,10 +169,13 @@ watch(() => t.value.review?.pending.id, () => { showSample.value = false })
           <button type="button" class="cursor-default text-xs text-muted underline underline-offset-2 hover:text-text" :aria-expanded="showSample" @click="showSample = !showSample">{{ showSample ? 'Hide' : 'Show' }} the document as it is now</button>
           <pre v-if="showSample" class="mt-1 max-h-48 overflow-auto rounded-md border border-border bg-bg p-2 font-mono text-xs">{{ tab.review.pending.sample }}</pre>
         </div>
+        <label v-if="tab.review.pending.level === 'typed'" class="flex flex-col gap-1 text-xs text-muted">Type {{ tab.review.pending.db_name }} to confirm
+          <Input v-model="tab.review.typed" class="font-mono text-xs text-text" autocomplete="off" spellcheck="false" :data-testid="tid('mongo-typed')" @keydown.enter.prevent="store.commitReview(tab)" />
+        </label>
         <p v-if="tab.review.error" role="alert" class="text-xs text-danger">{{ tab.review.error }}</p>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <Button :disabled="tab.review.busy" :data-testid="tid('mongo-confirm')" @click="store.commitReview(tab)">Confirm</Button>
+          <Button :disabled="tab.review.busy || (tab.review.pending.level === 'typed' && tab.review.typed !== tab.review.pending.db_name)" :data-testid="tid('mongo-confirm')" @click="store.commitReview(tab)">Confirm</Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

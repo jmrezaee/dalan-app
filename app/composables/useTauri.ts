@@ -2,7 +2,7 @@
 import { Channel } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { commands } from '~/types/bindings'
-import type { MgDocOp, MgFindRequest, AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, SqlRunEvent_Serialize, RunMode, TxnAction, GridEdits_Deserialize, StructureOp_Deserialize, TableRef, ActivityView, SessionAction, ExportFormat, TransferProgress, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
+import type { CodeLanguage, MgAggRequest, MgDocOp, MgFindRequest, MgIndexOp, MgStage, AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, SqlRunEvent_Serialize, RunMode, TxnAction, GridEdits_Deserialize, StructureOp_Deserialize, TableRef, ActivityView, SessionAction, ExportFormat, TransferProgress, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -48,7 +48,17 @@ export function useTauri() {
     mgCount: (connId: string, db: string, coll: string, filter: string) => unwrap(commands.mgCount(connId, db, coll, filter)),
     mgDocGet: (connId: string, db: string, coll: string, id: string) => unwrap(commands.mgDocGet(connId, db, coll, id)),
     mgDocPrepare: (connId: string, db: string, coll: string, op: MgDocOp) => unwrap(commands.mgDocPrepare(connId, db, coll, op)),
-    mgDocCommit: (connId: string, pendingId: string) => unwrap(commands.mgDocCommit(connId, pendingId)),
+    mgDocCommit: (connId: string, pendingId: string, typedName: string | null = null) => unwrap(commands.mgDocCommit(connId, pendingId, typedName)),
+    mgAggregate: (connId: string, request: MgAggRequest) => unwrap(commands.mgAggregate(connId, request)),
+    mgAggPrepare: (connId: string, request: MgAggRequest) => unwrap(commands.mgAggPrepare(connId, request)),
+    mgViewPrepare: (connId: string, db: string, coll: string, name: string, stages: MgStage[]) => unwrap(commands.mgViewPrepare(connId, db, coll, name, stages)),
+    mgPipelineCode: (coll: string, stages: MgStage[], language: CodeLanguage) => unwrap(commands.mgPipelineCode(coll, stages, language)),
+    mgSchema: (connId: string, db: string, coll: string, sample: number) => unwrap(commands.mgSchema(connId, db, coll, sample)),
+    mgIndexes: (connId: string, db: string, coll: string) => unwrap(commands.mgIndexes(connId, db, coll)),
+    mgIndexPrepare: (connId: string, db: string, coll: string, op: MgIndexOp) => unwrap(commands.mgIndexPrepare(connId, db, coll, op)),
+    mgValidation: (connId: string, db: string, coll: string) => unwrap(commands.mgValidation(connId, db, coll)),
+    mgValidationCheck: (connId: string, db: string, coll: string, validator: string) => unwrap(commands.mgValidationCheck(connId, db, coll, validator)),
+    mgValidationPrepare: (connId: string, db: string, coll: string, validator: string, level: string, action: string) => unwrap(commands.mgValidationPrepare(connId, db, coll, validator, level, action)),
     mgDocDiscard: (connId: string, pendingId: string) => unwrap(commands.mgDocDiscard(connId, pendingId)),
     sqlObjects: (connId: string, path: string[]) => unwrap(commands.sqlObjects(connId, path)),
     sqlTableInfo: (connId: string, schema: string, table: string) => unwrap(commands.sqlTableInfo(connId, schema, table)),

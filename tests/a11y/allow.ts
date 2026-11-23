@@ -5,6 +5,18 @@ export const ALLOWED: Allowed[] = [
   {
     rule: 'aria-required-children',
     selector: 'div[role="tablist"]',
+    state: 'S45-mongo-aggregate',
+    reason: 'The same app tab bar as in S36-sql-table.',
+  },
+  {
+    rule: 'aria-required-children',
+    selector: 'div[role="tablist"]',
+    state: 'S46-mongo-schema',
+    reason: 'The same app tab bar as in S36-sql-table.',
+  },
+  {
+    rule: 'aria-required-children',
+    selector: 'div[role="tablist"]',
     state: 'S44-mongo-tree',
     reason: 'The same app tab bar as in S36-sql-table.',
   },
