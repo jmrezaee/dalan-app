@@ -2,7 +2,7 @@
 import { Channel } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { commands } from '~/types/bindings'
-import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, SqlRunEvent_Serialize, RunMode, TxnAction, GridEdits_Deserialize, StructureOp_Deserialize, TableRef, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
+import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, SqlRunEvent_Serialize, RunMode, TxnAction, GridEdits_Deserialize, StructureOp_Deserialize, TableRef, ActivityView, SessionAction, ExportFormat, TransferProgress, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -70,6 +70,34 @@ export function useTauri() {
     sqlExplain: (connId: string, editorId: string, text: string, mode: RunMode, cursor: number | null, analyze: boolean, timeoutMs: number) => unwrap(commands.sqlExplain(connId, editorId, text, mode, cursor, analyze, timeoutMs)),
     sqlDiagram: (connId: string, tables: TableRef[], steps: number) => unwrap(commands.sqlDiagram(connId, tables, steps)),
     sqlSaveExport: (suggestedName: string, data: number[]) => unwrap(commands.sqlSaveExport(suggestedName, data)),
+    sqlActivity: (connId: string, view: ActivityView) => unwrap(commands.sqlActivity(connId, view)),
+    sqlSessionPrepare: (connId: string, pid: number, action: SessionAction) => unwrap(commands.sqlSessionPrepare(connId, pid, action)),
+    sqlSessionCommit: (connId: string, pendingId: string, typedName: string | null) => unwrap(commands.sqlSessionCommit(connId, pendingId, typedName)),
+    sqlSessionDiscard: (connId: string, pendingId: string) => unwrap(commands.sqlSessionDiscard(connId, pendingId)),
+    sqlExportTable: (connId: string, transferId: string, schema: string, table: string, filter: string, format: ExportFormat, header: boolean, onProgress: (p: TransferProgress) => void) => {
+      const progress = new Channel<TransferProgress>()
+      progress.onmessage = onProgress
+      return unwrap(commands.sqlExportTable(connId, transferId, schema, table, filter, format, header, progress as never))
+    },
+    sqlTransferStop: (transferId: string) => unwrap(commands.sqlTransferStop(transferId)),
+    sqlImportPick: (connId: string) => unwrap(commands.sqlImportPick(connId)),
+    sqlImportPreview: (connId: string, schema: string, table: string, fileId: string, delimiterName: string, header: boolean) => unwrap(commands.sqlImportPreview(connId, schema, table, fileId, delimiterName, header)),
+    sqlImportPrepare: (connId: string, schema: string, table: string, fileId: string, delimiterName: string, header: boolean, mapping: (string | null)[]) => unwrap(commands.sqlImportPrepare(connId, schema, table, fileId, delimiterName, header, mapping)),
+    sqlImportCommit: (connId: string, pendingId: string) => unwrap(commands.sqlImportCommit(connId, pendingId)),
+    sqlImportDiscard: (connId: string, pendingId: string) => unwrap(commands.sqlImportDiscard(connId, pendingId)),
+    sqlBackupCheck: (connId: string) => unwrap(commands.sqlBackupCheck(connId)),
+    sqlBackupStart: (connId: string, transferId: string, onProgress: (p: TransferProgress) => void) => {
+      const progress = new Channel<TransferProgress>()
+      progress.onmessage = onProgress
+      return unwrap(commands.sqlBackupStart(connId, transferId, progress as never))
+    },
+    sqlRestorePrepare: (connId: string) => unwrap(commands.sqlRestorePrepare(connId)),
+    sqlRestoreCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, onProgress: (p: TransferProgress) => void) => {
+      const progress = new Channel<TransferProgress>()
+      progress.onmessage = onProgress
+      return unwrap(commands.sqlRestoreCommit(connId, pendingId, typedName, transferId, progress as never))
+    },
+    sqlRestoreDiscard: (connId: string, pendingId: string) => unwrap(commands.sqlRestoreDiscard(connId, pendingId)),
     sqlCancel: (connId: string, editorId: string) => unwrap(commands.sqlCancel(connId, editorId)),
     sqlEditorClose: (connId: string, editorId: string) => unwrap(commands.sqlEditorClose(connId, editorId)),
     sqlCatalog: (connId: string, refresh: boolean) => unwrap(commands.sqlCatalog(connId, refresh)),

@@ -15,6 +15,7 @@ use crate::redis::console::history_enabled;
 use crate::sql::pg::{PageRequest, SqlObject, SqlPage, SqlTableInfo};
 use crate::dbs::gate::{self, decide, strongest, Decision};
 use crate::redis::store::RedisWriteMode;
+use crate::sql::activity::{Activity, ActivityView};
 use crate::sql::classify::{classify, Class, Piece};
 use crate::sql::run::{pieces_for, HeldRun, RunMode, RunOpts, SqlCatalog, SqlRunEvent, TxnState};
 use crate::sql;
@@ -23,6 +24,8 @@ use crate::sql::explain::ExplainPlan;
 use crate::sql::grid::GridEdits;
 use crate::sql::structure::{StructureOp, TableStructure};
 use tauri_plugin_dialog::DialogExt;
+use crate::sql::backup::{self, Tool};
+use crate::sql::transfer::{ExportFormat, CsvPreview, TransferProgress};
 use crate::sql::values::SqlCell;
 use crate::sql::{DbEvent, Emit};
 use crate::ssh::PromptAnswer;
@@ -644,4 +647,457 @@ pub async fn sql_save_export(
         .map_err(|_| crate::error::AppError::validation("That location can't be used."))?;
     std::fs::write(&path, data).map_err(|e| crate::error::AppError::internal(format!("Couldn't write the file: {e}")))?;
     Ok(Some(path.display().to_string()))
+}
+
+/// The activity views (S41): tiles always, plus sessions with blocking chains, or one of the server-wide tables.
+#[tauri::command]
+#[specta::specta]
+pub async fn sql_activity(state: State<'_, AppState>, conn_id: String, view: ActivityView) -> AppResult<Activity> {
+    state.require_unlocked()?;
+    state.sql.pg(&conn_id).await?.activity(view).await
+}
+
+#[derive(Debug, Clone, Copy, serde::Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionAction {
+    Cancel,
+    End,
+}
+
+#[derive(Serialize, Type)]
+pub struct SessionPending {
+    pub id: String,
+    pub level: PendingLevel,
+    pub db_name: String,
+    pub environment: String,
+    pub pid: i32,
+    pub user: String,
+    pub state: String,
+    pub query: String,
+    pub end: bool,
+}
+
+/// Cancelling another person's query or ending their session: refused in a Read-only database, held for a
+/// confirmation, and on a production database the name must be typed.
+#[tauri::command]
+#[specta::specta]
+pub async fn sql_session_prepare(
+    state: State<'_, AppState>,
+    conn_id: String,
+    pid: i32,
+    action: SessionAction,
+) -> AppResult<SessionPending> {
+    state.require_unlocked()?;
+    let db_id = state.sql.db_id(&conn_id)?;
+    let target = sql::gate_target(&state.store(), &db_id).await?;
+    let production = target.environment == "production";
+    let class = if production { Class::Dangerous } else { Class::Write };
+    if decide(target.mode, class) == Decision::Refuse {
+        return Err(gate::read_only_error(&target.name));
+    }
+    let end = matches!(action, SessionAction::End);
+    let (user, st, query, started) = state
+        .sql
+        .pg(&conn_id)
+        .await?
+        .session_info(pid)
+        .await?
+        .ok_or_else(|| crate::error::AppError::not_found("That session is gone, or it is one of Dalan's own."))?;
+    let id = state.sql.session_pending.put(&conn_id, class, (pid, end, started))?;
+    Ok(SessionPending {
+        id,
+        level: if production { PendingLevel::Typed } else { PendingLevel::Confirm },
+        db_name: target.name,
+        environment: target.environment,
+        pid,
+        user,
+        state: st,
+        query,
+        end,
+    })
+}
+
+/// "Cancel query" / "End session": the held action, once, after the mode and (on production) the name are checked.
+/// `true` when the server did it; `false` when the session had gone.
+#[tauri::command]
+#[specta::specta]
+pub async fn sql_session_commit(
+    state: State<'_, AppState>,
+    conn_id: String,
+    pending_id: String,
+    typed_name: Option<String>,
+) -> AppResult<bool> {
+    state.require_unlocked()?;
+    let class = state.sql.session_pending.peek_class(&conn_id, &pending_id)?;
+    let db_id = state.sql.db_id(&conn_id)?;
+    let target = sql::gate_target(&state.store(), &db_id).await?;
+    gate::approve(target.mode, class, &target.name, typed_name.as_deref())?;
+    let ((pid, end, started), _) = state.sql.session_pending.take(&conn_id, &pending_id)?;
+    Ok(state.sql.pg(&conn_id).await?.signal_session(pid, end, &started).await?.unwrap_or(false))
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn sql_session_discard(state: State<'_, AppState>, conn_id: String, pending_id: String) -> AppResult<()> {
+    let _ = state.sql.session_pending.take(&conn_id, &pending_id);
+    Ok(())
+}
+
+// ---- Transfer (S43, F26)
+
+async fn pick_save(app: &tauri::AppHandle, name: String) -> AppResult<Option<std::path::PathBuf>> {
+    let dialog_app = app.clone();
+    let picked = tokio::task::spawn_blocking(move || dialog_app.dialog().file().set_file_name(&name).blocking_save_file())
+        .await
+        .map_err(|e| crate::error::AppError::internal(e.to_string()))?;
+    picked
+        .map(|p| p.into_path().map_err(|_| crate::error::AppError::validation("That location can't be used.")))
+        .transpose()
+}
+
+async fn pick_open(app: &tauri::AppHandle, title: &'static str) -> AppResult<Option<std::path::PathBuf>> {
+    let dialog_app = app.clone();
+    let picked = tokio::task::spawn_blocking(move || dialog_app.dialog().file().set_title(title).blocking_pick_file())
+        .await
+        .map_err(|e| crate::error::AppError::internal(e.to_string()))?;
+    picked
+        .map(|p| p.into_path().map_err(|_| crate::error::AppError::validation("That location can't be used.")))
+        .transpose()
+}
+
+#[derive(Serialize, Type)]
+pub struct TransferDone {
+    pub path: String,
+    pub rows: f64,
+    pub bytes: f64,
+}
+
+/// Writes a table (or the rows matching `filter`) to a file the person picks. Rows stream to the file; progress
+/// arrives on `progress`. `None` when the save dialog was cancelled.
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::too_many_arguments)]
+pub async fn sql_export_table(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    conn_id: String,
+    transfer_id: String,
+    schema: String,
+    table: String,
+    filter: String,
+    format: ExportFormat,
+    header: bool,
+    progress: Channel<TransferProgress>,
+) -> AppResult<Option<TransferDone>> {
+    state.require_unlocked()?;
+    let pg = state.sql.pg(&conn_id).await?;
+    let Some(path) = pick_save(&app, format!("{table}.{}", format.extension())).await? else {
+        return Ok(None);
+    };
+    let stop = state.sql.begin_transfer(&transfer_id);
+    let file = std::fs::File::create(&path).map_err(|e| crate::error::AppError::validation(format!("Couldn't create that file: {e}")))?;
+    let mut out = std::io::BufWriter::new(file);
+    let result = pg
+        .export_table(&schema, &table, &filter, format, header, &mut out, &|rows, bytes| {
+            let _ = progress.send(TransferProgress { rows, bytes });
+        }, &stop)
+        .await;
+    state.sql.end_transfer(&transfer_id);
+    match result {
+        Ok((rows, bytes)) => Ok(Some(TransferDone { path: path.display().to_string(), rows, bytes })),
+        Err(e) => {
+            drop(out);
+            let _ = std::fs::remove_file(&path);
+            Err(e)
+        }
+    }
+}
+
+/// Stop for an export, a backup or a restore.
+#[tauri::command]
+#[specta::specta]
+pub fn sql_transfer_stop(state: State<'_, AppState>, transfer_id: String) -> AppResult<()> {
+    state.sql.stop_transfer(&transfer_id);
+    Ok(())
+}
+
+#[derive(Serialize, Type)]
+pub struct CsvFile {
+    /// What the window sends back to choose this file; the path stays in Rust.
+    pub id: String,
+    pub name: String,
+}
+
+/// The open-file dialog for an import. Rust keeps the path; the window only shows the name.
+#[tauri::command]
+#[specta::specta]
+pub async fn sql_import_pick(app: tauri::AppHandle, state: State<'_, AppState>, conn_id: String) -> AppResult<Option<CsvFile>> {
+    state.require_unlocked()?;
+    Ok(pick_open(&app, "Import a CSV").await?.map(|p| {
+        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        CsvFile { id: state.sql.put_file(&conn_id, p), name }
+    }))
+}
+
+fn delimiter(d: &str) -> char {
+    match d {
+        "tab" => '\t',
+        ";" => ';',
+        "|" => '|',
+        _ => ',',
+    }
+}
+
+/// The file's columns, its first rows and how they line up with the table's columns.
+#[tauri::command]
+#[specta::specta]
+pub async fn sql_import_preview(
+    state: State<'_, AppState>,
+    conn_id: String,
+    schema: String,
+    table: String,
+    file_id: String,
+    delimiter_name: String,
+    header: bool,
+) -> AppResult<CsvPreview> {
+    state.require_unlocked()?;
+    let path = state.sql.file(&conn_id, &file_id)?;
+    let text = tokio::task::spawn_blocking(move || crate::sql::transfer::read_limited(&path)).await.map_err(|e| crate::error::AppError::internal(e.to_string()))??;
+    state.sql.pg(&conn_id).await?.import_preview(&schema, &table, &text, delimiter(&delimiter_name), header).await
+}
+
+#[derive(Serialize, Type)]
+pub struct CsvImportPending {
+    pub id: String,
+    pub db_name: String,
+    pub environment: String,
+    pub rows: f64,
+    pub statement: String,
+}
+
+/// Maps the file onto the table and holds the load for the confirmation. Read-only databases refuse.
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::too_many_arguments)]
+pub async fn sql_import_prepare(
+    state: State<'_, AppState>,
+    conn_id: String,
+    schema: String,
+    table: String,
+    file_id: String,
+    delimiter_name: String,
+    header: bool,
+    mapping: Vec<Option<String>>,
+) -> AppResult<CsvImportPending> {
+    state.require_unlocked()?;
+    let db_id = state.sql.db_id(&conn_id)?;
+    let target = sql::gate_target(&state.store(), &db_id).await?;
+    if decide(target.mode, Class::Write) == Decision::Refuse {
+        return Err(gate::read_only_error(&target.name));
+    }
+    let path = state.sql.file(&conn_id, &file_id)?;
+    let text = tokio::task::spawn_blocking(move || crate::sql::transfer::read_limited(&path)).await.map_err(|e| crate::error::AppError::internal(e.to_string()))??;
+    let plan = state.sql.pg(&conn_id).await?.import_plan(&schema, &table, &text, delimiter(&delimiter_name), header, &mapping).await?;
+    let (rows, statement) = (plan.rows as f64, plan.statement.clone());
+    let id = state.sql.import_pending.put(&conn_id, Class::Write, plan)?;
+    Ok(CsvImportPending { id, db_name: target.name, environment: target.environment, rows, statement })
+}
+
+/// Loads what `sql_import_prepare` held, in one transaction, after the mode is asked again. Returns the rows loaded.
+#[tauri::command]
+#[specta::specta]
+pub async fn sql_import_commit(state: State<'_, AppState>, conn_id: String, pending_id: String) -> AppResult<f64> {
+    state.require_unlocked()?;
+    let class = state.sql.import_pending.peek_class(&conn_id, &pending_id)?;
+    let db_id = state.sql.db_id(&conn_id)?;
+    let target = sql::gate_target(&state.store(), &db_id).await?;
+    gate::approve(target.mode, class, &target.name, None)?;
+    let (plan, _) = state.sql.import_pending.take(&conn_id, &pending_id)?;
+    Ok(state.sql.pg(&conn_id).await?.import_commit(&plan).await? as f64)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn sql_import_discard(state: State<'_, AppState>, conn_id: String, pending_id: String) -> AppResult<()> {
+    let _ = state.sql.import_pending.take(&conn_id, &pending_id);
+    Ok(())
+}
+
+#[derive(Serialize, Type)]
+pub struct BackupInfo {
+    pub tool: String,
+    pub runs_on: String,
+    pub version: Option<String>,
+    /// Why it can't run, in words (tool missing, engine not supported yet).
+    pub problem: Option<String>,
+}
+
+/// Which dump tool would run, where, and its version (S43's "Tool on db-primary").
+#[tauri::command]
+#[specta::specta]
+pub async fn sql_backup_check(state: State<'_, AppState>, conn_id: String) -> AppResult<BackupInfo> {
+    state.require_unlocked()?;
+    let db_id = state.sql.db_id(&conn_id)?;
+    let cfg = sql::load(&state.store(), &db_id).await?;
+    let ssh = state.sql.ssh(&conn_id).await?;
+    let runs_on = backup::runs_on(ssh.as_deref());
+    let tool = match backup::tool_name(cfg.engine, Tool::Dump) {
+        Ok(t) => t,
+        Err(e) => return Ok(BackupInfo { tool: String::new(), runs_on, version: None, problem: Some(e.message) }),
+    };
+    Ok(match backup::tool_version(ssh.as_deref(), tool).await {
+        Ok(v) => BackupInfo { tool: tool.into(), runs_on, version: Some(v), problem: None },
+        Err(e) => BackupInfo { tool: tool.into(), runs_on, version: None, problem: Some(e.message) },
+    })
+}
+
+/// Runs the dump tool and streams its output to a file the person picks. `None` when the dialog was cancelled.
+#[tauri::command]
+#[specta::specta]
+pub async fn sql_backup_start(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    conn_id: String,
+    transfer_id: String,
+    progress: Channel<TransferProgress>,
+) -> AppResult<Option<TransferDone>> {
+    state.require_unlocked()?;
+    let db_id = state.sql.db_id(&conn_id)?;
+    let cfg = sql::load(&state.store(), &db_id).await?;
+    backup::tool_name(cfg.engine, Tool::Dump)?;
+    let ssh = state.sql.ssh(&conn_id).await?;
+    let name = format!("{}-{}.dump", cfg.database.clone().unwrap_or_else(|| cfg.name.clone()), chrono_free_date());
+    let Some(path) = pick_save(&app, name).await? else {
+        return Ok(None);
+    };
+    let stop = state.sql.begin_transfer(&transfer_id);
+    let file = std::fs::File::create(&path).map_err(|e| crate::error::AppError::validation(format!("Couldn't create that file: {e}")))?;
+    let mut out = std::io::BufWriter::new(file);
+    let result = backup::run(backup::Run {
+        cfg: &cfg,
+        ssh: ssh.as_deref(),
+        tool: Tool::Dump,
+        stdout: Some(&mut out),
+        stdin_file: None,
+        progress: &|bytes| {
+            let _ = progress.send(TransferProgress { rows: 0.0, bytes });
+        },
+        log: &|l| log::debug!("pg_dump: {l}"),
+        stop: &stop,
+    })
+    .await;
+    state.sql.end_transfer(&transfer_id);
+    drop(out);
+    match result {
+        Ok(()) => {
+            let bytes = std::fs::metadata(&path).map(|m| m.len() as f64).unwrap_or(0.0);
+            Ok(Some(TransferDone { path: path.display().to_string(), rows: 0.0, bytes }))
+        }
+        Err(e) => {
+            // A dump that did not finish is not a backup: it goes.
+            let _ = std::fs::remove_file(&path);
+            Err(e)
+        }
+    }
+}
+
+/// Today as YYYY-MM-DD in UTC, without a date crate.
+fn chrono_free_date() -> String {
+    let days = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) / 86_400) as i64;
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+#[derive(Serialize, Type)]
+pub struct RestorePending {
+    pub id: String,
+    pub db_name: String,
+    pub environment: String,
+    pub file_name: String,
+    pub file_bytes: f64,
+    pub runs_on: String,
+}
+
+/// Picks a dump file and holds the restore. Always typed; refused in Read-only, and on a production database unless it
+/// has been switched to Open (which needs the master password).
+#[tauri::command]
+#[specta::specta]
+pub async fn sql_restore_prepare(app: tauri::AppHandle, state: State<'_, AppState>, conn_id: String) -> AppResult<Option<RestorePending>> {
+    state.require_unlocked()?;
+    let db_id = state.sql.db_id(&conn_id)?;
+    let target = sql::gate_target(&state.store(), &db_id).await?;
+    if target.mode == RedisWriteMode::ReadOnly {
+        return Err(gate::read_only_error(&target.name));
+    }
+    if target.environment == "production" && target.mode != RedisWriteMode::Open {
+        return Err(crate::error::AppError::new(
+            crate::error::ErrorCode::DbReadOnlyMode,
+            format!("{} is a production database. To restore into it, switch it to Open first (that needs the master password).", target.name),
+        ));
+    }
+    let cfg = sql::load(&state.store(), &db_id).await?;
+    backup::tool_name(cfg.engine, Tool::Restore)?;
+    let Some(path) = pick_open(&app, "Restore from a dump").await? else {
+        return Ok(None);
+    };
+    let ssh = state.sql.ssh(&conn_id).await?;
+    let file_bytes = std::fs::metadata(&path).map(|m| m.len() as f64).map_err(|e| crate::error::AppError::validation(format!("Couldn't read that file: {e}")))?;
+    let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let id = state.sql.restore_pending.put(&conn_id, Class::Dangerous, path)?;
+    Ok(Some(RestorePending { id, db_name: target.name, environment: target.environment, file_name, file_bytes, runs_on: backup::runs_on(ssh.as_deref()) }))
+}
+
+/// Runs the restore tool on the held file after the database's exact name is typed and the mode asked again.
+#[tauri::command]
+#[specta::specta]
+pub async fn sql_restore_commit(
+    state: State<'_, AppState>,
+    conn_id: String,
+    pending_id: String,
+    typed_name: Option<String>,
+    transfer_id: String,
+    progress: Channel<TransferProgress>,
+) -> AppResult<()> {
+    state.require_unlocked()?;
+    let class = state.sql.restore_pending.peek_class(&conn_id, &pending_id)?;
+    let db_id = state.sql.db_id(&conn_id)?;
+    let target = sql::gate_target(&state.store(), &db_id).await?;
+    if target.environment == "production" && target.mode != RedisWriteMode::Open {
+        return Err(gate::read_only_error(&target.name));
+    }
+    gate::approve(target.mode, class, &target.name, typed_name.as_deref())?;
+    let (path, _) = state.sql.restore_pending.take(&conn_id, &pending_id)?;
+    let cfg = sql::load(&state.store(), &db_id).await?;
+    let ssh = state.sql.ssh(&conn_id).await?;
+    let stop = state.sql.begin_transfer(&transfer_id);
+    let result = backup::run(backup::Run {
+        cfg: &cfg,
+        ssh: ssh.as_deref(),
+        tool: Tool::Restore,
+        stdout: None,
+        stdin_file: Some(&path),
+        progress: &|bytes| {
+            let _ = progress.send(TransferProgress { rows: 0.0, bytes });
+        },
+        log: &|l| log::debug!("pg_restore: {l}"),
+        stop: &stop,
+    })
+    .await;
+    state.sql.end_transfer(&transfer_id);
+    result
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn sql_restore_discard(state: State<'_, AppState>, conn_id: String, pending_id: String) -> AppResult<()> {
+    let _ = state.sql.restore_pending.take(&conn_id, &pending_id);
+    Ok(())
 }

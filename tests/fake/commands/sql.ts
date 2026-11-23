@@ -4,7 +4,7 @@
 import { fail, type Handlers } from '../types'
 import type { SqlCell_Serialize as Cell_Serialize, SqlColumn_Serialize, SqlTableInfo_Serialize } from '../../../app/types/bindings'
 
-type Keys = 'dbOpen' | 'dbRespond' | 'dbClose' | 'sqlObjects' | 'sqlTableInfo' | 'sqlTablePage' | 'sqlCount' | 'sqlCell' | 'sqlStructure' | 'sqlStructurePrepare' | 'sqlStructureCommit' | 'sqlStructureDiscard' | 'sqlExplain' | 'sqlDiagram' | 'sqlSaveExport' | 'sqlRun' | 'sqlRunCommit' | 'sqlRunDiscard' | 'sqlTxn' | 'sqlGridPrepare' | 'sqlGridCommit' | 'sqlGridDiscard' | 'sqlCancel' | 'sqlEditorClose' | 'sqlCatalog' | 'sqlFormat' | 'sqlHistory' | 'sqlHistoryClear'
+type Keys = 'dbOpen' | 'dbRespond' | 'dbClose' | 'sqlObjects' | 'sqlTableInfo' | 'sqlTablePage' | 'sqlCount' | 'sqlCell' | 'sqlStructure' | 'sqlStructurePrepare' | 'sqlStructureCommit' | 'sqlStructureDiscard' | 'sqlExplain' | 'sqlDiagram' | 'sqlSaveExport' | 'sqlActivity' | 'sqlSessionPrepare' | 'sqlSessionCommit' | 'sqlSessionDiscard' | 'sqlExportTable' | 'sqlTransferStop' | 'sqlImportPick' | 'sqlImportPreview' | 'sqlImportPrepare' | 'sqlImportCommit' | 'sqlImportDiscard' | 'sqlBackupCheck' | 'sqlBackupStart' | 'sqlRestorePrepare' | 'sqlRestoreCommit' | 'sqlRestoreDiscard' | 'sqlRun' | 'sqlRunCommit' | 'sqlRunDiscard' | 'sqlTxn' | 'sqlGridPrepare' | 'sqlGridCommit' | 'sqlGridDiscard' | 'sqlCancel' | 'sqlEditorClose' | 'sqlCatalog' | 'sqlFormat' | 'sqlHistory' | 'sqlHistoryClear'
 
 const col = (name: string, type_name: string, kind: SqlColumn_Serialize['kind'], pk: number | null = null, nullable = true): SqlColumn_Serialize =>
   ({ name, type_name, kind, nullable: pk === null && nullable, default: null, pk_position: pk })
@@ -82,6 +82,20 @@ function opSql(schema: string, tname: string, o: any) {
   }
 }
 const extraIndexes = new Map<string, { name: string, definition: string, unique: boolean }[]>()
+
+// ---- Activity (D6): a few made-up sessions; 18290 holds a lock that 18342 waits for.
+const sessions = [
+  { pid: 18342, user: 'api', application: 'api', state: 'active', age_s: 41, wait: 'Lock transactionid', query: 'update payments set state = \'settled\' where order_id = $1', blocked_by: [18290], mine: false },
+  { pid: 18290, user: 'worker', application: 'worker', state: 'idle in transaction', age_s: 252, wait: 'Client', query: 'select * from payments where order_id = 5511 for update', blocked_by: [], mine: false },
+  { pid: 18298, user: 'api', application: 'api', state: 'idle', age_s: 2, wait: '', query: 'select 1', blocked_by: [], mine: false },
+  { pid: 18400, user: 'reporting', application: 'bi', state: 'idle', age_s: 600, wait: '', query: 'select 2', blocked_by: [], mine: false },
+  { pid: 18377, user: 'app', application: 'Dalan', state: 'active', age_s: 0, wait: '', query: 'select pid from pg_stat_activity', blocked_by: [], mine: true },
+]
+let xacts = 1_000_000
+const sessionHeld = new Map<string, { pid: number, end: boolean, typed: boolean }>()
+const exportsDone: string[] = []
+const importHeld = new Map<string, number>()
+const restoreHeld = new Map<string, boolean>()
 
 const table = (name: string) => TABLES[name] ?? fail('not_found', `There is no table public.${name} (it may have been dropped).`)
 const cell = (c: SqlColumn_Serialize, v: string | null): Cell_Serialize => (v === null ? { kind: 'null', v: null, cut: false } : { kind: c.kind, v, cut: false })
@@ -167,6 +181,113 @@ async function runPieces(a: any, ch: number, send: (c: number, m: unknown) => vo
 }
 
 export const sql: Pick<Handlers, Keys> = {
+  sqlActivity: (a) => {
+    xacts += 500
+    const tiles = { connections: 86, max_connections: 200, active: 7, waiting: 1, transactions_total: xacts, cache_hit_pct: 99.4, replicas: 2, replication_lag_s: 0.3, db_bytes: 41 * 2 ** 30 }
+    const chain = sessions.filter(x => x.blocked_by.length)
+    const link = (x: typeof sessions[number]) => ({ pid: x.pid, user: x.user, state: x.state, age_s: x.age_s, query: x.query })
+    const chains = chain.length ? [{ root: link(sessions.find(x => x.pid === chain[0]!.blocked_by[0])!), waiting: chain.map(link) }] : []
+    const tables: Record<string, { columns: string[], rows: string[][] }> = {
+      locks: { columns: ['PID', 'User', 'Type', 'Relation', 'Mode', 'Granted'], rows: [['18290', 'worker', 'relation', 'payments', 'RowShareLock', 'true'], ['18342', 'api', 'transactionid', '', 'ShareLock', 'false']] },
+      slow: { columns: ['PID', 'User', 'Running for', 'Query'], rows: [['18342', 'api', '00:00:41', 'update payments …']] },
+      tables: { columns: ['Table', 'Rows', 'Size', 'Seq scans', 'Index scans', 'Dead rows', 'Last vacuum'], rows: [['public.orders', '1200', '96 kB', '3', '40', '0', 'never']] },
+      roles: { columns: ['Role', 'Rights', 'Login', 'Connection limit', 'Sessions'], rows: [['app', '', 'login', '-1', '4']] },
+      replication: { columns: ['Replica', 'Address', 'State', 'Sync', 'Replay lag'], rows: [['replica1', '10.0.0.7', 'streaming', 'async', '00:00:00.3']] },
+    }
+    return { tiles, sessions: a.view === 'sessions' ? sessions : [], chains: a.view === 'sessions' ? chains : [], table: a.view === 'sessions' ? null : tables[a.view]! }
+  },
+  sqlSessionPrepare: (a, { m }) => {
+    const c = m.sqlConns.get(a.connId)
+    const db = m.dbs.find(d => d.id === c?.db)
+    if (!db) fail('not_found', 'That database connection is closed.')
+    if (db.write_mode === 'read_only') fail('db_read_only_mode', `${db.name} is read-only in Dalan. Nothing was sent.`)
+    const x = sessions.find(s => s.pid === a.pid && !s.mine)
+    if (!x) fail('not_found', 'That session is gone, or it is one of Dalan\'s own.')
+    const typed = db.environment === 'production'
+    const id = `sess-${sessionHeld.size + 1}-${Date.now()}`
+    sessionHeld.set(id, { pid: a.pid, end: a.action === 'end', typed })
+    return { id, level: typed ? 'typed' : 'confirm', db_name: db.name, environment: db.environment, pid: a.pid, user: x.user, state: x.state, query: x.query, end: a.action === 'end' }
+  },
+  sqlSessionCommit: (a, { m }) => {
+    const h = sessionHeld.get(a.pendingId)
+    if (!h) fail('db_confirm_needed', 'That confirmation was already used or isn\'t for this tab. Nothing was sent.')
+    const db = m.dbs.find(d => d.id === m.sqlConns.get(a.connId)!.db)!
+    if (h.typed && a.typedName !== db.name) fail('db_confirm_needed', 'The name doesn\'t match the database\'s name. Nothing was sent.')
+    sessionHeld.delete(a.pendingId)
+    const i = sessions.findIndex(s => s.pid === h.pid)
+    if (i < 0) return false
+    if (h.end) {
+      sessions.splice(i, 1)
+      for (const s of sessions) s.blocked_by = s.blocked_by.filter(p => p !== h.pid)
+    }
+    else sessions[i]!.query = ''
+    return true
+  },
+  sqlSessionDiscard: (a) => {
+    sessionHeld.delete(a.pendingId)
+    return null
+  },
+  sqlExportTable: (a, { channel, send, tag }) => {
+    const ch = channel(a.progress)
+    const rows = TABLES[a.table]?.rows().length ?? 0
+    send(ch, { rows: Math.floor(rows / 2), bytes: 1024 })
+    tag(`export:${a.table}.${a.format}`)
+    exportsDone.push(a.table)
+    return { path: `/tmp/${a.table}.${a.format}`, rows, bytes: rows * 20 }
+  },
+  sqlTransferStop: () => null,
+  sqlImportPick: () => ({ id: 'file-1', name: 'orders-nov.csv' }),
+  sqlImportPreview: (a) => {
+    const cols = TABLES[a.table]?.cols ?? []
+    const fileCols = ['id', 'who', 'name', 'note']
+    return { file_columns: fileCols, sample: [['1', 'Ada', 'x', 'y']], total_rows: 3, table_columns: cols.map(c => ({ name: c.name, type_name: c.type_name, generated: false })), suggested: fileCols.map(f => cols.find(c => c.name === f)?.name ?? null) }
+  },
+  sqlImportPrepare: (a, { m }) => {
+    const c = m.sqlConns.get(a.connId)
+    const db = m.dbs.find(d => d.id === c!.db)!
+    if (db.write_mode === 'read_only') fail('db_read_only_mode', `${db.name} is read-only in Dalan. Nothing was sent.`)
+    const mapped = a.mapping.filter(Boolean)
+    if (!mapped.length) fail('validation', 'Map at least one column.')
+    const id = `imp-${importHeld.size + 1}-${Date.now()}`
+    importHeld.set(id, 3)
+    return { id, db_name: db.name, environment: db.environment, rows: 3, statement: `COPY "${a.schema}"."${a.table}" (${mapped.map((x: string) => `"${x}"`).join(', ')}) FROM STDIN WITH (FORMAT csv)` }
+  },
+  sqlImportCommit: (a) => {
+    const n = importHeld.get(a.pendingId)
+    if (n === undefined) fail('db_confirm_needed', 'That confirmation was already used or isn\'t for this tab. Nothing was sent.')
+    importHeld.delete(a.pendingId)
+    return n
+  },
+  sqlImportDiscard: (a) => {
+    importHeld.delete(a.pendingId)
+    return null
+  },
+  sqlBackupCheck: () => ({ tool: 'pg_dump', runs_on: 'db-primary', version: 'pg_dump (PostgreSQL) 16.4', problem: null }),
+  sqlBackupStart: (a, { channel, send, tag }) => {
+    send(channel(a.progress), { rows: 0, bytes: 5 * 2 ** 20 })
+    tag('backup:app.dump')
+    return { path: '/tmp/app-2026-11-24.dump', rows: 0, bytes: 5 * 2 ** 20 }
+  },
+  sqlRestorePrepare: (a, { m }) => {
+    const db = m.dbs.find(d => d.id === m.sqlConns.get(a.connId)!.db)!
+    if (db.write_mode === 'read_only') fail('db_read_only_mode', `${db.name} is read-only in Dalan. Nothing was sent.`)
+    if (db.environment === 'production' && db.write_mode !== 'open') fail('db_read_only_mode', `${db.name} is a production database. To restore into it, switch it to Open first (that needs the master password).`)
+    const id = `rest-${restoreHeld.size + 1}-${Date.now()}`
+    restoreHeld.set(id, true)
+    return { id, db_name: db.name, environment: db.environment, file_name: 'app-2026-11-22.dump', file_bytes: 5 * 2 ** 20, runs_on: 'db-primary' }
+  },
+  sqlRestoreCommit: (a, { m, tag }) => {
+    if (!restoreHeld.has(a.pendingId)) fail('db_confirm_needed', 'That confirmation was already used or isn\'t for this tab. Nothing was sent.')
+    const db = m.dbs.find(d => d.id === m.sqlConns.get(a.connId)!.db)!
+    if (a.typedName !== db.name) fail('db_confirm_needed', 'The name doesn\'t match the database\'s name. Nothing was sent.')
+    restoreHeld.delete(a.pendingId)
+    tag('restore:app-2026-11-22.dump')
+    return null
+  },
+  sqlRestoreDiscard: (a) => {
+    restoreHeld.delete(a.pendingId)
+    return null
+  },
   sqlStructure: (a) => {
     const t = table(a.table)
     const pk = t.cols.filter(c => c.pk_position).map(c => c.name)

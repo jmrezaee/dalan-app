@@ -126,7 +126,7 @@ pub struct SqlCatalog {
     pub tables: Vec<CatalogTable>,
 }
 
-fn kind_of(t: &PgType) -> CellKind {
+pub(super) fn kind_of(t: &PgType) -> CellKind {
     match t.kind() {
         Kind::Array(_) => CellKind::Array,
         Kind::Enum(_) => CellKind::Enum,

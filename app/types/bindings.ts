@@ -94,6 +94,47 @@ export const commands = {
 	 *  window never touches the file system: it hands Rust the bytes. Returns the path, or `None` when cancelled.
 	 */
 	sqlSaveExport: (suggestedName: string, data: number[]) => typedError<string | null, AppError>(__TAURI_INVOKE("sql_save_export", { suggestedName, data })),
+	/**  The activity views (S41): tiles always, plus sessions with blocking chains, or one of the server-wide tables. */
+	sqlActivity: (connId: string, view: ActivityView) => typedError<Activity_Serialize, AppError>(__TAURI_INVOKE("sql_activity", { connId, view })),
+	/**
+	 *  Cancelling another person's query or ending their session: refused in a Read-only database, held for a
+	 *  confirmation, and on a production database the name must be typed.
+	 */
+	sqlSessionPrepare: (connId: string, pid: number, action: SessionAction) => typedError<SessionPending, AppError>(__TAURI_INVOKE("sql_session_prepare", { connId, pid, action })),
+	/**
+	 *  "Cancel query" / "End session": the held action, once, after the mode and (on production) the name are checked.
+	 *  `true` when the server did it; `false` when the session had gone.
+	 */
+	sqlSessionCommit: (connId: string, pendingId: string, typedName: string | null) => typedError<boolean, AppError>(__TAURI_INVOKE("sql_session_commit", { connId, pendingId, typedName })),
+	sqlSessionDiscard: (connId: string, pendingId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_session_discard", { connId, pendingId })),
+	/**
+	 *  Writes a table (or the rows matching `filter`) to a file the person picks. Rows stream to the file; progress
+	 *  arrives on `progress`. `None` when the save dialog was cancelled.
+	 */
+	sqlExportTable: (connId: string, transferId: string, schema: string, table: string, filter: string, format: ExportFormat, header: boolean, progress: Channel<TransferProgress>) => typedError<TransferDone | null, AppError>(__TAURI_INVOKE("sql_export_table", { connId, transferId, schema, table, filter, format, header, progress })),
+	/**  Stop for an export, a backup or a restore. */
+	sqlTransferStop: (transferId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_transfer_stop", { transferId })),
+	/**  The open-file dialog for an import. Rust keeps the path; the window only shows the name. */
+	sqlImportPick: (connId: string) => typedError<CsvFile | null, AppError>(__TAURI_INVOKE("sql_import_pick", { connId })),
+	/**  The file's columns, its first rows and how they line up with the table's columns. */
+	sqlImportPreview: (connId: string, schema: string, table: string, fileId: string, delimiterName: string, header: boolean) => typedError<CsvPreview, AppError>(__TAURI_INVOKE("sql_import_preview", { connId, schema, table, fileId, delimiterName, header })),
+	/**  Maps the file onto the table and holds the load for the confirmation. Read-only databases refuse. */
+	sqlImportPrepare: (connId: string, schema: string, table: string, fileId: string, delimiterName: string, header: boolean, mapping: (string | null)[]) => typedError<CsvImportPending, AppError>(__TAURI_INVOKE("sql_import_prepare", { connId, schema, table, fileId, delimiterName, header, mapping })),
+	/**  Loads what `sql_import_prepare` held, in one transaction, after the mode is asked again. Returns the rows loaded. */
+	sqlImportCommit: (connId: string, pendingId: string) => typedError<number | null, AppError>(__TAURI_INVOKE("sql_import_commit", { connId, pendingId })),
+	sqlImportDiscard: (connId: string, pendingId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_import_discard", { connId, pendingId })),
+	/**  Which dump tool would run, where, and its version (S43's "Tool on db-primary"). */
+	sqlBackupCheck: (connId: string) => typedError<BackupInfo_Serialize, AppError>(__TAURI_INVOKE("sql_backup_check", { connId })),
+	/**  Runs the dump tool and streams its output to a file the person picks. `None` when the dialog was cancelled. */
+	sqlBackupStart: (connId: string, transferId: string, progress: Channel<TransferProgress>) => typedError<TransferDone | null, AppError>(__TAURI_INVOKE("sql_backup_start", { connId, transferId, progress })),
+	/**
+	 *  Picks a dump file and holds the restore. Always typed; refused in Read-only, and on a production database unless it
+	 *  has been switched to Open (which needs the master password).
+	 */
+	sqlRestorePrepare: (connId: string) => typedError<RestorePending | null, AppError>(__TAURI_INVOKE("sql_restore_prepare", { connId })),
+	/**  Runs the restore tool on the held file after the database's exact name is typed and the mode asked again. */
+	sqlRestoreCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, progress: Channel<TransferProgress>) => typedError<null, AppError>(__TAURI_INVOKE("sql_restore_commit", { connId, pendingId, typedName, transferId, progress })),
+	sqlRestoreDiscard: (connId: string, pendingId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_restore_discard", { connId, pendingId })),
 	/**  Stop: the running statement is cancelled by the server (a second connection), and no further statement starts. */
 	sqlCancel: (connId: string, editorId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_cancel", { connId, editorId })),
 	/**  The editor tab closed. */
@@ -366,6 +407,59 @@ export const events = {
 };
 
 /* Types */
+export type Activity = Activity_Serialize | Activity_Deserialize;
+
+export type ActivityTable = {
+	columns: string[],
+	rows: string[][],
+};
+
+export type ActivityTiles = ActivityTiles_Serialize | ActivityTiles_Deserialize;
+
+export type ActivityTiles_Deserialize = {
+	connections: number,
+	max_connections: number,
+	active: number,
+	waiting: number,
+	/**  Commits plus rollbacks so far; the window turns two readings into a rate. */
+	transactions_total: number | null,
+	cache_hit_pct?: number | null,
+	replicas: number,
+	replication_lag_s?: number | null,
+	db_bytes: number | null,
+};
+
+export type ActivityTiles_Serialize = {
+	connections: number,
+	max_connections: number,
+	active: number,
+	waiting: number,
+	/**  Commits plus rollbacks so far; the window turns two readings into a rate. */
+	transactions_total: number | null,
+	cache_hit_pct: number | null,
+	replicas: number,
+	replication_lag_s: number | null,
+	db_bytes: number | null,
+};
+
+export type ActivityView = "sessions" | "locks" | "slow" | "tables" | "roles" | "replication";
+
+export type Activity_Deserialize = {
+	tiles: ActivityTiles_Deserialize,
+	sessions: SessionRow[],
+	chains: BlockingChain[],
+	/**  For every view but Sessions. */
+	table?: ActivityTable | null,
+};
+
+export type Activity_Serialize = {
+	tiles: ActivityTiles_Serialize,
+	sessions: SessionRow[],
+	chains: BlockingChain[],
+	/**  For every view but Sessions. */
+	table: ActivityTable | null,
+};
+
 /**  `kind`: `inherit`, `on` or `off`. */
 export type AgentChoice = {
 	kind: string,
@@ -437,6 +531,30 @@ export type AutoLockWarning = {
 	seconds_left: number,
 };
 
+export type BackupInfo = BackupInfo_Serialize | BackupInfo_Deserialize;
+
+export type BackupInfo_Deserialize = {
+	tool: string,
+	runs_on: string,
+	version?: string | null,
+	/**  Why it can't run, in words (tool missing, engine not supported yet). */
+	problem?: string | null,
+};
+
+export type BackupInfo_Serialize = {
+	tool: string,
+	runs_on: string,
+	version: string | null,
+	/**  Why it can't run, in words (tool missing, engine not supported yet). */
+	problem: string | null,
+};
+
+/**  One session that blocks others, and everyone stuck behind it (directly or through another waiter). */
+export type BlockingChain = {
+	root: ChainLink,
+	waiting: ChainLink[],
+};
+
 export type CatalogTable = {
 	schema: string,
 	name: string,
@@ -461,10 +579,48 @@ export type CellChange_Serialize = {
 
 export type CellKind = "null" | "bool" | "int" | "decimal" | "float" | "text" | "bytes" | "json" | "datetime" | "array" | "enum" | "uuid" | "interval" | "unknown";
 
+export type ChainLink = {
+	pid: number,
+	user: string,
+	state: string,
+	age_s: number | null,
+	query: string,
+};
+
 export type Choice = "replace" | "keep_both" | "skip";
 
 /**  Ordered by how much care a statement needs: `Read < Write < Schema < Dangerous`. */
 export type Class = "read" | "write" | "schema" | "dangerous";
+
+export type CsvColumn = {
+	name: string,
+	type_name: string,
+	/**  Identity and generated columns are filled by the server and can't be mapped to. */
+	generated: boolean,
+};
+
+export type CsvFile = {
+	/**  What the window sends back to choose this file; the path stays in Rust. */
+	id: string,
+	name: string,
+};
+
+export type CsvImportPending = {
+	id: string,
+	db_name: string,
+	environment: string,
+	rows: number | null,
+	statement: string,
+};
+
+export type CsvPreview = {
+	file_columns: string[],
+	sample: string[][],
+	total_rows: number | null,
+	table_columns: CsvColumn[],
+	/**  For each file column, the table column with the same name (case aside), if any. */
+	suggested: (string | null)[],
+};
 
 /**
  *  The editor's form (S35) for PostgreSQL, MySQL, MariaDB and MongoDB. `password: Some` sets a new one;
@@ -769,7 +925,9 @@ export type ErrorCode = "locked" | "wrong_password" | "too_many_attempts" |
 /**  The table has no primary key or unique not-null key, so its rows can't be matched safely. */
 "sql_no_key" | 
 /**  A manual transaction is open on this editor. */
-"sql_in_transaction" | "internal";
+"sql_in_transaction" | 
+/**  The dump or restore tool isn't installed where it would run (the host, or this computer). */
+"db_tool_missing" | "internal";
 
 export type ExplainPlan = ExplainPlan_Serialize | ExplainPlan_Deserialize;
 
@@ -790,6 +948,8 @@ export type ExplainPlan_Serialize = {
 	buffers_read: number | null,
 	hint: PlanHint | null,
 };
+
+export type ExportFormat = "csv" | "tsv" | "json" | "sql";
 
 export type FailKind = "error" | "timeout" | "cancelled";
 
@@ -2251,6 +2411,15 @@ export type RedisWriteOutcome_Serialize =
 /**  It ran. `reply` is the server's answer when it is worth showing (a new stream entry's id). */
 { status: "done"; reply: string | null } | { status: "pending"; pending: RedisPending_Serialize };
 
+export type RestorePending = {
+	id: string,
+	db_name: string,
+	environment: string,
+	file_name: string,
+	file_bytes: number | null,
+	runs_on: string,
+};
+
 export type RowEdit = RowEdit_Serialize | RowEdit_Deserialize;
 
 export type RowEdit_Deserialize = {
@@ -2343,6 +2512,8 @@ export type SerialConfig = {
 	flow: string,
 };
 
+export type SessionAction = "cancel" | "end";
+
 export type SessionEvent = SessionEvent_Serialize | SessionEvent_Deserialize;
 
 export type SessionEvent_Deserialize = { type: "state"; state: SessionState } | { type: "prompt"; prompt_id: string; kind: PromptKind } | { type: "error"; code: ErrorCode; message: string } | { type: "exit"; status?: number | null } | 
@@ -2369,6 +2540,32 @@ export type SessionEvent_Serialize = { type: "state"; state: SessionState } | { 
 
 export type SessionOpened = {
 	session_id: string,
+};
+
+export type SessionPending = {
+	id: string,
+	level: PendingLevel,
+	db_name: string,
+	environment: string,
+	pid: number,
+	user: string,
+	state: string,
+	query: string,
+	end: boolean,
+};
+
+export type SessionRow = {
+	pid: number,
+	user: string,
+	application: string,
+	state: string,
+	/**  Seconds in this state. */
+	age_s: number | null,
+	wait: string,
+	query: string,
+	blocked_by: number[],
+	/**  One of Dalan's own connections: it can be seen but not cancelled or ended from here. */
+	mine: boolean,
 };
 
 export type SessionState = "connecting" | "authenticating" | "ready" | "disconnected" | "closed";
@@ -2800,6 +2997,12 @@ export type Themes_Serialize = {
 	groups: ProfileTheme_Serialize[],
 };
 
+export type TransferDone = {
+	path: string,
+	rows: number | null,
+	bytes: number | null,
+};
+
 export type TransferEvent = TransferEvent_Serialize | TransferEvent_Deserialize;
 
 export type TransferEvent_Deserialize = 
@@ -2819,6 +3022,11 @@ export type TransferItem = {
 	src_path: string,
 	dst_endpoint: string,
 	dst_dir: string,
+};
+
+export type TransferProgress = {
+	rows: number | null,
+	bytes: number | null,
 };
 
 export type TransferStarted = {

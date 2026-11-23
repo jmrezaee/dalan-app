@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { Diagram, ExplainPlan_Serialize as ExplainPlan, StructureOp_Deserialize as StructureOp, StructurePending, TableStructure_Serialize as TableStructure, PendingRun, TxnState, GridPending, SqlCatalog, SqlRunEvent_Serialize, RunMode, SqlCell_Serialize as Cell, DbEvent_Serialize, PageCursor_Serialize, PromptKind, RedisStepState, SqlColumn_Serialize as SqlColumn, SqlObject_Serialize as SqlObject, SqlServerInfo, SqlTableInfo_Serialize as SqlTableInfo } from '~/types/bindings'
+import type { Activity_Serialize as Activity, ActivityView, CsvPreview, SessionPending, SessionAction, ExportFormat, TransferProgress, Diagram, ExplainPlan_Serialize as ExplainPlan, StructureOp_Deserialize as StructureOp, StructurePending, TableStructure_Serialize as TableStructure, PendingRun, TxnState, GridPending, SqlCatalog, SqlRunEvent_Serialize, RunMode, SqlCell_Serialize as Cell, DbEvent_Serialize, PageCursor_Serialize, PromptKind, RedisStepState, SqlColumn_Serialize as SqlColumn, SqlObject_Serialize as SqlObject, SqlServerInfo, SqlTableInfo_Serialize as SqlTableInfo } from '~/types/bindings'
 import { useTauri } from '~/composables/useTauri'
 
 export type SqlStatus = 'connecting' | 'ready' | 'failed' | 'closed'
@@ -119,6 +119,8 @@ function setup() {
   const catalog = ref<SqlCatalog | null>(null)
   const history = ref<string[]>([])
   const diagrams = ref<DiagramTab[]>([])
+  /** The Activity and Transfer inner tabs (S41, S43): each is open or not, one of each. */
+  const special = ref<('activity' | 'transfer')[]>([])
   let diagramCount = 0
 
   const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : (e as { message?: string })?.message ?? fallback)
@@ -171,6 +173,7 @@ function setup() {
     tabs.value = []
     queries.value = []
     diagrams.value = []
+    special.value = []
     catalog.value = null
     activeTab.value = ''
     try {
@@ -513,6 +516,90 @@ function setup() {
     }
   }
 
+  // ---- Activity (S41, F25) and Transfer (S43, F26)
+  function openSpecial(kind: 'activity' | 'transfer') {
+    if (!special.value.includes(kind)) special.value.push(kind)
+    activeTab.value = kind
+  }
+  function closeSpecial(kind: 'activity' | 'transfer') {
+    special.value = special.value.filter(k => k !== kind)
+    if (activeTab.value === kind) activeTab.value = queries.value[0]?.id ?? tabs.value[0]?.id ?? ''
+  }
+  const activityState = reactive<{ view: ActivityView, data: Activity | null, error: string, at: number, rate: number | null, last: { total: number, at: number } | null, pending: SessionPending | null, busy: boolean, note: string }>(
+    { view: 'sessions', data: null, error: '', at: 0, rate: null, last: null, pending: null, busy: false, note: '' })
+  let activityToken = 0
+  let activityBusy = false
+  async function refreshActivity(view?: ActivityView) {
+    if (!connId.value) return
+    // A poll waits for the one before it; choosing another view starts afresh and drops the older answer.
+    if (activityBusy && !view) return
+    if (view && view !== activityState.view) { activityState.view = view; activityState.data = null }
+    const token = ++activityToken
+    activityBusy = true
+    try {
+      const d = await api.sqlActivity(connId.value, activityState.view)
+      if (token !== activityToken) return
+      const now = Date.now()
+      // Transactions per second from two readings of the server's counter.
+      const prev = activityState.last
+      activityState.rate = prev && now > prev.at ? Math.max(0, ((d.tiles.transactions_total ?? 0) - prev.total) / ((now - prev.at) / 1000)) : activityState.rate
+      activityState.last = { total: d.tiles.transactions_total ?? 0, at: now }
+      activityState.data = d
+      activityState.at = now
+      activityState.error = ''
+    }
+    catch (e) {
+      if (token === activityToken) activityState.error = message(e, 'Couldn\'t read the activity.')
+    }
+    finally {
+      if (token === activityToken) activityBusy = false
+    }
+  }
+  async function prepareSession(pid: number, action: SessionAction) {
+    activityState.note = ''
+    try {
+      activityState.pending = await api.sqlSessionPrepare(connId.value, pid, action)
+    }
+    catch (e) {
+      activityState.error = message(e, 'Couldn\'t prepare that.')
+    }
+  }
+  async function confirmSession(typed: string | null) {
+    const p = activityState.pending
+    if (!p || activityState.busy) return
+    activityState.busy = true
+    try {
+      const done = await api.sqlSessionCommit(connId.value, p.id, typed)
+      activityState.pending = null
+      activityState.note = done ? (p.end ? `Ended session ${p.pid}.` : `Cancelled the query of session ${p.pid}.`) : `Session ${p.pid} had already gone.`
+      await refreshActivity()
+    }
+    catch (e) {
+      activityState.error = message(e, 'Couldn\'t do that.')
+    }
+    activityState.busy = false
+  }
+  async function discardSession() {
+    const p = activityState.pending
+    activityState.pending = null
+    if (p) await api.sqlSessionDiscard(connId.value, p.id).catch(() => {})
+  }
+
+  let transferCount = 0
+  const newTransferId = () => `t${++transferCount}-${Date.now()}`
+  const stopTransfer = (id: string) => api.sqlTransferStop(id).catch(() => {})
+  const exportTable = (id: string, schema: string, table: string, filter: string, format: ExportFormat, header: boolean, onProgress: (p: TransferProgress) => void) => api.sqlExportTable(connId.value, id, schema, table, filter, format, header, onProgress)
+  const importPick = () => api.sqlImportPick(connId.value)
+  const importPreview = (schema: string, table: string, path: string, delimiter: string, header: boolean): Promise<CsvPreview> => api.sqlImportPreview(connId.value, schema, table, path, delimiter, header)
+  const importPrepare = (schema: string, table: string, path: string, delimiter: string, header: boolean, mapping: (string | null)[]) => api.sqlImportPrepare(connId.value, schema, table, path, delimiter, header, mapping)
+  const importCommit = (id: string) => api.sqlImportCommit(connId.value, id)
+  const importDiscard = (id: string) => api.sqlImportDiscard(connId.value, id).catch(() => {})
+  const backupCheck = () => api.sqlBackupCheck(connId.value)
+  const backupStart = (id: string, onProgress: (p: TransferProgress) => void) => api.sqlBackupStart(connId.value, id, onProgress)
+  const restorePrepare = () => api.sqlRestorePrepare(connId.value)
+  const restoreCommit = (pending: string, typed: string | null, id: string, onProgress: (p: TransferProgress) => void) => api.sqlRestoreCommit(connId.value, pending, typed, id, onProgress)
+  const restoreDiscard = (id: string) => api.sqlRestoreDiscard(connId.value, id).catch(() => {})
+
   // ---- Diagram (S40)
   async function openDiagram(schema?: string, table?: string) {
     const start = schema && table ? [`${schema}.${table}`] : []
@@ -759,7 +846,7 @@ function setup() {
     q.title = row.name
   }
 
-  return { dbId, connId, status, steps, prompt, info, error, schemas, treeFilter, tabs, activeTab, current, setView, loadStructure, addOp, removeOp, reviewStructure, applyStructure, cancelStructure, migrationText, explain, diagrams, openDiagram, loadDiagram, closeDiagram, saveExport, changeCount, setCell, toggleDelete, discardEdits, review, commitReview, cancelReview, queries, catalog, history, newQuery, closeQuery, requestCloseQuery, finishAndClose, openTransactions, confirmRun, discardRun, txn, setManual, loadCatalog, run, stop, format, loadHistory, clearHistory, save, open, retry, respond, close, toggleSchema, openTable, closeTable, loadPage, apply, refresh, nextPage, prevPage, sortBy, countExactly, select, keyOf, jump }
+  return { dbId, connId, status, steps, prompt, info, error, schemas, treeFilter, tabs, activeTab, current, special, openSpecial, closeSpecial, activityState, refreshActivity, prepareSession, confirmSession, discardSession, newTransferId, stopTransfer, exportTable, importPick, importPreview, importPrepare, importCommit, importDiscard, backupCheck, backupStart, restorePrepare, restoreCommit, restoreDiscard, setView, loadStructure, addOp, removeOp, reviewStructure, applyStructure, cancelStructure, migrationText, explain, diagrams, openDiagram, loadDiagram, closeDiagram, saveExport, changeCount, setCell, toggleDelete, discardEdits, review, commitReview, cancelReview, queries, catalog, history, newQuery, closeQuery, requestCloseQuery, finishAndClose, openTransactions, confirmRun, discardRun, txn, setManual, loadCatalog, run, stop, format, loadHistory, clearHistory, save, open, retry, respond, close, toggleSchema, openTable, closeTable, loadPage, apply, refresh, nextPage, prevPage, sortBy, countExactly, select, keyOf, jump }
 }
 
 // One store per SQL tab, like the Redis tabs: each has its own connection, tree and open tables.

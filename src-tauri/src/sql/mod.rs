@@ -2,12 +2,15 @@
 //! part: opening a database's connection through its route (with the host's questions and the steps shown in S33's
 //! "Connecting" card), and keeping the open connections by id so a tab's commands find theirs.
 
+pub mod activity;
+pub mod backup;
 pub mod classify;
 pub mod explain;
 pub mod diagram;
 pub mod grid;
 pub mod pg;
 pub mod structure;
+pub mod transfer;
 pub mod run;
 #[cfg(test)]
 mod tests;
@@ -303,7 +306,8 @@ async fn run(
             *live.opener.lock().await = Some(opener);
             *live.conn.lock().await = Some(conn);
             emit(DbEvent::Ready { info });
-            // Hold the SSH connection until the tab closes.
+            // Hold the SSH connection until the tab closes (backups use it too).
+            *live.ssh.lock().await = ssh.clone();
             let _ssh = ssh;
             let _ = cancel.changed().await;
             closed.store(true, Ordering::SeqCst);
@@ -355,6 +359,8 @@ struct Live {
     cancel: watch::Sender<bool>,
     conn: tokio::sync::Mutex<Option<Arc<PgConn>>>,
     opener: tokio::sync::Mutex<Option<Opener>>,
+    /// The SSH connection to the route's last host, for tools that run there (backup, restore).
+    ssh: tokio::sync::Mutex<Option<Arc<Connected>>>,
     /// One connection per editor tab, so a transaction in one never touches another (spec section 3).
     editors: tokio::sync::Mutex<HashMap<String, Arc<Editor>>>,
 }
@@ -376,6 +382,14 @@ pub struct SqlManager {
     /// Grid edits held for the commit review.
     /// Structure changes held for the review.
     pub structure_pending: crate::dbs::gate::PendingStore<Vec<String>>,
+    /// Session cancels and ends held for the gate's answer: (pid, end).
+    pub session_pending: crate::dbs::gate::PendingStore<(i32, bool, String)>,
+    /// Files chosen for import, by id: the window only ever holds the id and the name, never the path.
+    pub import_files: Mutex<HashMap<String, (String, std::path::PathBuf)>>,
+    pub import_pending: crate::dbs::gate::PendingStore<transfer::ImportPlan>,
+    pub restore_pending: crate::dbs::gate::PendingStore<std::path::PathBuf>,
+    /// Running exports, backups and restores by id, so Stop can reach them.
+    pub transfers: Mutex<HashMap<String, Arc<AtomicBool>>>,
     pub grid_pending: crate::dbs::gate::PendingStore<Vec<grid::GridStatement>>,
     conns: Mutex<HashMap<String, Arc<Live>>>,
 }
@@ -397,6 +411,7 @@ impl SqlManager {
         let live = Arc::new(Live {
             db_id: db_id.clone(),
             opener: tokio::sync::Mutex::new(None),
+            ssh: tokio::sync::Mutex::new(None),
             editors: tokio::sync::Mutex::new(HashMap::new()),
             prompts: Arc::new(Prompts::default()),
             cancel,
@@ -440,6 +455,53 @@ impl SqlManager {
             .sum()
     }
 
+    /// Remembers a picked file for this connection and returns its id (at most eight are kept).
+    pub fn put_file(&self, conn_id: &str, path: std::path::PathBuf) -> String {
+        let id = uuid::Uuid::now_v7().to_string();
+        if let Ok(mut f) = self.import_files.lock() {
+            if f.len() >= 8 {
+                f.clear();
+            }
+            f.insert(id.clone(), (conn_id.to_string(), path));
+        }
+        id
+    }
+
+    /// The path behind a file id, only for the connection that picked it.
+    pub fn file(&self, conn_id: &str, id: &str) -> AppResult<std::path::PathBuf> {
+        self.import_files
+            .lock()
+            .ok()
+            .and_then(|f| f.get(id).filter(|(c, _)| c == conn_id).map(|(_, p)| p.clone()))
+            .ok_or_else(|| AppError::validation("Choose the file again."))
+    }
+
+    /// The SSH connection of a host route (`None` on a direct route).
+    pub async fn ssh(&self, conn_id: &str) -> AppResult<Option<Arc<Connected>>> {
+        Ok(self.get(conn_id)?.ssh.lock().await.clone())
+    }
+
+    /// Starts a transfer's stop flag; `stop_transfer` sets it.
+    pub fn begin_transfer(&self, id: &str) -> Arc<AtomicBool> {
+        let flag = Arc::new(AtomicBool::new(false));
+        if let Ok(mut m) = self.transfers.lock() {
+            m.insert(id.to_string(), Arc::clone(&flag));
+        }
+        flag
+    }
+    pub fn end_transfer(&self, id: &str) {
+        if let Ok(mut m) = self.transfers.lock() {
+            m.remove(id);
+        }
+    }
+    pub fn stop_transfer(&self, id: &str) {
+        if let Ok(m) = self.transfers.lock() {
+            if let Some(f) = m.get(id) {
+                f.store(true, Ordering::SeqCst);
+            }
+        }
+    }
+
     /// The saved database a connection was opened for.
     pub fn db_id(&self, conn_id: &str) -> AppResult<String> {
         Ok(self.get(conn_id)?.db_id.clone())
@@ -478,6 +540,12 @@ impl SqlManager {
     pub fn close(&self, conn_id: &str) {
         self.pending.drop_conn(conn_id);
         self.grid_pending.drop_conn(conn_id);
+        self.session_pending.drop_conn(conn_id);
+        self.import_pending.drop_conn(conn_id);
+        if let Ok(mut f) = self.import_files.lock() {
+            f.retain(|_, (c, _)| c != conn_id);
+        }
+        self.restore_pending.drop_conn(conn_id);
         self.structure_pending.drop_conn(conn_id);
         let live = self.conns.lock().ok().and_then(|mut m| m.remove(conn_id));
         if let Some(live) = live {

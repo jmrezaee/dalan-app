@@ -57,6 +57,8 @@ pub enum ErrorCode {
     SqlNoKey,
     /// A manual transaction is open on this editor.
     SqlInTransaction,
+    /// The dump or restore tool isn't installed where it would run (the host, or this computer).
+    DbToolMissing,
     Internal,
 }
 
@@ -157,6 +159,7 @@ mod tests {
             SqlConflict,
             SqlNoKey,
             SqlInTransaction,
+            DbToolMissing,
             Internal,
         ];
         // An exhaustive match: adding a variant is a compile error here until the list above has it.
@@ -168,7 +171,7 @@ mod tests {
                 | RedisUnreachable | RedisTlsUntrusted | RedisRefused | RedisReadOnlyMode
                 | RedisConfirmNeeded | DbAuthFailed | DbUnreachable | DbTlsUntrusted
                 | DbRefused | DbReadOnlyMode | DbConfirmNeeded | SqlConflict | SqlNoKey
-                | SqlInTransaction | Internal => {}
+                | SqlInTransaction | DbToolMissing | Internal => {}
             }
             let json = serde_json::to_value(AppError::new(c, "m")).unwrap();
             let obj = json.as_object().unwrap();

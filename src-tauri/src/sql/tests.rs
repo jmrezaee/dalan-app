@@ -29,6 +29,8 @@ create table d2.e2 (id int primary key, name text, qty int);
 create table d2.e3 (id int primary key, name text, qty int);
 create table d2.e4 (id int primary key, name text, qty int);
 create table d2.e5 (id int primary key, name text, qty int);
+create table d2.imp1 (id int primary key, name text, amount numeric, gen int generated always as (id * 2) stored);
+create table d2.imp2 (id int primary key, name text);
 create table d2.e6 (a text, b int, "select" text, j json, primary key (a, b));
 insert into d2.e6 values ('x', 1, 's', '{"k": 1}'), ('x', 2, 't', null);
 insert into d2.e1 select g, 'n' || g, g * 10 from generate_series(1, 5) g;
@@ -952,4 +954,186 @@ async fn l3_pg_explain_inside_a_manual_transaction_leaves_it_open_and_unchanged(
     assert_eq!(scalar(&c, "select qty from d2.e4 where id = 1").await, "11");
     c.txn_end(false).await.unwrap();
     assert_eq!(scalar(&c, "select qty from d2.e4 where id = 1").await, "10");
+}
+
+// ---- D6: activity
+
+use super::activity::ActivityView;
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_pg_activity_shows_sessions_and_a_blocking_chain_and_signals_only_other_clients() {
+    seed();
+    let c = connect_direct(TlsMode::Off).await.unwrap();
+    // A second connection holds a row lock in an open transaction; a third waits for it.
+    let holder = connect_direct(TlsMode::Off).await.unwrap();
+    holder.txn_begin().await.unwrap();
+    run_w(&holder, "update d2.e1 set qty = qty where id = 2").await;
+    let holder_pid: i32 = scalar(&holder, "select pg_backend_pid()").await.parse().unwrap();
+    let waiter = std::sync::Arc::new(connect_direct(TlsMode::Off).await.unwrap());
+    let w2 = waiter.clone();
+    let job = tokio::spawn(async move {
+        let pieces = pieces_for("update d2.e1 set qty = qty + 1 where id = 2", RunMode::All, None).unwrap();
+        w2.run_script(&pieces, &RunOpts { limit: 0, timeout_ms: 20_000 }, &AtomicBool::new(false), true, &|_| {}).await.unwrap();
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+    let a = c.activity(ActivityView::Sessions).await.unwrap();
+    assert!(a.tiles.connections >= 3 && a.tiles.max_connections > 0 && a.tiles.waiting >= 1, "{:?}", a.tiles);
+    let chain = a.chains.iter().find(|ch| ch.root.pid == holder_pid).expect("the holder heads a chain");
+    assert!(chain.waiting.iter().any(|w| w.query.contains("qty + 1")));
+    assert!(a.sessions.iter().all(|s| s.application == "Dalan" && s.mine), "our own sessions are marked");
+    // Ending a session of ours is refused (Dalan's own connections are never touched).
+    assert_eq!(c.signal_session(holder_pid, true, "").await.unwrap(), None);
+    assert!(c.session_info(holder_pid).await.unwrap().is_none());
+    waiter.txn_state().await.unwrap();
+    holder.txn_end(false).await.unwrap();
+    job.await.unwrap();
+    for v in [ActivityView::Locks, ActivityView::Slow, ActivityView::Tables, ActivityView::Roles, ActivityView::Replication] {
+        let t = c.activity(v).await.unwrap().table.unwrap();
+        assert!(!t.columns.is_empty(), "{v:?}");
+        assert!(t.rows.iter().all(|r| r.len() == t.columns.len()));
+    }
+    let tables = c.activity(ActivityView::Tables).await.unwrap().table.unwrap();
+    assert!(tables.rows.iter().any(|r| r[0] == "d2.orders"));
+}
+
+async fn find_psql(c: &PgConn) -> i32 {
+    for _ in 0..30 {
+        let a = c.activity(ActivityView::Sessions).await.unwrap();
+        if let Some(s) = a.sessions.iter().find(|s| s.application == "psql-d6" && s.query.contains("pg_sleep")) {
+            return s.pid;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    panic!("the other client never showed up");
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_pg_another_clients_query_is_cancelled_and_its_session_ended_from_activity() {
+    seed();
+    let c = connect_direct(TlsMode::Off).await.unwrap();
+    // A client that is not Dalan: psql inside the container, running a long query.
+    let spawn = |sql: &str| {
+        std::process::Command::new("docker")
+            .args(["exec", "-e", "PGAPPNAME=psql-d6", "dalan-test-pg", "psql", "-U", "app", "-d", "shop", "-c", sql])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("docker")
+    };
+    let mut first = spawn("select pg_sleep(60)");
+    let pid = find_psql(&c).await;
+    let (user, _state, query, started) = c.session_info(pid).await.unwrap().unwrap();
+    assert_eq!(user, "app");
+    assert!(query.contains("pg_sleep"));
+    // A session that started at another time (a reused pid) is left alone.
+    assert_eq!(c.signal_session(pid, false, "1999-01-01 00:00:00+00").await.unwrap(), None);
+    assert_eq!(c.signal_session(pid, false, &started).await.unwrap(), Some(true));
+    assert!(!first.wait().unwrap().success(), "the query was cancelled");
+    // Ending a session: the client is disconnected.
+    let mut second = spawn("select pg_sleep(60)");
+    let pid2 = find_psql(&c).await;
+    let started2 = c.session_info(pid2).await.unwrap().unwrap().3;
+    assert_eq!(c.signal_session(pid2, true, &started2).await.unwrap(), Some(true));
+    assert!(!second.wait().unwrap().success());
+    assert_eq!(c.signal_session(pid2, true, &started2).await.unwrap(), None, "gone now");
+}
+
+// ---- D6: export and import
+
+use super::transfer::ExportFormat;
+
+async fn export(c: &PgConn, table: &str, filter: &str, f: ExportFormat, header: bool) -> (String, f64) {
+    let mut buf: Vec<u8> = Vec::new();
+    let (rows, _) = c.export_table("d2", table, filter, f, header, &mut buf, &|_, _| {}, &AtomicBool::new(false)).await.unwrap();
+    (String::from_utf8(buf).unwrap(), rows)
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_pg_export_streams_every_format_and_honours_a_filter() {
+    seed();
+    let c = connect_direct(TlsMode::Off).await.unwrap();
+    let (csv, rows) = export(&c, "customers", "", ExportFormat::Csv, true).await;
+    assert_eq!(rows, 50.0);
+    assert!(csv.starts_with("id,name,meta\n1,customer 1,\"{\"\"vip\"\": false}\"\n"), "{}", &csv[..80]);
+    assert_eq!(csv.lines().count(), 51);
+    let (tsv, _) = export(&c, "customers", "id <= 2", ExportFormat::Tsv, false).await;
+    assert_eq!(tsv.lines().count(), 2);
+    assert!(tsv.lines().next().unwrap().starts_with("1\tcustomer 1\t"));
+    let (json, rows) = export(&c, "customers", "id > 40", ExportFormat::Json, true).await;
+    assert_eq!(rows, 10.0);
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v.as_array().unwrap().len(), 10);
+    assert_eq!(v[0]["id"], 41);
+    assert_eq!(v[1]["meta"]["vip"], true);
+    let (sql, _) = export(&c, "customers", "id = 1", ExportFormat::Sql, true).await;
+    assert_eq!(sql, "insert into \"d2\".\"customers\" (\"id\", \"name\", \"meta\") values (1, 'customer 1', '{\"vip\": false}');\n");
+    // A table with more rows than one batch, and a filter that is refused before anything is written.
+    let (big, rows) = export(&c, "orders", "", ExportFormat::Json, true).await;
+    assert_eq!(rows, 1200.0);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&big).unwrap().as_array().unwrap().len(), 1200);
+    let mut buf = Vec::new();
+    let err = c.export_table("d2", "orders", "1 = 1; drop table d2.orders", ExportFormat::Csv, true, &mut buf, &|_, _| {}, &AtomicBool::new(false)).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::Validation);
+    assert!(buf.is_empty());
+    assert_eq!(scalar(&c, "select count(*) from d2.orders").await, "1200");
+    // Stop: the file holds what was written, and the connection is fine.
+    let stop = AtomicBool::new(true);
+    let mut buf = Vec::new();
+    let err = c.export_table("d2", "orders", "", ExportFormat::Json, true, &mut buf, &|_, _| {}, &stop).await.unwrap_err();
+    assert_eq!(err.message, "Stopped.");
+    let err = c.export_table("d2", "orders", "", ExportFormat::Csv, true, &mut buf, &|_, _| {}, &stop).await.unwrap_err();
+    assert_eq!(err.message, "Stopped.");
+    assert_eq!(scalar(&c, "select 1").await, "1");
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_pg_import_maps_columns_loads_in_one_transaction_and_a_bad_row_loads_nothing() {
+    seed();
+    let c = connect_direct(TlsMode::Off).await.unwrap();
+    let csv = "ref,who,amt,skipme\n1,\"Ada, L\",10.50,x\n2,Bob,,y\n3,\"Cy \"\"C\"\"\",7,z\n";
+    let pv = c.import_preview("d2", "imp1", csv, ',', true).await.unwrap();
+    assert_eq!(pv.file_columns, ["ref", "who", "amt", "skipme"]);
+    assert_eq!(pv.total_rows, 3.0);
+    assert!(pv.table_columns.iter().any(|c| c.name == "gen" && c.generated));
+    let mapping = vec![Some("id".to_string()), Some("name".to_string()), Some("amount".to_string()), None];
+    let plan = c.import_plan("d2", "imp1", csv, ',', true, &mapping).await.unwrap();
+    assert_eq!(plan.rows, 3);
+    assert_eq!(c.import_commit(&plan).await.unwrap(), 3);
+    assert_eq!(scalar(&c, "select count(*) from d2.imp1").await, "3");
+    assert_eq!(scalar(&c, "select name from d2.imp1 where id = 3").await, "Cy \"C\"");
+    assert_eq!(scalar(&c, "select (amount is null)::text from d2.imp1 where id = 2").await, "true");
+    assert_eq!(scalar(&c, "select gen from d2.imp1 where id = 3").await, "6");
+    // The same keys again: the server refuses, and nothing from this load is kept.
+    let again = "id,name\n10,new\n1,dup\n";
+    let plan = c.import_plan("d2", "imp2", again, ',', true, &[Some("id".into()), Some("name".into())]).await.unwrap();
+    assert_eq!(c.import_commit(&plan).await.unwrap(), 2);
+    let plan = c.import_plan("d2", "imp2", "id,name\n11,ok\n10,dup\n", ',', true, &[Some("id".into()), Some("name".into())]).await.unwrap();
+    let err = c.import_commit(&plan).await.unwrap_err();
+    assert!(err.message.contains("Nothing was loaded"), "{}", err.message);
+    assert_eq!(scalar(&c, "select count(*) from d2.imp2").await, "2");
+    // Mapping mistakes and a short row are refused before anything is sent.
+    for (m, text) in [
+        (vec![Some("gen".to_string())], "a\n1\n"),
+        (vec![Some("id".to_string()), Some("id".to_string())], "a,b\n1,2\n"),
+        (vec![Some("nope".to_string())], "a\n1\n"),
+        (vec![None], "a\n1\n"),
+        (vec![Some("id".to_string()), Some("name".to_string())], "a,b\n1\n"),
+    ] {
+        assert_eq!(c.import_plan("d2", "imp1", text, ',', true, &m).await.unwrap_err().code, ErrorCode::Validation, "{m:?}");
+    }
+}
+
+#[test]
+fn a_picked_file_is_known_only_by_its_id_and_only_to_its_own_connection() {
+    let m = super::SqlManager::default();
+    let id = m.put_file("c1", std::path::PathBuf::from("/data/orders.csv"));
+    assert_eq!(m.file("c1", &id).unwrap(), std::path::PathBuf::from("/data/orders.csv"));
+    assert!(m.file("c2", &id).is_err());
+    assert!(m.file("c1", "/etc/passwd").is_err(), "a path is not an id");
+    m.close("c1");
+    assert!(m.file("c1", &id).is_err());
 }
