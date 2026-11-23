@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { SqlCell_Serialize as Cell, DbEvent_Serialize, PageCursor_Serialize, PromptKind, RedisStepState, SqlColumn_Serialize as SqlColumn, SqlObject_Serialize as SqlObject, SqlServerInfo, SqlTableInfo_Serialize as SqlTableInfo } from '~/types/bindings'
+import type { SqlCatalog, SqlRunEvent_Serialize, RunMode, SqlCell_Serialize as Cell, DbEvent_Serialize, PageCursor_Serialize, PromptKind, RedisStepState, SqlColumn_Serialize as SqlColumn, SqlObject_Serialize as SqlObject, SqlServerInfo, SqlTableInfo_Serialize as SqlTableInfo } from '~/types/bindings'
 import { useTauri } from '~/composables/useTauri'
 
 export type SqlStatus = 'connecting' | 'ready' | 'failed' | 'closed'
@@ -37,6 +37,38 @@ export interface TableTab {
   full: { text: string | null, loading: boolean } | null
 }
 
+/** One statement's answer in the query editor (S37). Rows arrive in batches while `state` is `running`. */
+export interface ResultSet {
+  index: number
+  statement: string
+  cols: SqlColumn[]
+  rows: Cell[][]
+  state: 'running' | 'done' | 'failed'
+  /** The row limit cut the result off. */
+  more: boolean
+  elapsedMs: number | null
+  selected: { row: number, col: number } | null
+}
+export interface QueryMessage { kind: 'info' | 'error' | 'refused', text: string, statement?: string }
+export type QueryView = `r${number}` | 'messages' | 'history' | 'saved'
+/** A query tab (S37). It keeps its text, results and messages while another tab shows. */
+export interface QueryTab {
+  id: string
+  title: string
+  text: string
+  /** The text as last saved or loaded; a different `text` shows the unsaved dot. */
+  saved: string
+  savedId: string | null
+  cursor: number
+  running: boolean
+  results: ResultSet[]
+  messages: QueryMessage[]
+  view: QueryView
+  limit: number
+  timeoutS: number
+  totalMs: number | null
+}
+
 export const PAGE_SIZE = 200
 const tableId = (schema: string, table: string) => `${schema}.${table}`
 
@@ -56,6 +88,11 @@ function setup() {
   const activeTab = ref('')
   const current = computed(() => tabs.value.find(t => t.id === activeTab.value) ?? null)
   let generation = 0
+  const queries = ref<QueryTab[]>([])
+  let queryCount = 0
+  /** Tables and columns for completion; read when the first editor opens. */
+  const catalog = ref<SqlCatalog | null>(null)
+  const history = ref<string[]>([])
 
   const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : (e as { message?: string })?.message ?? fallback)
 
@@ -105,6 +142,8 @@ function setup() {
     info.value = null
     schemas.value = []
     tabs.value = []
+    queries.value = []
+    catalog.value = null
     activeTab.value = ''
     try {
       const opened = await api.dbOpen(id, e => onEvent(gen, e))
@@ -303,7 +342,154 @@ function setup() {
     await apply(tab)
   }
 
-  return { dbId, connId, status, steps, prompt, info, error, schemas, treeFilter, tabs, activeTab, current, open, retry, respond, close, toggleSchema, openTable, closeTable, loadPage, apply, refresh, nextPage, prevPage, sortBy, countExactly, select, keyOf, jump }
+  // ---- The query editor (S37, F23)
+  const editorId = (q: QueryTab) => q.id
+
+  function newQuery(text = '', title?: string, savedId: string | null = null) {
+    const n = ++queryCount
+    const q = reactive<QueryTab>({
+      id: `q${n}`, title: title ?? `Query ${n}`, text, saved: savedId ? text : '', savedId, cursor: 0, running: false, results: [], messages: [], view: 'messages',
+      limit: 1000, timeoutS: 30, totalMs: null,
+    })
+    queries.value.push(q)
+    activeTab.value = q.id
+    if (!catalog.value) void loadCatalog(false)
+    return q
+  }
+
+  function closeQuery(id: string) {
+    const i = queries.value.findIndex(q => q.id === id)
+    if (i < 0) return
+    const q = queries.value[i]!
+    if (q.running) void api.sqlCancel(connId.value, editorId(q)).catch(() => {})
+    if (connId.value) void api.sqlEditorClose(connId.value, editorId(q)).catch(() => {})
+    queries.value.splice(i, 1)
+    if (activeTab.value === id) activeTab.value = queries.value[Math.min(i, queries.value.length - 1)]?.id ?? tabs.value[0]?.id ?? ''
+  }
+
+  async function loadCatalog(refresh: boolean) {
+    if (!connId.value) return
+    try {
+      catalog.value = await api.sqlCatalog(connId.value, refresh)
+    }
+    catch {
+      // Completion is a convenience: without the catalog the editor still offers keywords.
+    }
+  }
+
+  const runIds = new WeakMap<QueryTab, number>()
+
+  /**
+   * Runs the statement at the cursor, the selection (`selected` is its text) or the whole script. Results arrive as
+   * events; a newer run of the same tab drops what an older one still sends.
+   */
+  async function run(q: QueryTab, mode: RunMode, selected = '') {
+    if (q.running || !connId.value) return
+    const text = mode === 'selection' ? selected : q.text
+    if (!text.trim()) {
+      q.messages = [{ kind: 'info', text: mode === 'selection' ? 'Select some SQL first.' : 'There is nothing to run.' }]
+      q.view = 'messages'
+      return
+    }
+    const id = (runIds.get(q) ?? 0) + 1
+    runIds.set(q, id)
+    q.running = true
+    q.results = []
+    q.messages = []
+    q.totalMs = null
+    q.view = 'messages'
+    const live = () => runIds.get(q) === id
+    const onEvent = (e: SqlRunEvent_Serialize) => {
+      if (!live()) return
+      const r = q.results[('index' in e ? e.index : -1)]
+      switch (e.type) {
+        case 'started':
+          q.results[e.index] = { index: e.index, statement: e.statement, cols: [], rows: [], state: 'running', more: false, elapsedMs: null, selected: null }
+          if (e.index === 0) q.view = 'r0'
+          break
+        case 'columns':
+          if (r) r.cols = e.columns.map(c => ({ name: c.name, type_name: c.type_name, kind: c.kind, nullable: true, default: null, pk_position: null }))
+          break
+        case 'rows':
+          if (r) for (const row of e.rows) r.rows.push(row)
+          break
+        case 'done':
+          if (r) {
+            r.state = 'done'
+            r.more = e.more
+            r.elapsedMs = e.elapsed_ms
+            q.messages.push({ kind: 'info', statement: r.statement, text: r.cols.length ? `${e.rows.toLocaleString('en-US')} ${e.rows === 1 ? 'row' : 'rows'} · ${e.elapsed_ms} ms${e.more ? ` · stopped at the limit of ${q.limit.toLocaleString('en-US')}` : ''}` : `Done · ${e.elapsed_ms} ms` })
+          }
+          break
+        case 'failed':
+          if (r) r.state = 'failed'
+          q.messages.push({
+            kind: 'error', statement: r?.statement,
+            text: e.kind === 'timeout' ? `Stopped after ${q.timeoutS} s. Raise the timeout or add a filter.` : e.kind === 'cancelled' ? 'Stopped.' : e.message,
+          })
+          q.view = 'messages'
+          break
+        case 'refused':
+          q.messages.push({ kind: 'refused', text: e.message })
+          q.view = 'messages'
+          break
+        case 'finished':
+          q.totalMs = e.elapsed_ms
+          q.running = false
+          void loadHistory()
+          break
+      }
+    }
+    try {
+      await api.sqlRun(connId.value, editorId(q), text, mode, mode === 'current' ? q.cursor : null, q.limit, q.timeoutS * 1000, onEvent)
+    }
+    catch (e) {
+      if (live()) {
+        q.messages.push({ kind: 'error', text: message(e, 'Couldn\'t run that.') })
+        q.view = 'messages'
+      }
+    }
+    // The command answers after its last event; if `finished` never came (an error before the run began), stop here.
+    if (live()) q.running = false
+  }
+
+  async function stop(q: QueryTab) {
+    if (!q.running || !connId.value) return
+    try {
+      await api.sqlCancel(connId.value, editorId(q))
+    }
+    catch (e) {
+      q.messages.push({ kind: 'error', text: message(e, 'Couldn\'t stop it.') })
+    }
+  }
+
+  async function format(q: QueryTab) {
+    if (q.text.trim()) q.text = await api.sqlFormat(q.text)
+  }
+
+  async function loadHistory() {
+    if (!dbId.value) return
+    try {
+      history.value = await api.sqlHistory(dbId.value)
+    }
+    catch {
+      history.value = []
+    }
+  }
+  async function clearHistory() {
+    await api.sqlHistoryClear(dbId.value)
+    history.value = []
+  }
+
+  /** Save (⌘S): a new saved query, or the one this tab was loaded from. `thisDatabaseOnly` ties it to this database. */
+  async function save(q: QueryTab, name: string, thisDatabaseOnly: boolean) {
+    const row = await api.savedSave({ id: q.savedId, database_id: thisDatabaseOnly ? dbId.value : null, engine: 'postgres', kind: 'sql', name: name.trim(), folder: null, description: null, body: q.text })
+    q.savedId = row.id
+    q.saved = q.text
+    q.title = row.name
+  }
+
+  return { dbId, connId, status, steps, prompt, info, error, schemas, treeFilter, tabs, activeTab, current, queries, catalog, history, newQuery, closeQuery, loadCatalog, run, stop, format, loadHistory, clearHistory, save, open, retry, respond, close, toggleSchema, openTable, closeTable, loadPage, apply, refresh, nextPage, prevPage, sortBy, countExactly, select, keyOf, jump }
 }
 
 // One store per SQL tab, like the Redis tabs: each has its own connection, tree and open tables.

@@ -103,6 +103,7 @@ export const SCREENS: ScreenState[] = [
   { id: 'S35-database-form', scenario: 'team', open: async (p) => { await vaultNav(p, 'Databases'); await p.getByRole('button', { name: 'New database' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('radio', { name: 'Through a host' }).click() } },
   { id: 'S36-sql-tab-tree', scenario: 'team', open: async (p) => { await sqlTab(p) } },
   { id: 'S36-sql-table', scenario: 'team', open: async (p) => { const t = await sqlTab(p); await t.getByRole('treeitem', { name: 'table orders' }).click(); await t.getByRole('grid', { name: 'public.orders rows' }).getByRole('gridcell', { name: '1' }).first().click() } },
+  { id: 'S37-sql-editor', scenario: 'team', open: async (p) => { const t = await sqlTab(p); await t.getByRole('button', { name: 'New query' }).click(); const box = t.getByRole('textbox', { name: /SQL$/ }); await box.click(); await p.keyboard.insertText('select * from customers'); await t.getByTestId('sql-run').click(); await t.getByRole('button', { name: /Result 1/ }).waitFor() } },
   { id: 'S34-saved-queries', scenario: 'team', open: async (p) => { await vaultNav(p, 'Saved queries') } },
   // ---- Redis (replica/redis/spec.md): S26 to S33.
   { id: 'S26-databases', scenario: 'team', open: async (p) => { await vaultNav(p, 'Databases') } },

@@ -10,7 +10,10 @@ use tauri::ipc::Channel;
 use tauri::State;
 
 use crate::error::AppResult;
+use crate::dbs::history;
+use crate::redis::console::history_enabled;
 use crate::sql::pg::{PageRequest, SqlObject, SqlPage, SqlTableInfo};
+use crate::sql::run::{pieces_for, RunMode, RunOpts, SqlCatalog, SqlRunEvent};
 use crate::sql::values::SqlCell;
 use crate::sql::{DbEvent, Emit};
 use crate::ssh::PromptAnswer;
@@ -143,5 +146,132 @@ pub async fn sql_cell(
         .pg(&conn_id)
         .await?
         .cell(&schema, &table, &key, &column)
+        .await
+}
+
+/// Runs the editor's text: the statement at the cursor, the selection, or the whole script. Results stream over
+/// `events` as they come (rows in batches); the command itself answers when the run is over. D3 runs reads only.
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::too_many_arguments)]
+pub async fn sql_run(
+    state: State<'_, AppState>,
+    conn_id: String,
+    editor_id: String,
+    text: String,
+    mode: RunMode,
+    cursor: Option<u32>,
+    limit: u32,
+    timeout_ms: u32,
+    events: Channel<SqlRunEvent>,
+) -> AppResult<()> {
+    state.require_unlocked()?;
+    let pieces = pieces_for(&text, mode, cursor)?;
+    let editor = state.sql.editor(&conn_id, &editor_id).await?;
+    editor.stop.store(false, std::sync::atomic::Ordering::SeqCst);
+    // What was typed is remembered once it is known to be allowed to run; the password filter is inside.
+    let db_id = state.sql.db_id(&conn_id)?;
+    let ran = pieces
+        .iter()
+        .map(|p| p.text.as_str())
+        .collect::<Vec<_>>()
+        .join(";\n");
+    let refused = pieces
+        .iter()
+        .any(|p| crate::sql::classify::classify(&p.text) != crate::sql::classify::Class::Read);
+    if !refused {
+        let _ = state
+            .store()
+            .with_db_session(move |c, s| {
+                if history_enabled(c) {
+                    history::remember(c, s, &db_id, "sql", &ran)?;
+                }
+                Ok(())
+            })
+            .await;
+    }
+    let opts = RunOpts {
+        limit: limit.min(1_000_000),
+        timeout_ms: timeout_ms.clamp(1000, 3_600_000),
+    };
+    editor.running.store(true, std::sync::atomic::Ordering::SeqCst);
+    let out = editor
+        .conn
+        .run_script(&pieces, &opts, &editor.stop, &|e| {
+            let _ = events.send(e);
+        })
+        .await;
+    editor.running.store(false, std::sync::atomic::Ordering::SeqCst);
+    out
+}
+
+/// Stop: the running statement is cancelled by the server (a second connection), and no further statement starts.
+#[tauri::command]
+#[specta::specta]
+pub async fn sql_cancel(
+    state: State<'_, AppState>,
+    conn_id: String,
+    editor_id: String,
+) -> AppResult<()> {
+    state.require_unlocked()?;
+    let editor = state.sql.editor(&conn_id, &editor_id).await?;
+    // Nothing running: a cancel now would land on whatever the connection does next.
+    if !editor.running.load(std::sync::atomic::Ordering::SeqCst) {
+        return Ok(());
+    }
+    editor.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    editor.conn.cancel_running().await
+}
+
+/// The editor tab closed.
+#[tauri::command]
+#[specta::specta]
+pub async fn sql_editor_close(
+    state: State<'_, AppState>,
+    conn_id: String,
+    editor_id: String,
+) -> AppResult<()> {
+    state.sql.close_editor(&conn_id, &editor_id).await;
+    Ok(())
+}
+
+/// Tables and columns for completion; `refresh` reads them again (after a schema change).
+#[tauri::command]
+#[specta::specta]
+pub async fn sql_catalog(
+    state: State<'_, AppState>,
+    conn_id: String,
+    refresh: bool,
+) -> AppResult<SqlCatalog> {
+    state.require_unlocked()?;
+    let c = state.sql.pg(&conn_id).await?.catalog(refresh).await?;
+    Ok((*c).clone())
+}
+
+/// Lays the statements out on lines. Comments and anything unreadable are left as typed.
+#[tauri::command]
+#[specta::specta]
+pub fn sql_format(text: String) -> String {
+    crate::sql::classify::format(&text)
+}
+
+/// What was run on this database, newest first.
+#[tauri::command]
+#[specta::specta]
+pub async fn sql_history(state: State<'_, AppState>, db_id: String) -> AppResult<Vec<String>> {
+    state.require_unlocked()?;
+    state
+        .store()
+        .with_db_session(move |c, s| history::list(c, s, &db_id, "sql"))
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn sql_history_clear(state: State<'_, AppState>, db_id: String) -> AppResult<()> {
+    state.require_unlocked()?;
+    state
+        .store()
+        .with_db_session(move |c, s| history::clear(c, s, &db_id, "sql"))
         .await
 }

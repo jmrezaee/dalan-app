@@ -55,6 +55,22 @@ export const commands = {
 	sqlCount: (connId: string, schema: string, table: string, filter: string) => typedError<number | null, AppError>(__TAURI_INVOKE("sql_count", { connId, schema, table, filter })),
 	/**  One whole cell (the page cut it), for the cell panel. */
 	sqlCell: (connId: string, schema: string, table: string, key: KeyPart[], column: string) => typedError<SqlCell_Serialize, AppError>(__TAURI_INVOKE("sql_cell", { connId, schema, table, key, column })),
+	/**
+	 *  Runs the editor's text: the statement at the cursor, the selection, or the whole script. Results stream over
+	 *  `events` as they come (rows in batches); the command itself answers when the run is over. D3 runs reads only.
+	 */
+	sqlRun: (connId: string, editorId: string, text: string, mode: RunMode, cursor: number | null, limit: number, timeoutMs: number, events: Channel<SqlRunEvent_Deserialize>) => typedError<null, AppError>(__TAURI_INVOKE("sql_run", { connId, editorId, text, mode, cursor, limit, timeoutMs, events })),
+	/**  Stop: the running statement is cancelled by the server (a second connection), and no further statement starts. */
+	sqlCancel: (connId: string, editorId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_cancel", { connId, editorId })),
+	/**  The editor tab closed. */
+	sqlEditorClose: (connId: string, editorId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_editor_close", { connId, editorId })),
+	/**  Tables and columns for completion; `refresh` reads them again (after a schema change). */
+	sqlCatalog: (connId: string, refresh: boolean) => typedError<SqlCatalog, AppError>(__TAURI_INVOKE("sql_catalog", { connId, refresh })),
+	/**  Lays the statements out on lines. Comments and anything unreadable are left as typed. */
+	sqlFormat: (text: string) => __TAURI_INVOKE<string>("sql_format", { text }),
+	/**  What was run on this database, newest first. */
+	sqlHistory: (dbId: string) => typedError<string[], AppError>(__TAURI_INVOKE("sql_history", { dbId })),
+	sqlHistoryClear: (dbId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_history_clear", { dbId })),
 	/**  S26: the saved databases, by name. */
 	redisDbList: () => typedError<RedisDatabase_Serialize[], AppError>(__TAURI_INVOKE("redis_db_list")),
 	/**
@@ -387,9 +403,18 @@ export type AutoLockWarning = {
 	seconds_left: number,
 };
 
+export type CatalogTable = {
+	schema: string,
+	name: string,
+	columns: string[],
+};
+
 export type CellKind = "null" | "bool" | "int" | "decimal" | "float" | "text" | "bytes" | "json" | "datetime" | "array" | "enum" | "uuid" | "interval" | "unknown";
 
 export type Choice = "replace" | "keep_both" | "skip";
+
+/**  Ordered by how much care a statement needs: `Read < Write < Schema < Dangerous`. */
+export type Class = "read" | "write" | "schema" | "dangerous";
 
 /**
  *  The editor's form (S35) for PostgreSQL, MySQL, MariaDB and MongoDB. `password: Some` sets a new one;
@@ -656,6 +681,8 @@ export type ErrorCode = "locked" | "wrong_password" | "too_many_attempts" |
 "db_read_only_mode" | 
 /**  A write needs its confirmation (unknown, used, expired or foreign pending id, or the typed name is wrong). */
 "db_confirm_needed" | "internal";
+
+export type FailKind = "error" | "timeout" | "cancelled";
 
 export type ForwardInput = ForwardInput_Serialize | ForwardInput_Deserialize;
 
@@ -2004,6 +2031,14 @@ export type RedisWriteOutcome_Serialize =
 /**  It ran. `reply` is the server's answer when it is worth showing (a new stream entry's id). */
 { status: "done"; reply: string | null } | { status: "pending"; pending: RedisPending_Serialize };
 
+export type RunColumn = {
+	name: string,
+	type_name: string,
+	kind: CellKind,
+};
+
+export type RunMode = "current" | "selection" | "all";
+
 export type SavedKind = "sql" | "pipeline" | "filter" | "command";
 
 export type SavedQuery = SavedQuery_Serialize | SavedQuery_Deserialize;
@@ -2164,6 +2199,10 @@ export type SortKey = {
 	descending: boolean,
 };
 
+export type SqlCatalog = {
+	tables: CatalogTable[],
+};
+
 export type SqlCell = SqlCell_Serialize | SqlCell_Deserialize;
 
 export type SqlCell_Deserialize = {
@@ -2251,6 +2290,27 @@ export type SqlPage_Serialize = {
 	keyset: boolean,
 	elapsed_ms: number,
 };
+
+/**  What a run tells the window. `index` is the statement's place in the script. */
+export type SqlRunEvent = SqlRunEvent_Serialize | SqlRunEvent_Deserialize;
+
+/**  What a run tells the window. `index` is the statement's place in the script. */
+export type SqlRunEvent_Deserialize = 
+/**  A statement begins. `start` and `end` are its characters in the editor's text. */
+{ type: "started"; index: number; statement: string; start: number; end: number } | { type: "columns"; index: number; columns: RunColumn[] } | { type: "rows"; index: number; rows: SqlCell_Deserialize[][] } | 
+/**  `rows` is what was sent; `more` says the limit cut the result off. */
+{ type: "done"; index: number; rows: number; more: boolean; elapsed_ms: number } | { type: "failed"; index: number; kind: FailKind; message: string } | 
+/**  Not run: not a read. Nothing of the script ran. */
+{ type: "refused"; index: number; class: Class; message: string } | { type: "finished"; elapsed_ms: number };
+
+/**  What a run tells the window. `index` is the statement's place in the script. */
+export type SqlRunEvent_Serialize = 
+/**  A statement begins. `start` and `end` are its characters in the editor's text. */
+{ type: "started"; index: number; statement: string; start: number; end: number } | { type: "columns"; index: number; columns: RunColumn[] } | { type: "rows"; index: number; rows: SqlCell_Serialize[][] } | 
+/**  `rows` is what was sent; `more` says the limit cut the result off. */
+{ type: "done"; index: number; rows: number; more: boolean; elapsed_ms: number } | { type: "failed"; index: number; kind: FailKind; message: string } | 
+/**  Not run: not a read. Nothing of the script ran. */
+{ type: "refused"; index: number; class: Class; message: string } | { type: "finished"; elapsed_ms: number };
 
 export type SqlServerInfo = {
 	engine: string,

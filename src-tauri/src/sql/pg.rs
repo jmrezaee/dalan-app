@@ -21,12 +21,26 @@ const STATEMENT_TIMEOUT_MS: u32 = 30_000;
 pub const DEFAULT_PAGE: u32 = 200;
 pub const MAX_PAGE: u32 = 1000;
 
+/// Opens a fresh stream to the server through the same route (for a cancel request, or another connection).
+pub type Reopen = std::sync::Arc<
+    dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = AppResult<BoxStream>> + Send>>
+        + Send
+        + Sync,
+>;
+
 pub struct PgConn {
-    client: Client,
+    pub(super) client: Client,
     /// A statement scope began and its ROLLBACK has not been confirmed (an error, or the request was dropped half way).
-    dirty: std::sync::atomic::AtomicBool,
+    pub(super) dirty: std::sync::atomic::AtomicBool,
     /// One statement scope at a time: a table page's read-only transaction must not interleave with another's.
-    gate: tokio::sync::Mutex<()>,
+    pub(super) gate: tokio::sync::Mutex<()>,
+    /// What a cancel request needs: the server's token for this connection and a way to reach the server again.
+    pub(super) cancel: tokio_postgres::CancelToken,
+    pub(super) reopen: Reopen,
+    pub(super) tls: TlsMode,
+    pub(super) server_name: String,
+    /// The tables and columns, for the editor's completion. Read once, again on request.
+    pub(super) catalog: tokio::sync::Mutex<Option<std::sync::Arc<super::run::SqlCatalog>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -67,6 +81,7 @@ pub fn map_error(e: &tokio_postgres::Error) -> AppError {
     )
 }
 
+#[derive(Clone)]
 pub struct Login {
     pub user: String,
     pub password: Option<Zeroizing<String>>,
@@ -81,6 +96,7 @@ impl PgConn {
     pub async fn connect(
         stream: BoxStream,
         login: Login,
+        reopen: Reopen,
         on_close: impl FnOnce(Option<String>) + Send + 'static,
     ) -> AppResult<(PgConn, SqlServerInfo)> {
         let started = Instant::now();
@@ -130,9 +146,14 @@ impl PgConn {
         };
         Ok((
             PgConn {
+                cancel: client.cancel_token(),
                 client,
                 dirty: std::sync::atomic::AtomicBool::new(false),
                 gate: tokio::sync::Mutex::new(()),
+                reopen,
+                tls: login.tls,
+                server_name: login.server_name.clone(),
+                catalog: tokio::sync::Mutex::new(None),
             },
             info,
         ))
@@ -140,7 +161,7 @@ impl PgConn {
 
     /// Takes the statement scope. If an earlier scope never confirmed its ROLLBACK (the request was dropped, or the
     /// BEGIN failed), the connection may still be inside a transaction, possibly an aborted one: end it first.
-    async fn scope(&self) -> tokio::sync::MutexGuard<'_, ()> {
+    pub(super) async fn scope(&self) -> tokio::sync::MutexGuard<'_, ()> {
         use std::sync::atomic::Ordering;
         let guard = self.gate.lock().await;
         if self.dirty.load(Ordering::SeqCst) {
@@ -151,7 +172,7 @@ impl PgConn {
     }
 
     /// Runs `body` inside a read-only transaction that is always rolled back.
-    async fn read_only<T>(
+    pub(super) async fn read_only<T>(
         &self,
         body: impl AsyncFnOnce(&Client) -> Result<T, tokio_postgres::Error>,
     ) -> AppResult<T> {
@@ -176,7 +197,7 @@ impl PgConn {
 
 /// `SSLRequest`, the server's one-byte answer, then the TLS handshake. Done here (not by the driver's TLS glue) so the
 /// certificate problems come out as our own codes.
-async fn start_tls(
+pub(super) async fn start_tls(
     mut stream: BoxStream,
     mode: TlsMode,
     server_name: &str,

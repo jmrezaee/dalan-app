@@ -71,6 +71,21 @@ fn seed_now() {
     assert!(child.wait().unwrap().success(), "seeding failed");
 }
 
+/// A way back to the test server on this computer, for the cancel request.
+fn direct_reopen() -> super::pg::Reopen {
+    std::sync::Arc::new(|| {
+        Box::pin(async {
+            let target = Target {
+                address: "127.0.0.1".into(),
+                port: 15432,
+                tls: false,
+                tls_server_name: None,
+            };
+            transport::direct_for(Engine::Postgres, &target).await
+        })
+    })
+}
+
 async fn connect_direct(mode: TlsMode) -> Result<PgConn, crate::error::AppError> {
     let target = Target {
         address: "127.0.0.1".into(),
@@ -86,7 +101,9 @@ async fn connect_direct(mode: TlsMode) -> Result<PgConn, crate::error::AppError>
         tls: mode,
         server_name: "127.0.0.1".into(),
     };
-    PgConn::connect(stream, login, |_| {}).await.map(|(c, _)| c)
+    PgConn::connect(stream, login, direct_reopen(), |_| {})
+        .await
+        .map(|(c, _)| c)
 }
 
 fn req(table: &str) -> PageRequest {
@@ -362,7 +379,10 @@ async fn l3_pg_tls_require_encrypts_verify_refuses_an_unknown_authority_and_a_wr
         tls: TlsMode::Off,
         server_name: String::new(),
     };
-    let err = PgConn::connect(stream, login, |_| {}).await.err().unwrap();
+    let err = PgConn::connect(stream, login, direct_reopen(), |_| {})
+        .await
+        .err()
+        .unwrap();
     assert_eq!(err.code, ErrorCode::DbAuthFailed);
     // Nothing listening.
     let dead = Target {
@@ -403,7 +423,9 @@ async fn l3_pg_through_a_host_the_same_pages_come_back() {
         tls: TlsMode::Require,
         server_name: "pg".into(),
     };
-    let (c, info) = PgConn::connect(stream, login, |_| {}).await.unwrap();
+    let (c, info) = PgConn::connect(stream, login, direct_reopen(), |_| {})
+        .await
+        .unwrap();
     assert!(
         info.version.starts_with("PostgreSQL 16"),
         "{}",
@@ -458,4 +480,186 @@ async fn l3_pg_a_request_dropped_half_way_leaves_the_connection_usable_and_a_par
         .await
         .unwrap();
     assert_eq!(whole.v.as_deref(), Some("sku-1-2"));
+}
+
+// ---- D3: the editor's runs
+
+use super::run::{pieces_for, FailKind, RunMode, RunOpts, SqlRunEvent};
+use std::sync::atomic::AtomicBool;
+use std::sync::Mutex;
+
+/// Runs a script and returns every event, in order.
+async fn run(c: &PgConn, sql: &str, limit: u32, timeout_ms: u32) -> Vec<SqlRunEvent> {
+    let pieces = pieces_for(sql, RunMode::All, None).unwrap();
+    let out = Mutex::new(Vec::new());
+    c.run_script(
+        &pieces,
+        &RunOpts { limit, timeout_ms },
+        &AtomicBool::new(false),
+        &|e| out.lock().unwrap().push(e),
+    )
+    .await
+    .unwrap();
+    out.into_inner().unwrap()
+}
+
+fn row_count(events: &[SqlRunEvent], index: u32) -> usize {
+    events
+        .iter()
+        .map(|e| match e {
+            SqlRunEvent::Rows { index: i, rows } if *i == index => rows.len(),
+            _ => 0,
+        })
+        .sum()
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_pg_a_script_streams_each_result_in_batches_and_stops_at_the_limit() {
+    seed();
+    let c = connect_direct(TlsMode::Off).await.unwrap();
+    // Two result sets; 1200 rows come in batches of 500, then the limit cuts the second one.
+    let ev = run(
+        &c,
+        "select id, status::text, total from d2.orders order by id; select 1 as one, null::text as nothing",
+        0,
+        30_000,
+    )
+    .await;
+    assert_eq!(row_count(&ev, 0), 1200);
+    assert_eq!(row_count(&ev, 1), 1);
+    let batches = ev
+        .iter()
+        .filter(|e| matches!(e, SqlRunEvent::Rows { index: 0, .. }))
+        .count();
+    assert_eq!(batches, 3, "500 + 500 + 200");
+    assert!(matches!(ev.last(), Some(SqlRunEvent::Finished { .. })));
+    // A limit: exactly that many rows, and `more` says there were others.
+    let ev = run(&c, "select id from d2.orders order by id", 100, 30_000).await;
+    assert_eq!(row_count(&ev, 0), 100);
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, SqlRunEvent::Done { rows: 100, more: true, .. })));
+    // At exactly the limit there is nothing more.
+    let ev = run(&c, "select id from d2.customers order by id", 50, 30_000).await;
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, SqlRunEvent::Done { rows: 50, more: false, .. })));
+    // Values keep every digit; NULL is NULL; show and explain answer without a cursor.
+    let ev = run(&c, "select big, dec from d2.types", 0, 30_000).await;
+    let cell = ev
+        .iter()
+        .find_map(|e| match e {
+            SqlRunEvent::Rows { rows, .. } => Some(rows[0].clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(cell[0].v.as_deref(), Some("9223372036854775807"));
+    assert_eq!(cell[1].v.as_deref(), Some("12345678901234567890.123456789"));
+    let ev = run(&c, "show server_version; explain select 1", 0, 30_000).await;
+    assert_eq!(row_count(&ev, 0), 1);
+    assert!(row_count(&ev, 1) >= 1);
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_pg_nothing_but_a_read_runs_and_a_refused_script_runs_nothing() {
+    seed();
+    let c = connect_direct(TlsMode::Off).await.unwrap();
+    for sql in [
+        "insert into d2.log values (9)",
+        "update d2.customers set name = 'x'",
+        "delete from d2.log where n = 1",
+        "create table d2.nope (a int)",
+        "drop table d2.log",
+        "truncate d2.log",
+        "select d2.bump()", // a read in form, a write in effect: the read-only transaction stops it
+        "begin",
+        "set search_path = d2",
+    ] {
+        let ev = run(&c, sql, 0, 30_000).await;
+        let stopped = ev.iter().any(|e| matches!(e, SqlRunEvent::Refused { .. }))
+            || ev.iter().any(|e| matches!(e, SqlRunEvent::Failed { .. }));
+        assert!(stopped, "{sql}");
+        assert_eq!(row_count(&ev, 0), 0, "{sql}");
+    }
+    // One write in a script of reads: not even the reads run.
+    let ev = run(&c, "select 1; insert into d2.log values (9); select 2", 0, 30_000).await;
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, SqlRunEvent::Refused { index: 1, .. })));
+    assert!(!ev.iter().any(|e| matches!(e, SqlRunEvent::Started { .. })));
+    // Nothing was written by any of it.
+    let ev = run(&c, "select count(*) from d2.log", 0, 30_000).await;
+    let n = ev
+        .iter()
+        .find_map(|e| match e {
+            SqlRunEvent::Rows { rows, .. } => rows[0][0].v.clone(),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(n, "0");
+    // A bad statement fails with the server's own words and stops the script; the connection is still good.
+    let ev = run(&c, "select 1; select * from d2.missing; select 3", 0, 30_000).await;
+    assert!(ev.iter().any(|e| matches!(e, SqlRunEvent::Failed { index: 1, kind: FailKind::Error, message } if message.contains("missing"))));
+    assert!(!ev.iter().any(|e| matches!(e, SqlRunEvent::Started { index: 2, .. })));
+    assert_eq!(row_count(&run(&c, "select 1", 0, 30_000).await, 0), 1);
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_pg_a_long_statement_times_out_and_stop_cancels_it_from_a_second_connection() {
+    seed();
+    let c = std::sync::Arc::new(connect_direct(TlsMode::Off).await.unwrap());
+    let ev = run(&c, "select pg_sleep(5)", 0, 1000).await;
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, SqlRunEvent::Failed { kind: FailKind::Timeout, .. })), "{ev:?}");
+    // Stop while it runs.
+    let stop = std::sync::Arc::new(AtomicBool::new(false));
+    let events = std::sync::Arc::new(Mutex::new(Vec::new()));
+    let (c2, stop2, events2) = (c.clone(), stop.clone(), events.clone());
+    let started = std::time::Instant::now();
+    let job = tokio::spawn(async move {
+        let pieces = pieces_for("select pg_sleep(30)", RunMode::All, None).unwrap();
+        c2.run_script(
+            &pieces,
+            &RunOpts { limit: 0, timeout_ms: 60_000 },
+            &stop2,
+            &|e| events2.lock().unwrap().push(e),
+        )
+        .await
+        .unwrap();
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    c.cancel_running().await.unwrap();
+    job.await.unwrap();
+    assert!(started.elapsed() < std::time::Duration::from_secs(10), "the sleep was not cut short");
+    assert!(events
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|e| matches!(e, SqlRunEvent::Failed { kind: FailKind::Cancelled, .. })));
+    // The connection works afterwards.
+    assert_eq!(row_count(&run(&c, "select 1", 0, 30_000).await, 0), 1);
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_pg_the_catalog_lists_tables_and_columns_for_completion() {
+    seed();
+    let c = connect_direct(TlsMode::Off).await.unwrap();
+    let cat = c.catalog(false).await.unwrap();
+    let orders = cat
+        .tables
+        .iter()
+        .find(|t| t.schema == "d2" && t.name == "orders")
+        .expect("d2.orders");
+    assert_eq!(orders.columns[0], "id");
+    assert!(orders.columns.contains(&"customer_id".to_string()));
+    assert!(!cat.tables.iter().any(|t| t.schema == "pg_catalog"));
+    // Cached until asked again.
+    assert!(std::sync::Arc::ptr_eq(&cat, &c.catalog(false).await.unwrap()));
+    assert!(!std::sync::Arc::ptr_eq(&cat, &c.catalog(true).await.unwrap()));
 }

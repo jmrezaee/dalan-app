@@ -2,7 +2,7 @@
 import { Channel } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { commands } from '~/types/bindings'
-import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
+import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, SqlRunEvent_Serialize, RunMode, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -48,6 +48,17 @@ export function useTauri() {
     sqlTablePage: (connId: string, request: PageRequest_Deserialize) => unwrap(commands.sqlTablePage(connId, request)),
     sqlCount: (connId: string, schema: string, table: string, filter: string) => unwrap(commands.sqlCount(connId, schema, table, filter)),
     sqlCell: (connId: string, schema: string, table: string, key: { column: string, value: string }[], column: string) => unwrap(commands.sqlCell(connId, schema, table, key, column)),
+    sqlRun: (connId: string, editorId: string, text: string, mode: RunMode, cursor: number | null, limit: number, timeoutMs: number, onEvent: (e: SqlRunEvent_Serialize) => void) => {
+      const events = new Channel<SqlRunEvent_Serialize>()
+      events.onmessage = onEvent
+      return unwrap(commands.sqlRun(connId, editorId, text, mode, cursor, limit, timeoutMs, events as never))
+    },
+    sqlCancel: (connId: string, editorId: string) => unwrap(commands.sqlCancel(connId, editorId)),
+    sqlEditorClose: (connId: string, editorId: string) => unwrap(commands.sqlEditorClose(connId, editorId)),
+    sqlCatalog: (connId: string, refresh: boolean) => unwrap(commands.sqlCatalog(connId, refresh)),
+    sqlFormat: (text: string) => commands.sqlFormat(text),
+    sqlHistory: (dbId: string) => unwrap(commands.sqlHistory(dbId)),
+    sqlHistoryClear: (dbId: string) => unwrap(commands.sqlHistoryClear(dbId)),
     redisDbList: () => unwrap(commands.redisDbList()),
     redisDbSave: (input: RedisDatabaseInput_Deserialize, masterPassword: string | null = null) => unwrap(commands.redisDbSave(input, masterPassword)),
     redisDbDelete: (id: string) => unwrap(commands.redisDbDelete(id)),

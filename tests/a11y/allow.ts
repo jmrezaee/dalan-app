@@ -10,6 +10,18 @@ export const ALLOWED: Allowed[] = [
   },
   {
     rule: 'aria-required-children',
+    selector: 'div[role="tablist"]',
+    state: 'S36-sql-tab-tree',
+    reason: 'The same app tab bar: the object tree view now also has the (empty) strip of open tabs, so axe names the tab list by its role.',
+  },
+  {
+    rule: 'aria-required-children',
+    selector: 'div[role="tablist"]',
+    state: 'S37-sql-editor',
+    reason: 'The same app tab bar as in S36-sql-table.',
+  },
+  {
+    rule: 'aria-required-children',
     selector: '.overflow-x-auto',
     reason: 'The tab bar is a tablist whose closable tabs sit next to their own close button. Keyboard users close a tab with the shortcut (Mod+W). Revisit with a roving-tabindex tab list and a Delete key.',
   },

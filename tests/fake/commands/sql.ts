@@ -4,7 +4,7 @@
 import { fail, type Handlers } from '../types'
 import type { SqlCell_Serialize as Cell_Serialize, SqlColumn_Serialize, SqlTableInfo_Serialize } from '../../../app/types/bindings'
 
-type Keys = 'dbOpen' | 'dbRespond' | 'dbClose' | 'sqlObjects' | 'sqlTableInfo' | 'sqlTablePage' | 'sqlCount' | 'sqlCell'
+type Keys = 'dbOpen' | 'dbRespond' | 'dbClose' | 'sqlObjects' | 'sqlTableInfo' | 'sqlTablePage' | 'sqlCount' | 'sqlCell' | 'sqlRun' | 'sqlCancel' | 'sqlEditorClose' | 'sqlCatalog' | 'sqlFormat' | 'sqlHistory' | 'sqlHistoryClear'
 
 const col = (name: string, type_name: string, kind: SqlColumn_Serialize['kind'], pk: number | null = null, nullable = true): SqlColumn_Serialize =>
   ({ name, type_name, kind, nullable: pk === null && nullable, default: null, pk_position: pk })
@@ -49,6 +49,26 @@ function matcher(filter: string, cols: SqlColumn_Serialize[]): (row: (string | n
     return m[2] === '=' ? a === b : m[2] === '<=' ? a <= b : m[2] === '>=' ? a >= b : m[2] === '<' ? a < b : a > b
   })
 }
+
+// ---- The query editor (D3). Not a SQL engine: a script is split at `;`, and each statement is answered by what it
+// mentions: `pg_sleep` waits until Stop, a table name returns that table's rows, `select 1` one row, anything that
+// writes is refused like Rust does, and a statement naming `missing` fails with the server's words.
+const stops = new Map<string, () => void>()
+const history: string[] = []
+const wait = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
+
+function split(text: string) {
+  const out: { text: string, start: number, end: number }[] = []
+  let start = 0
+  for (const part of text.split(';')) {
+    const lead = part.length - part.trimStart().length
+    const t = part.trim()
+    if (t) out.push({ text: t, start: start + lead, end: start + lead + t.length })
+    start += part.length + 1
+  }
+  return out
+}
+const WRITES = /^(insert|update|delete|create|alter|drop|truncate|grant|revoke|vacuum|begin|commit|rollback|set|copy|call|do)\b/i
 
 export const sql: Pick<Handlers, Keys> = {
   dbOpen: (a, { m, id, channel, send }) => {
@@ -131,5 +151,68 @@ export const sql: Pick<Handlers, Keys> = {
     const ci = t.cols.findIndex(c => c.name === a.column)
     if (!row || ci < 0) fail('not_found', 'That row is gone.')
     return cell(t.cols[ci]!, row[ci]!)
+  },
+  sqlRun: async (a, { m, channel, send }) => {
+    const c = m.sqlConns.get(a.connId)
+    if (!c || c.closed) fail('not_found', 'That database connection is closed.')
+    const ch = channel(a.events)
+    const all = split(a.text)
+    if (!all.length) fail('validation', 'There is nothing to run.')
+    const pieces = a.mode === 'current' ? [all.find(p => (a.cursor ?? 0) >= p.start && (a.cursor ?? 0) <= p.end) ?? all.filter(p => p.end <= (a.cursor ?? 0)).at(-1) ?? all[0]!] : all
+    const started = Date.now()
+    const refused = pieces.findIndex(p => WRITES.test(p.text))
+    if (refused >= 0) {
+      send(ch, { type: 'refused', index: refused, class: 'write', message: 'This changes data or structure. The editor only runs reads for now; changes arrive with the confirmation dialogs in an update.' })
+      send(ch, { type: 'finished', elapsed_ms: 0 })
+      return null
+    }
+    history.unshift(pieces.map(p => p.text).join(';\n'))
+    let stopped = false
+    stops.set(a.editorId, () => { stopped = true })
+    for (const [i, p] of pieces.entries()) {
+      if (stopped) break
+      send(ch, { type: 'started', index: i, statement: p.text, start: p.start, end: p.end })
+      if (/pg_sleep/i.test(p.text)) {
+        const limit = (a.timeoutMs ?? 30000)
+        for (let t = 0; t < limit && !stopped; t += 20) await wait(20)
+        send(ch, { type: 'failed', index: i, kind: stopped ? 'cancelled' : 'timeout', message: 'canceling statement' })
+        break
+      }
+      if (/\bmissing\b/i.test(p.text)) {
+        send(ch, { type: 'failed', index: i, kind: 'error', message: 'relation "missing" does not exist' })
+        break
+      }
+      const tname = Object.keys(TABLES).find(n => new RegExp(`\\b${n}\\b`, 'i').test(p.text))
+      let cols: SqlColumn_Serialize[]
+      let rows: (string | null)[][]
+      if (tname) {
+        cols = TABLES[tname]!.cols
+        rows = TABLES[tname]!.rows()
+      }
+      else {
+        cols = [col('one', 'integer', 'int'), col('nothing', 'text', 'text')]
+        rows = [['1', null]]
+      }
+      send(ch, { type: 'columns', index: i, columns: cols.map(x => ({ name: x.name, type_name: x.type_name, kind: x.kind })) })
+      const limit = a.limit || Infinity
+      const shown = rows.slice(0, limit)
+      for (let at = 0; at < shown.length; at += 500) send(ch, { type: 'rows', index: i, rows: shown.slice(at, at + 500).map(r => r.map((v, k) => cell(cols[k]!, v))) })
+      send(ch, { type: 'done', index: i, rows: shown.length, more: rows.length > shown.length, elapsed_ms: 3 })
+    }
+    stops.delete(a.editorId)
+    send(ch, { type: 'finished', elapsed_ms: Date.now() - started })
+    return null
+  },
+  sqlCancel: (a) => {
+    stops.get(a.editorId)?.()
+    return null
+  },
+  sqlEditorClose: () => null,
+  sqlCatalog: () => ({ tables: Object.entries(TABLES).map(([name, t]) => ({ schema: 'public', name, columns: t.cols.map(c => c.name) })) }),
+  sqlFormat: (a) => String(a.text).replace(/\s+/g, ' ').replace(/\b(select|from|where|order by|group by|limit)\b/gi, w => `\n${w.toUpperCase()}`).trim() + ';',
+  sqlHistory: () => [...history],
+  sqlHistoryClear: () => {
+    history.length = 0
+    return null
   },
 }

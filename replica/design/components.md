@@ -533,6 +533,20 @@ SqlTableView (S36 Data view)
   ("order_items rows point here" [Show them]); each opens that table in a new tab with the filter filled in.
   Footer (h 36): "Rows 1–200 of 1,180 (estimate) · 22 ms", [Count exactly], and Previous / Page n / Next. Empty: "This table has no rows yet." or "No rows match this filter. Clear it?".
 
+SqlEditor (S37)
+  CodeMirror 6 in a box (bg bg, mono 12/20, line numbers in text-muted). Syntax colours are the ANSI tokens: keyword ansi-magenta, string ansi-green, number ansi-yellow, function ansi-blue, comment ansi-bright-black. Selection bg accent/20; caret accent.
+  Completion: keywords, then tables and columns from the catalog (`schema.` and `alias.` aware); a list under the caret (surface-raised, radius md), ↑/↓, Tab or Enter accepts, Esc closes. Never from the network.
+  Keys: ⌘↵ runs the statement at the caret (or the selection), ⇧⌘↵ runs all, ⌘S saves, ⌥⇧F formats. It stays mounted while its tab lives (hard rule 4). Focus ring: inset 2px accent on the box when focused with the keyboard.
+  Read-only while a run is going? No: typing is allowed, the run uses the text it started with.
+
+SqlQueryTab (S37, F23)
+  Inner tab "Query n" (an unsaved dot when the text differs from its last save). Toolbar (h 40): Run ⌘↵ (primary; becomes "Stop" (danger) while running, Esc stops), Run selection, Run all, Format, Save; right side: Limit (mono input, 1000) and Timeout (seconds, 30).
+  Result strip (h 34): one tab per statement ("Result 1 · 50 rows · 38 ms", "Result 2 · 1 row"), Messages, History, Saved; a Copy as… menu (CSV, TSV, JSON, Markdown, SQL insert) for the open result. Active tab: inset 2px accent on top.
+  While running: the tab shows rows as they arrive with "Running…" and a Stop button; rows over the limit show "First 1,000 rows. Raise the limit to see more." (muted, with the Run button's label unchanged).
+  A refused statement (not a read) says "This changes data or structure. The editor only runs reads for now…" in the Messages tab, with the statement; nothing of the script ran. A failed statement shows the server's own text in Messages and on its result tab (danger dot); a timeout says "Stopped after 30 s. Raise the timeout or add a filter." and a cancel says "Stopped."
+  Empty: "Run a query to see rows here. ⌘↵ runs the statement your cursor is in." History: newest first, a click puts the text in the editor, a clear button; "Nothing run on this database yet." Saved: this engine's saved queries ("Save a query with ⌘S and it shows up here for every database of that engine.").
+  Save (⌘S): a small popover with a name field and "Only this database" toggle; Enter saves.
+
 ShortcutRecorder (S23)
   Input-like button "Press keys…"; shows captured combo as Kbd chips; conflict → danger text "Already used by New tab" + [Replace]
 

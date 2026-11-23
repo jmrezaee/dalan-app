@@ -2,7 +2,9 @@
 //! part: opening a database's connection through its route (with the host's questions and the steps shown in S33's
 //! "Connecting" card), and keeping the open connections by id so a tab's commands find theirs.
 
+pub mod classify;
 pub mod pg;
+pub mod run;
 #[cfg(test)]
 mod tests;
 pub mod values;
@@ -28,7 +30,7 @@ use crate::redis::store::RedisRoute;
 use crate::ssh::{Connected, PromptAnswer, Prompts, SessionEvent};
 use crate::state::Store;
 
-use pg::{PgConn, SqlServerInfo};
+use pg::{PgConn, Reopen, SqlServerInfo};
 
 /// What a connecting or open SQL tab hears. The first four are the same machinery as a Redis tab's.
 #[derive(Debug, Clone, Serialize, Type)]
@@ -156,7 +158,7 @@ pub async fn connect(
     prompts: Arc<Prompts>,
     emit: Emit,
     on_close: impl FnOnce(Option<String>) + Send + 'static,
-) -> AppResult<(Arc<PgConn>, SqlServerInfo, Option<Arc<Connected>>)> {
+) -> AppResult<Opened> {
     if cfg.engine != Engine::Postgres {
         return Err(AppError::validation(format!(
             "Opening {} databases arrives in a later update.",
@@ -196,10 +198,20 @@ pub async fn connect(
         tls: false,
         tls_server_name: None,
     };
-    let stream = match &ssh {
-        Some(ssh) => transport::through_host_for(cfg.engine, ssh, &target).await,
-        None => transport::direct_for(cfg.engine, &target).await,
+    // The way to the server, kept: a cancel request and each editor's own connection take it again.
+    let reopen: Reopen = {
+        let (ssh, target, engine) = (ssh.clone(), target.clone(), cfg.engine);
+        Arc::new(move || {
+            let (ssh, target) = (ssh.clone(), target.clone());
+            Box::pin(async move {
+                match &ssh {
+                    Some(ssh) => transport::through_host_for(engine, ssh, &target).await,
+                    None => transport::direct_for(engine, &target).await,
+                }
+            })
+        })
     };
+    let stream = (reopen)().await;
     let stream = match stream {
         Ok(s) => s,
         Err(e) => {
@@ -226,7 +238,7 @@ pub async fn connect(
         tls: cfg.tls,
         server_name,
     };
-    let (conn, info) = match PgConn::connect(stream, login, on_close).await {
+    let (conn, info) = match PgConn::connect(stream, login.clone(), Arc::clone(&reopen), on_close).await {
         Ok(v) => v,
         Err(e) => {
             step(
@@ -239,7 +251,15 @@ pub async fn connect(
         }
     };
     step(&emit, reach + 1, RedisStepState::Done, None);
-    Ok((Arc::new(conn), info, ssh))
+    let opener: Opener = Arc::new(move || {
+        let (reopen, login) = (Arc::clone(&reopen), login.clone());
+        Box::pin(async move {
+            let stream = (reopen)().await?;
+            let (conn, _) = PgConn::connect(stream, login, Arc::clone(&reopen), |_| {}).await?;
+            Ok(conn)
+        })
+    });
+    Ok((Arc::new(conn), info, ssh, opener))
 }
 
 /// "Test connection" for a SQL database: the whole sign-in, then closed. A host that needs an answer from the user
@@ -249,7 +269,7 @@ pub async fn test(store: &Store, cfg: SqlConfig) -> AppResult<SqlServerInfo> {
     let quiet: Emit = Arc::new(|_| {});
     let name = cfg.name.clone();
     let route = cfg.route;
-    let (_conn, info, _ssh) = connect(store.clone(), Arc::new(cfg), prompts, quiet, |_| {})
+    let (_conn, info, _ssh, _opener) = connect(store.clone(), Arc::new(cfg), prompts, quiet, |_| {})
         .await
         .map_err(|e| {
             if e.code == ErrorCode::AuthFailed && route == RedisRoute::Host {
@@ -275,7 +295,8 @@ async fn run(
         _ = cancel.changed() => return,
     };
     match result {
-        Ok((conn, info, ssh)) => {
+        Ok((conn, info, ssh, opener)) => {
+            *live.opener.lock().await = Some(opener);
             *live.conn.lock().await = Some(conn);
             emit(DbEvent::Ready { info });
             // Hold the SSH connection until the tab closes.
@@ -290,7 +311,15 @@ async fn run(
     }
 }
 
-type Opened = (Arc<PgConn>, SqlServerInfo, Option<Arc<Connected>>);
+/// Opens one more connection to the same server by the same route (an editor tab's own).
+type Opener = Arc<
+    dyn Fn() -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = AppResult<PgConn>> + Send>,
+        > + Send
+        + Sync,
+>;
+
+type Opened = (Arc<PgConn>, SqlServerInfo, Option<Arc<Connected>>, Opener);
 
 async fn attempt(
     store: &Store,
@@ -317,9 +346,22 @@ async fn attempt(
 }
 
 struct Live {
+    db_id: String,
     prompts: Arc<Prompts>,
     cancel: watch::Sender<bool>,
     conn: tokio::sync::Mutex<Option<Arc<PgConn>>>,
+    opener: tokio::sync::Mutex<Option<Opener>>,
+    /// One connection per editor tab, so a transaction in one never touches another (spec section 3).
+    editors: tokio::sync::Mutex<HashMap<String, Arc<Editor>>>,
+}
+
+/// An editor tab's connection and its stop flag.
+pub struct Editor {
+    pub conn: PgConn,
+    /// Set by Stop; a run clears it when it starts.
+    pub stop: AtomicBool,
+    /// A run is going: only then does Stop send a cancel to the server.
+    pub running: AtomicBool,
 }
 
 /// The open SQL connections, by id. One per tab; lock closes them all.
@@ -343,6 +385,9 @@ impl SqlManager {
         let conn_id = uuid::Uuid::now_v7().to_string();
         let (cancel, cancel_rx) = watch::channel(false);
         let live = Arc::new(Live {
+            db_id: db_id.clone(),
+            opener: tokio::sync::Mutex::new(None),
+            editors: tokio::sync::Mutex::new(HashMap::new()),
             prompts: Arc::new(Prompts::default()),
             cancel,
             conn: tokio::sync::Mutex::new(None),
@@ -369,6 +414,41 @@ impl SqlManager {
                 "This database isn't connected right now.",
             )
         })
+    }
+
+    /// The saved database a connection was opened for.
+    pub fn db_id(&self, conn_id: &str) -> AppResult<String> {
+        Ok(self.get(conn_id)?.db_id.clone())
+    }
+
+    /// The editor tab's own connection, opened on first use.
+    pub async fn editor(&self, conn_id: &str, editor_id: &str) -> AppResult<Arc<Editor>> {
+        let live = self.get(conn_id)?;
+        // Held while connecting, so two first runs of one editor don't open two connections.
+        let mut editors = live.editors.lock().await;
+        if let Some(e) = editors.get(editor_id) {
+            return Ok(Arc::clone(e));
+        }
+        let opener = live.opener.lock().await.clone().ok_or_else(|| {
+            AppError::new(
+                ErrorCode::DbUnreachable,
+                "This database isn't connected right now.",
+            )
+        })?;
+        let editor = Arc::new(Editor {
+            conn: opener().await?,
+            stop: AtomicBool::new(false),
+            running: AtomicBool::new(false),
+        });
+        editors.insert(editor_id.to_string(), Arc::clone(&editor));
+        Ok(editor)
+    }
+
+    /// The editor tab closed: its connection ends with it.
+    pub async fn close_editor(&self, conn_id: &str, editor_id: &str) {
+        if let Ok(live) = self.get(conn_id) {
+            live.editors.lock().await.remove(editor_id);
+        }
     }
 
     pub fn close(&self, conn_id: &str) {

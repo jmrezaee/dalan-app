@@ -65,7 +65,7 @@ function onTabKey(e: KeyboardEvent, i: number) {
     <div v-if="store.status === 'ready'" class="flex min-h-0 flex-1">
       <SqlTree :tab-key="tabKey" />
       <section class="flex min-w-0 flex-1 flex-col" aria-label="Tables">
-        <div v-if="store.tabs.length" role="group" aria-label="Open tables" class="flex h-9 shrink-0 overflow-x-auto border-b border-border">
+        <div role="group" aria-label="Open tabs" class="flex h-9 shrink-0 overflow-x-auto border-b border-border">
           <div v-for="(t, i) in store.tabs" :key="t.id" :class="cn('flex shrink-0 items-center border-r border-border text-sm text-muted', store.activeTab === t.id && 'bg-bg text-text shadow-[inset_0_2px_0_var(--color-accent)]')">
             <button
               :id="`${tabKey}-tab-${t.id}`" type="button" :aria-current="store.activeTab === t.id ? 'true' : undefined"
@@ -75,11 +75,22 @@ function onTabKey(e: KeyboardEvent, i: number) {
             </button>
             <button type="button" class="mr-1.5 grid size-5 place-items-center rounded hover:bg-surface-hover" :aria-label="`Close ${t.table}`" @click="store.closeTable(t.id)"><X class="size-3" aria-hidden="true" /></button>
           </div>
+          <div v-for="q in store.queries" :key="q.id" :class="cn('flex shrink-0 items-center border-r border-border text-sm text-muted', store.activeTab === q.id && 'bg-bg text-text shadow-[inset_0_2px_0_var(--color-accent)]')">
+            <button
+              :id="`${tabKey}-tab-${q.id}`" type="button" :aria-current="store.activeTab === q.id ? 'true' : undefined"
+              class="flex h-full cursor-default items-center gap-1.5 pl-3 pr-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" @click="store.activeTab = q.id"
+            >
+              {{ q.title }}<span v-if="q.text !== q.saved" class="size-1.5 rounded-full bg-accent" aria-label="unsaved" />
+            </button>
+            <button type="button" class="mr-1.5 grid size-5 place-items-center rounded hover:bg-surface-hover" :aria-label="`Close ${q.title}`" @click="store.closeQuery(q.id)"><X class="size-3" aria-hidden="true" /></button>
+          </div>
         </div>
         <template v-for="t in store.tabs" :key="t.id">
           <SqlTableView v-show="store.activeTab === t.id" :tab-key="tabKey" :tab="t" />
         </template>
-        <EmptyState v-if="!store.tabs.length" :icon="ShieldCheck" title="Open a table" text="Pick one from the list. Everything here only reads: changes come with the editor." />
+        <!-- Query tabs stay mounted while another tab shows, so their editors keep the caret and the undo history. -->
+        <SqlQueryTab v-for="q in store.queries" v-show="store.activeTab === q.id" :key="q.id" :tab-key="tabKey" :query="q" />
+        <EmptyState v-if="!store.tabs.length && !store.queries.length" :icon="ShieldCheck" title="Open a table or start a query" text="Pick a table from the list, or press New query. Only reads run for now: changes come with the next update." />
       </section>
     </div>
 
