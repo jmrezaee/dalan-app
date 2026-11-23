@@ -8,7 +8,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::classify::{self, Class, Dialect, Piece};
+use super::grid::{GridEdits, GridStatement};
 use super::mysql::{MyConn, MyResult};
+use super::run::{TxnInfo, TxnState};
 use super::pg::{ObjectKind, PageCursor, PageRequest, SqlColumn, SqlForeignKey, SqlObject, SqlPage, SqlTableInfo, DEFAULT_PAGE, MAX_PAGE};
 use super::run::{CatalogTable, FailKind, RunColumn, RunOpts, SqlCatalog, SqlRunEvent};
 use super::values::{CellKind, SqlCell};
@@ -36,6 +38,19 @@ fn key_lit(kind: CellKind, v: &str) -> String {
         v.to_string()
     } else {
         lit(v)
+    }
+}
+
+/// Statements that end the open transaction by themselves in MySQL and MariaDB (read from the statement's own
+/// tokens, so a leading comment doesn't hide it). `temporary` tables are the exception for create and drop.
+fn implicit_commit(sql: &str) -> bool {
+    let w = classify::words_for(sql, Dialect::My);
+    let has = |x: &str| w.iter().any(|y| y == x);
+    match w.first().map(String::as_str) {
+        Some("CREATE" | "DROP") => !has("TEMPORARY"),
+        Some("ALTER" | "TRUNCATE" | "RENAME" | "GRANT" | "REVOKE" | "ANALYZE" | "OPTIMIZE" | "REPAIR" | "LOCK" | "UNLOCK" | "FLUSH" | "BEGIN" | "START" | "XA" | "CHANGE" | "STOP" | "INSTALL" | "UNINSTALL" | "CACHE" | "LOAD") => true,
+        Some("SET") => has("AUTOCOMMIT"),
+        _ => false,
     }
 }
 
@@ -94,11 +109,13 @@ pub struct MyDb {
 pub struct MyEditor {
     pub conn: MyConn,
     gate: tokio::sync::Mutex<()>,
+    /// A manual transaction is open on this connection.
+    txn: std::sync::Mutex<Option<TxnInfo>>,
 }
 
 impl MyEditor {
     pub fn new(conn: MyConn) -> MyEditor {
-        MyEditor { conn, gate: tokio::sync::Mutex::new(()) }
+        MyEditor { conn, gate: tokio::sync::Mutex::new(()), txn: std::sync::Mutex::new(None) }
     }
 }
 
@@ -341,9 +358,150 @@ impl MyDb {
     }
 }
 
+impl MyDb {
+    /// A grid commit's statements for MySQL: values are literals (the text protocol has no parameters), each update says
+    /// "where the key matches and the cell is still what you saw" (`<=>` is NULL-safe equality). Binary columns can't be
+    /// edited as text.
+    pub async fn grid_statements(&self, edits: &GridEdits) -> AppResult<Vec<GridStatement>> {
+        use super::grid::RowEdit;
+        if edits.rows.is_empty() {
+            return Err(AppError::validation("There are no changes to commit."));
+        }
+        let info = self.table_info(&edits.schema, &edits.table).await?;
+        let mut pk: Vec<&SqlColumn> = info.columns.iter().filter(|c| c.pk_position.is_some()).collect();
+        pk.sort_by_key(|c| c.pk_position);
+        if pk.is_empty() {
+            return Err(AppError::new(ErrorCode::SqlNoKey, "This table has no key, so rows can't be matched safely. Use a query instead."));
+        }
+        let col = |n: &str| info.columns.iter().find(|c| c.name == n).ok_or_else(|| AppError::validation(format!("There is no column {n} in this table.")));
+        let table = format!("{}.{}", q(&edits.schema), q(&edits.table));
+        let key_where = |row: &RowEdit| -> AppResult<Vec<String>> {
+            let mut names: Vec<&str> = row.key.iter().map(|k| k.column.as_str()).collect();
+            names.sort_unstable();
+            names.dedup();
+            if names.len() != row.key.len() || names.len() != pk.len() || !pk.iter().all(|c| names.contains(&c.name.as_str())) {
+                return Err(AppError::validation("A row was sent without its whole primary key."));
+            }
+            // A text key is matched byte for byte too, so a `_ci` collation can't match a second row.
+            row.key.iter().map(|k| { let kind = col(&k.column)?.kind; Ok(if kind == CellKind::Int { format!("{} = {}", q(&k.column), key_lit(kind, &k.value)) } else { format!("binary cast({} as char) = binary {}", q(&k.column), lit(&k.value)) }) }).collect()
+        };
+        let opt = |v: &Option<String>| v.as_deref().map_or_else(|| "NULL".to_string(), lit);
+        // "The cell is still what the person saw": integers as numbers; everything else by its text form compared
+        // byte for byte (a FLOAT against a string is compared as a double, and a `_ci` collation would call 'abc' and
+        // 'ABC' equal). `<=>` is NULL-safe.
+        let same = |c: &SqlColumn, old: &Option<String>| -> String {
+            match (c.kind, old) {
+                (CellKind::Int, Some(v)) => format!("{} <=> {}", q(&c.name), key_lit(CellKind::Int, v)),
+                _ => format!("binary cast({} as char) <=> binary {}", q(&c.name), opt(old)),
+            }
+        };
+        let mut out = Vec::new();
+        for row in &edits.rows {
+            let mut conds = key_where(row)?;
+            if row.delete {
+                let sql = format!("delete from {table} where {}", conds.join(" and "));
+                out.push(GridStatement { shown: sql.clone(), sql, params: vec![] });
+                continue;
+            }
+            if row.changes.is_empty() {
+                return Err(AppError::validation("A row was sent with nothing changed."));
+            }
+            let mut sets = Vec::new();
+            for ch in &row.changes {
+                let c = col(&ch.column)?;
+                if c.kind == CellKind::Bytes {
+                    return Err(AppError::validation(format!("{} holds binary data and can't be edited as text. Use a query.", c.name)));
+                }
+                if c.pk_position.is_some() && ch.old != ch.new {
+                    return Err(AppError::validation(format!("{} is part of the key. Change it with a query.", c.name)));
+                }
+                sets.push(format!("{} = {}", q(&c.name), opt(&ch.new)));
+                conds.push(same(c, &ch.old));
+            }
+            let sql = format!("update {table} set {} where {}", sets.join(", "), conds.join(" and "));
+            out.push(GridStatement { shown: sql.clone(), sql, params: vec![] });
+        }
+        Ok(out)
+    }
+
+    /// One transaction; every statement must match exactly one row (the connection asks for matched rows, so an
+    /// update to the same value still counts), or everything is rolled back.
+    pub async fn grid_commit(&self, stmts: &[GridStatement]) -> AppResult<u32> {
+        let _scope = self.gate.lock().await;
+        self.conn.query("START TRANSACTION", 0).await?;
+        let mut failure = None;
+        for (i, st) in stmts.iter().enumerate() {
+            match self.conn.query(&st.sql, 0).await {
+                Ok(r) if r.affected == 1 => {}
+                Ok(_) => {
+                    failure = Some(AppError::new(ErrorCode::SqlConflict, format!("Row {} was changed or removed by someone else since you loaded it. Nothing was written. Reload the table and try again.", i + 1)));
+                    break;
+                }
+                Err(e) => {
+                    failure = Some(e);
+                    break;
+                }
+            }
+        }
+        let ended = self.conn.query(if failure.is_none() { "COMMIT" } else { "ROLLBACK" }, 0).await;
+        if let Some(f) = failure {
+            return Err(f);
+        }
+        ended?;
+        Ok(stmts.len() as u32)
+    }
+}
+
 impl MyEditor {
     pub async fn cancel_running(&self) -> AppResult<()> {
         self.conn.cancel_running().await
+    }
+
+    pub fn has_txn(&self) -> bool {
+        self.txn.lock().map(|t| t.is_some()).unwrap_or(false)
+    }
+
+    pub async fn txn_begin(&self) -> AppResult<()> {
+        let _scope = self.gate.lock().await;
+        if self.has_txn() {
+            return Err(AppError::new(ErrorCode::SqlInTransaction, "A transaction is already open in this editor."));
+        }
+        self.conn.query("START TRANSACTION", 0).await?;
+        if let Ok(mut t) = self.txn.lock() {
+            *t = Some(TxnInfo { since: Instant::now(), statements: 0, failed: false });
+        }
+        Ok(())
+    }
+
+    pub async fn txn_end(&self, commit: bool) -> AppResult<()> {
+        let _scope = self.gate.lock().await;
+        if !self.has_txn() {
+            return Ok(());
+        }
+        let out = self.conn.query(if commit { "COMMIT" } else { "ROLLBACK" }, 0).await.map(|_| ());
+        // Over either way: a COMMIT the server refused leaves nothing the person can still commit.
+        if let Ok(mut t) = self.txn.lock() {
+            *t = None;
+        }
+        out
+    }
+
+    /// The bar's numbers. The number of locked rows comes from `information_schema.innodb_trx`, which needs the PROCESS
+    /// privilege: without it the count is just left out.
+    pub async fn txn_state(&self) -> AppResult<TxnState> {
+        let info = self.txn.lock().ok().and_then(|t| t.clone());
+        let Some(info) = info else {
+            return Ok(TxnState { active: false, statements: 0, age_s: 0, failed: false, locks: 0 });
+        };
+        let _scope = self.gate.lock().await;
+        let locks = self
+            .conn
+            .query("select coalesce(max(trx_rows_locked), 0) from information_schema.innodb_trx where trx_mysql_thread_id = connection_id()", 1)
+            .await
+            .ok()
+            .and_then(|r| r.rows.first().and_then(|r| r[0].as_deref().and_then(|n| n.parse::<u64>().ok())))
+            .unwrap_or(0);
+        Ok(TxnState { active: true, statements: info.statements, age_s: info.since.elapsed().as_secs().min(u64::from(u32::MAX)) as u32, failed: false, locks: locks.min(u64::from(u32::MAX)) as u32 })
     }
 
     /// What each data-changing statement would do: run in a transaction that is rolled back. InnoDB only; a
@@ -375,12 +533,21 @@ impl MyEditor {
                 out.push(Some("Not tried out: it calls a function that acts outside the transaction.".into()));
                 continue;
             }
-            self.conn.query("START TRANSACTION", 0).await?;
+            // Inside the person's own transaction even a savepoint keeps the row locks until they commit: not tried.
+            let manual = self.has_txn();
+            if manual {
+                out.push(Some("Not tried out inside a transaction: its row locks would stay until you commit.".into()));
+                continue;
+            }
+            self.conn.query(if manual { "SAVEPOINT dalan_dry" } else { "START TRANSACTION" }, 0).await?;
             let r = self.conn.query(&p.text, 0).await;
-            let _ = self.conn.query("ROLLBACK", 0).await;
+            let _ = self.conn.query(if manual { "ROLLBACK TO SAVEPOINT dalan_dry" } else { "ROLLBACK" }, 0).await;
+            if manual {
+                let _ = self.conn.query("RELEASE SAVEPOINT dalan_dry", 0).await;
+            }
             out.push(Some(match r {
-                Ok(r) if r.affected == 1 => "This will change 1 row.".to_string(),
-                Ok(r) => format!("This will change {} rows.", r.affected),
+                Ok(r) if r.affected == 1 => "This matches 1 row.".to_string(),
+                Ok(r) => format!("This matches {} rows.", r.affected),
                 Err(e) => format!("The server says it would fail: {}", e.message),
             }));
         }
@@ -400,7 +567,9 @@ impl MyEditor {
         }
         let _scope = self.gate.lock().await;
         let _ = self.conn.set_timeout(opts.timeout_ms).await;
-        if all_reads {
+        // A manual transaction is the person's: nothing is wrapped around it.
+        let manual = self.has_txn();
+        if all_reads && !manual {
             self.conn.query("START TRANSACTION READ ONLY", 0).await?;
         }
         for (i, p) in pieces.iter().enumerate() {
@@ -412,6 +581,18 @@ impl MyEditor {
             emit(SqlRunEvent::Started { index, statement: p.text.clone(), start: p.start as u32, end: p.end as u32 });
             let t = Instant::now();
             let r: AppResult<MyResult> = self.conn.query(&p.text, opts.limit as usize).await;
+            // DDL and its kin commit the open transaction by themselves; a connection that dropped has lost it.
+            if manual && (r.is_ok() && implicit_commit(&p.text) || matches!(&r, Err(e) if e.code == ErrorCode::DbUnreachable)) {
+                if let Ok(mut g) = self.txn.lock() {
+                    *g = None;
+                }
+            } else if manual {
+                if let Ok(mut g) = self.txn.lock() {
+                    if let Some(x) = g.as_mut() {
+                        x.statements += 1;
+                    }
+                }
+            }
             match r {
                 // A killed `sleep()` answers normally: the stop flag says what happened.
                 Ok(_) if cancel.load(Ordering::SeqCst) && all_reads => {
@@ -445,7 +626,7 @@ impl MyEditor {
                 }
             }
         }
-        if all_reads {
+        if all_reads && !manual {
             let _ = self.conn.query("ROLLBACK", 0).await;
         }
         emit(SqlRunEvent::Finished { elapsed_ms: ms(started) });
@@ -504,7 +685,7 @@ mod docker_tests {
 
     const SEED: &str = r#"
 drop view if exists d7_open;
-drop table if exists d7_items, d7_orders, d7_customers, d7_nokey, d7_nums;
+drop table if exists d7_items, d7_orders, d7_customers, d7_nokey, d7_nums, d7_cmp;
 create table d7_nums (n int primary key);
 insert into d7_nums values (1);
 insert into d7_nums select n + 1 from d7_nums;
@@ -527,6 +708,8 @@ create table d7_items (order_id bigint, line_no int, sku varchar(40), primary ke
 insert into d7_items select o.n, l.n, concat('sku-', o.n, '-', l.n) from d7_nums o, d7_nums l where o.n <= 30 and l.n <= 4;
 create table d7_nokey (a int, b text);
 insert into d7_nokey values (1, 'a'), (2, 'b');
+create table d7_cmp (id int primary key, f float, d decimal(10,2), s varchar(20));
+insert into d7_cmp values (1, 0.1, 1.50, 'abc');
 create view d7_open as select * from d7_orders where status = 'open';
 "#;
 
@@ -654,6 +837,11 @@ create view d7_open as select * from d7_orders where status = 'open';
         }
     }
 
+    /// A customer's name as `c` sees it.
+    async fn name(c: &MyConn, id: u32) -> String {
+        c.query(&format!("select name from d7_customers where id = {id}"), 0).await.unwrap().rows[0][0].clone().unwrap()
+    }
+
     async fn run(e: &MyEditor, sql: &str, limit: u32, allow: bool, cancel: &AtomicBool) -> Vec<SqlRunEvent> {
         let pieces = super::super::run::pieces_for_d(sql, RunMode::All, None, Dialect::My).unwrap();
         let out = Mutex::new(Vec::new());
@@ -693,14 +881,14 @@ create view d7_open as select * from d7_orders where status = 'open';
             // The dry run says what a change would do and changes nothing.
             let p = super::super::run::pieces_for_d("update d7_orders set note = 'x' where status = 'open'; delete from d7_nokey", RunMode::All, None, Dialect::My).unwrap();
             let notes = e.preview(&p).await.unwrap();
-            assert_eq!(notes[0].as_deref(), Some("This will change 400 rows."));
+            assert_eq!(notes[0].as_deref(), Some("This matches 400 rows."));
             assert_eq!(e.conn.query("select count(*) from d7_orders where note = 'x'", 0).await.unwrap().rows[0][0].as_deref(), Some("0"));
             // With a table the rollback can't undo, nothing is tried out; with only InnoDB tables it is.
             e.conn.query("create table d7_myisam (a int) engine = MyISAM", 0).await.unwrap();
             let notes = e.preview(&p).await.unwrap();
             e.conn.query("drop table d7_myisam", 0).await.unwrap();
             assert!(notes[0].as_deref().unwrap().starts_with("Not tried out"), "{notes:?}");
-            assert_eq!(e.preview(&p).await.unwrap()[0].as_deref(), Some("This will change 400 rows."));
+            assert_eq!(e.preview(&p).await.unwrap()[0].as_deref(), Some("This matches 400 rows."));
             // Stop: a long statement ends within seconds and the connection works afterwards.
             let e = std::sync::Arc::new(e);
             let stop = std::sync::Arc::new(AtomicBool::new(false));
@@ -714,6 +902,82 @@ create view d7_open as select * from d7_orders where status = 'open';
             assert!(started.elapsed() < std::time::Duration::from_secs(10));
             assert!(ev.iter().any(|x| matches!(x, SqlRunEvent::Failed { kind: FailKind::Cancelled, .. })), "{ev:?}");
             assert_eq!(rows(&run(&e, "select 1", 0, false, &no).await, 0), 1);
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+    async fn l3_my_manual_transactions_and_grid_edits_work_on_both_servers() {
+        use super::super::grid::{CellChange, KeyValue, RowEdit};
+        let _one = ONE_AT_A_TIME.lock().await;
+        for (port, pw, container, root) in SERVERS {
+            seed(container, root);
+            let no = AtomicBool::new(false);
+            let e = MyEditor::new(conn(port, pw).await);
+            let other = conn(port, pw).await;
+            // A manual transaction holds its change until Commit or Roll back.
+            e.txn_begin().await.unwrap();
+            assert!(e.txn_begin().await.is_err());
+            run(&e, "update d7_customers set name = 'changed' where id = 10", 0, true, &no).await;
+            let st = e.txn_state().await.unwrap();
+            // (The locked-row count needs the PROCESS privilege, which this user lacks.)
+            assert!(st.active && st.statements == 1, "{st:?}");
+            assert_eq!(name(&other, 10).await, "customer 10");
+            assert_eq!(name(&e.conn, 10).await, "changed");
+            // Explaining or previewing inside it leaves it open.
+            let p = super::super::run::pieces_for_d("update d7_customers set name = 'x' where id = 11", RunMode::All, None, Dialect::My).unwrap();
+            assert_eq!(e.preview(&p).await.unwrap()[0].as_deref(), Some("Not tried out inside a transaction: its row locks would stay until you commit."));
+            assert!(e.txn_state().await.unwrap().active);
+            e.txn_end(false).await.unwrap();
+            assert_eq!(name(&other, 10).await, "customer 10");
+            e.txn_begin().await.unwrap();
+            run(&e, "update d7_customers set name = 'kept' where id = 10", 0, true, &no).await;
+            e.txn_end(true).await.unwrap();
+            assert_eq!(name(&other, 10).await, "kept");
+            // A DDL statement commits by itself: the transaction is over and the state says so.
+            e.txn_begin().await.unwrap();
+            run(&e, "update d7_customers set name = 'before ddl' where id = 12", 0, true, &no).await;
+            run(&e, "create table d7_tmp_ddl (a int)", 0, true, &no).await;
+            assert!(!e.txn_state().await.unwrap().active);
+            assert_eq!(name(&other, 12).await, "before ddl");
+            e.conn.query("drop table d7_tmp_ddl", 0).await.unwrap();
+
+            // Grid edits: updates and a delete commit together; a stale row stops everything.
+            let db = MyDb::new(conn(port, pw).await);
+            let edit = |id: &str, col: &str, old: Option<&str>, new: Option<&str>| RowEdit {
+                key: vec![KeyValue { column: "id".into(), value: id.into() }],
+                changes: vec![CellChange { column: col.into(), old: old.map(Into::into), new: new.map(Into::into) }],
+                delete: false,
+            };
+            let g = |rows| GridEdits { schema: "shop".into(), table: "d7_customers".into(), rows };
+            let stmts = db.grid_statements(&g(vec![edit("20", "name", Some("customer 20"), Some("it's \\ ok")), edit("21", "long_text", None, Some("now text")), edit("22", "name", Some("customer 22"), Some("customer 22"))])).await.unwrap();
+            assert!(stmts[0].shown.contains("<=> binary 'customer 20'") && stmts[0].shown.contains("'it''s \\\\ ok'"), "{}", stmts[0].shown);
+            assert_eq!(db.grid_commit(&stmts).await.unwrap(), 3);
+            assert_eq!(name(&other, 20).await, "it's \\ ok");
+            assert_eq!(other.query("select long_text from d7_customers where id = 21", 0).await.unwrap().rows[0][0].as_deref(), Some("now text"));
+            // Someone else changed row 31 after it was loaded: nothing from this commit stays.
+            other.query("update d7_customers set name = 'theirs' where id = 31", 0).await.unwrap();
+            let stmts = db.grid_statements(&g(vec![edit("30", "name", Some("customer 30"), Some("mine 30")), edit("31", "name", Some("customer 31"), Some("mine 31"))])).await.unwrap();
+            assert_eq!(db.grid_commit(&stmts).await.unwrap_err().code, ErrorCode::SqlConflict);
+            assert_eq!(name(&other, 30).await, "customer 30");
+            assert_eq!(name(&other, 31).await, "theirs");
+            // A delete removes one row; again it finds none and is a conflict. No key, a changed key and a binary column are refused.
+            let del = RowEdit { key: vec![KeyValue { column: "n".into(), value: "1500".into() }], changes: vec![], delete: true };
+            let stmts = db.grid_statements(&GridEdits { schema: "shop".into(), table: "d7_nums".into(), rows: vec![del] }).await.unwrap();
+            assert_eq!(db.grid_commit(&stmts).await.unwrap(), 1);
+            assert_eq!(db.grid_commit(&stmts).await.unwrap_err().code, ErrorCode::SqlConflict);
+            let nokey = GridEdits { schema: "shop".into(), table: "d7_nokey".into(), rows: vec![edit("1", "a", Some("1"), Some("2"))] };
+            assert_eq!(db.grid_statements(&nokey).await.unwrap_err().code, ErrorCode::SqlNoKey);
+            assert_eq!(db.grid_statements(&g(vec![edit("1", "id", Some("1"), Some("9"))])).await.unwrap_err().code, ErrorCode::Validation);
+            // Floats and decimals are matched by their text, and a case-only change by someone else is a conflict.
+            let cmp = |rows| GridEdits { schema: "shop".into(), table: "d7_cmp".into(), rows };
+            let ok = db.grid_statements(&cmp(vec![edit("1", "f", Some("0.1"), Some("0.2")), edit("1", "d", Some("1.50"), Some("2.50"))])).await.unwrap();
+            assert_eq!(db.grid_commit(&ok).await.unwrap(), 2);
+            other.query("update d7_cmp set s = 'ABC' where id = 1", 0).await.unwrap();
+            let stale = db.grid_statements(&cmp(vec![edit("1", "s", Some("abc"), Some("new"))])).await.unwrap();
+            assert_eq!(db.grid_commit(&stale).await.unwrap_err().code, ErrorCode::SqlConflict, "{}", stale[0].shown);
+            // A leading comment doesn't hide a DDL statement from the transaction bookkeeping.
+            assert!(implicit_commit("/* x */ create table t (a int)") && !implicit_commit("create temporary table t (a int)") && implicit_commit("set autocommit = 1") && !implicit_commit("set @a = 1"));
         }
     }
 }

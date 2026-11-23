@@ -456,24 +456,27 @@ impl EditorConn {
         }
     }
     pub fn has_txn(&self) -> bool {
-        matches!(self, EditorConn::Pg(c) if c.has_txn())
+        match self {
+            EditorConn::Pg(c) => c.has_txn(),
+            EditorConn::My(c) => c.has_txn(),
+        }
     }
     pub async fn txn_begin(&self) -> AppResult<()> {
         match self {
             EditorConn::Pg(c) => c.txn_begin().await,
-            EditorConn::My(_) => Err(AppError::validation(MY_LATER)),
+            EditorConn::My(c) => c.txn_begin().await,
         }
     }
     pub async fn txn_end(&self, commit: bool) -> AppResult<()> {
         match self {
             EditorConn::Pg(c) => c.txn_end(commit).await,
-            EditorConn::My(_) => Ok(()),
+            EditorConn::My(c) => c.txn_end(commit).await,
         }
     }
     pub async fn txn_state(&self) -> AppResult<run::TxnState> {
         match self {
             EditorConn::Pg(c) => c.txn_state().await,
-            EditorConn::My(_) => Ok(run::TxnState { active: false, statements: 0, age_s: 0, failed: false, locks: 0 }),
+            EditorConn::My(c) => c.txn_state().await,
         }
     }
     pub async fn explain(&self, text: &str, analyze: bool, timeout_ms: u32) -> AppResult<explain::ExplainPlan> {

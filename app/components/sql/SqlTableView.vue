@@ -44,7 +44,7 @@ const total = computed(() => {
 // ---- Editing (F22): a table with a key, in a database that allows changes
 const databases = useDatabasesStore()
 const mode = computed(() => databases.rows.find(d => d.id === store.dbId)?.write_mode ?? 'confirm')
-const editable = computed(() => !store.isMy && t.value.kind === 'table' && !!t.value.info?.columns.some(c => c.pk_position !== null) && mode.value !== 'read_only')
+const editable = computed(() => t.value.kind === 'table' && !!t.value.info?.columns.some(c => c.pk_position !== null) && mode.value !== 'read_only')
 const changes = computed(() => store.changeCount(t.value))
 const noKey = computed(() => !!t.value.info && !t.value.info.columns.some(c => c.pk_position !== null))
 

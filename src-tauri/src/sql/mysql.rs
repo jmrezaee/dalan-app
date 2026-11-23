@@ -250,7 +250,9 @@ impl MyConn {
             | CapabilityFlags::CLIENT_SECURE_CONNECTION
             | CapabilityFlags::CLIENT_LONG_PASSWORD
             | CapabilityFlags::CLIENT_TRANSACTIONS
-            | CapabilityFlags::CLIENT_PLUGIN_AUTH;
+            | CapabilityFlags::CLIENT_PLUGIN_AUTH
+            // An UPDATE reports the rows it matched, not only the ones whose value changed (the grid's check needs that).
+            | CapabilityFlags::CLIENT_FOUND_ROWS;
         caps &= offered;
         if login.database.as_deref().is_some_and(|d| !d.is_empty()) {
             caps |= CapabilityFlags::CLIENT_CONNECT_WITH_DB;

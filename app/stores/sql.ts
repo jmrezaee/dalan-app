@@ -728,8 +728,13 @@ function setup() {
   /** Begin, commit or roll back the manual transaction; `state` just reads it. Returns false when the server said no. */
   async function txn(q: QueryTab, action: 'begin' | 'commit' | 'rollback' | 'state') {
     try {
+      const was = !!q.txn?.active
       const st = await api.sqlTxn(connId.value, editorId(q), action)
       q.txn = st.active ? st : null
+      // The server ended it on its own (MySQL and MariaDB commit at every DDL statement): say so.
+      if (action === 'state' && was && !st.active) {
+        q.messages.push({ kind: 'info', text: 'That statement committed the transaction by itself (MySQL and MariaDB do that for DDL). The next run starts a new one.' })
+      }
       return true
     }
     catch (e) {

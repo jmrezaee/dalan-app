@@ -481,7 +481,11 @@ pub async fn sql_grid_prepare(
     if decide(target.mode, Class::Write) == Decision::Refuse {
         return Err(gate::read_only_error(&target.name));
     }
-    let stmts = state.sql.pg(&conn_id).await?.grid_statements(&edits).await?;
+    let stmts = if let Some(my) = state.sql.my(&conn_id).await? {
+        my.grid_statements(&edits).await?
+    } else {
+        state.sql.pg(&conn_id).await?.grid_statements(&edits).await?
+    };
     let statements = stmts.iter().map(|s| s.shown.clone()).collect();
     let id = state.sql.grid_pending.put(&conn_id, Class::Write, stmts)?;
     Ok(GridPending { id, db_name: target.name, environment: target.environment, statements })
@@ -500,6 +504,9 @@ pub async fn sql_grid_commit(
     let db_id = state.sql.db_id(&conn_id)?;
     let target = sql::gate_target(&state.store(), &db_id).await?;
     gate::approve(target.mode, class, &target.name, None)?;
+    if let Some(my) = state.sql.my(&conn_id).await? {
+        return my.grid_commit(&stmts).await;
+    }
     state.sql.pg(&conn_id).await?.grid_commit(&stmts).await
 }
 

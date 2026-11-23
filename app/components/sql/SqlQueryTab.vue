@@ -118,7 +118,7 @@ onMounted(() => { if (!databases.savedLoaded) void databases.refreshSaved() })
       <Button v-if="!store.isMy" variant="ghost" size="sm" :disabled="q.running" :data-testid="tid('sql-explain-analyze')" title="Runs the statement (a read) inside a transaction that is rolled back, and times each step" @click="explainNow(true)">Explain analyze</Button>
       <Button variant="ghost" size="sm" @click="store.format(q)">Format</Button>
       <Button variant="ghost" size="sm" @click="save()"><Save />Save</Button>
-      <Button v-if="!store.isMy" variant="secondary" size="sm" :aria-pressed="q.manual" :disabled="q.running || !!q.txn?.active" :title="q.manual ? 'Statements wait for Commit' : 'Each statement commits on its own'" :data-testid="tid('sql-manual')" @click="store.setManual(q, !q.manual)">{{ q.manual ? 'Manual' : 'Auto-commit' }}</Button>
+      <Button variant="secondary" size="sm" :aria-pressed="q.manual" :disabled="q.running || !!q.txn?.active" :title="q.manual ? 'Statements wait for Commit' : 'Each statement commits on its own'" :data-testid="tid('sql-manual')" @click="store.setManual(q, !q.manual)">{{ q.manual ? 'Manual' : 'Auto-commit' }}</Button>
       <span class="ml-auto flex items-center gap-2 text-xs text-muted">
         <label :for="`${tabKey}-${q.id}-limit`">Limit</label>
         <Input :id="`${tabKey}-${q.id}-limit`" v-model="limitText" class="h-7 w-20 text-xs" inputmode="numeric" autocomplete="off" />

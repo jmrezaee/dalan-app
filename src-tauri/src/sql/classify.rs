@@ -189,6 +189,11 @@ pub fn at_cursor(pieces: &[Piece], cursor: usize) -> Option<&Piece> {
 }
 
 /// The words of a statement, upper-cased, comments skipped. Quoted names are not words.
+/// The statement's own words, upper-cased (comments and quoted names skipped).
+pub fn words_for(sql: &str, d: Dialect) -> Vec<String> {
+    words(sql, d)
+}
+
 fn words(sql: &str, d: Dialect) -> Vec<String> {
     let dialect = d.sql();
     Tokenizer::new(dialect.as_ref(), sql)
