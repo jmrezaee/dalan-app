@@ -1,4 +1,4 @@
-//! Backup and restore (S43, F26) with the engine's own tools: `pg_dump -Fc` and `pg_restore`. On a route through a
+//! Backup and restore (S43, F26) with the engine's own tools: `pg_dump -Fc` and `pg_restore`, `mysqldump` and `mysql`, `mongodump --archive` and `mongorestore --archive`. On a route through a
 //! host the tool runs ON the host over an SSH exec channel (next to the data, matching the server's version) and its
 //! output streams to a file on this computer; on a direct route it runs on this computer if it is installed.
 //!
@@ -32,6 +32,8 @@ pub fn tool_candidates(engine: Engine, tool: Tool) -> AppResult<Vec<&'static str
         (Engine::Mysql, Tool::Restore) => vec!["mysql"],
         (Engine::Mariadb, Tool::Dump) => vec!["mariadb-dump", "mysqldump"],
         (Engine::Mariadb, Tool::Restore) => vec!["mariadb", "mysql"],
+        (Engine::Mongodb, Tool::Dump) => vec!["mongodump"],
+        (Engine::Mongodb, Tool::Restore) => vec!["mongorestore"],
         (e, _) => return Err(AppError::validation(format!("Backups of {} databases arrive with their own update.", e.label()))),
     })
 }
@@ -42,6 +44,60 @@ pub fn tool_name(engine: Engine, tool: Tool) -> AppResult<&'static str> {
 
 pub fn is_my(engine: Engine) -> bool {
     matches!(engine, Engine::Mysql | Engine::Mariadb)
+}
+
+pub fn is_mongo(engine: Engine) -> bool {
+    engine == Engine::Mongodb
+}
+
+/// Arguments for `mongodump` and `mongorestore` (the config file comes first, added by the caller). The archive goes
+/// through standard output (a dump) or standard input (a restore), gzipped.
+pub fn args_mongo(cfg: &SqlConfig, tool: Tool) -> Vec<String> {
+    let mut a: Vec<String> = vec!["--archive".into(), "--gzip".into()];
+    // A seed list backs up from its first member; the tool follows a replica set from there.
+    let first = cfg.address.split(',').next().unwrap_or("").trim();
+    let (host, port) = match first.rsplit_once(':').and_then(|(h, p)| p.parse::<u16>().ok().map(|p| (h, p))) {
+        Some((h, p)) => (h.to_string(), p),
+        None => (first.to_string(), cfg.port),
+    };
+    // `--option=value` in one word: a value that starts with `-` can't be read as another option.
+    a.extend([format!("--host={host}"), format!("--port={port}")]);
+    if !cfg.user.is_empty() {
+        a.extend([format!("--username={}", cfg.user), format!("--authenticationDatabase={}", cfg.auth_source.clone().filter(|x| !x.is_empty()).unwrap_or_else(|| "admin".into()))]);
+    }
+    match cfg.tls {
+        crate::dbs::transport::TlsMode::Off => {}
+        // "Require" is encryption without checking the certificate, the same as in the app's own connection.
+        crate::dbs::transport::TlsMode::Require => a.extend(["--tls".into(), "--tlsInsecure".into()]),
+        crate::dbs::transport::TlsMode::Verify => a.push("--tls".into()),
+    }
+    match (tool, cfg.database.as_deref().filter(|d| !d.is_empty())) {
+        (Tool::Dump, Some(d)) => a.push(format!("--db={d}")),
+        // Restore into this database only, replacing what is there (the dialog says so and asks for the name).
+        (Tool::Restore, Some(d)) => a.extend([format!("--nsInclude={d}.*"), "--drop".into()]),
+        (Tool::Restore, None) => a.push("--drop".into()),
+        (Tool::Dump, None) => {}
+    }
+    a
+}
+
+/// The first line of the tool's input: a one-line YAML config with the password (read by the wrapper into a private
+/// temporary file, removed when the tool ends), so the password is never on a command line.
+fn config_mongo(cfg: &SqlConfig) -> AppResult<Vec<u8>> {
+    let p = cfg.password.as_ref().map(|p| p.as_str()).unwrap_or("");
+    // Control characters and the Unicode line separators are not valid inside a YAML string: refuse, don't alter.
+    if p.chars().any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}')) {
+        return Err(AppError::validation("This password has a control character or line break in it, so it can't be handed to the dump tool. Use a different one for backups."));
+    }
+    Ok(format!("password: \"{}\"\n", p.replace('\\', "\\\\").replace('"', "\\\"")).into_bytes())
+}
+
+/// What `sh -c` runs on the host for MongoDB: one input line becomes a private config file for the tool.
+pub fn wrapper_mongo(tool: &str, args: &[String]) -> String {
+    format!(
+        "umask 077; f=$(mktemp) || exit 1; trap 'rm -f \"$f\"' EXIT HUP INT TERM; {{ IFS= read -r l1; printf '%s\\n' \"$l1\" > \"$f\"; }}; {tool} --config=\"$f\" {}",
+        args.iter().map(|a| shq(a)).collect::<Vec<_>>().join(" ")
+    )
 }
 
 /// The first candidate that is installed (on the host or here) and its version line.
@@ -169,7 +225,8 @@ pub fn runs_on(ssh: Option<&Connected>) -> String {
 }
 
 fn missing(tool: &str, on: &str) -> AppError {
-    AppError::new(ErrorCode::DbToolMissing, format!("{tool} isn't installed on {on}. Install the PostgreSQL client tools there, then try again."))
+    let what = if tool.starts_with("mongo") { "the MongoDB Database Tools" } else if tool.starts_with("my") || tool.starts_with("maria") { "the MySQL or MariaDB client tools" } else { "the PostgreSQL client tools" };
+    AppError::new(ErrorCode::DbToolMissing, format!("{tool} isn't installed on {on}. Install {what} there, then try again."))
 }
 
 /// The tool's version line, or `DbToolMissing`.
@@ -233,16 +290,17 @@ fn finish(status: Option<i32>, stderr: &str, stopped: bool, tool: &str) -> AppRe
 
 pub async fn run(mut r: Run<'_>) -> AppResult<()> {
     let my = is_my(r.cfg.engine);
-    let tool: String = if my { resolve_tool(r.ssh, r.cfg.engine, r.tool).await?.0 } else { tool_name(r.cfg.engine, r.tool)?.to_string() };
+    let mongo = is_mongo(r.cfg.engine);
+    let tool: String = if my || mongo { resolve_tool(r.ssh, r.cfg.engine, r.tool).await?.0 } else { tool_name(r.cfg.engine, r.tool)?.to_string() };
     let tool = tool.as_str();
-    let a = if my { args_my(r.cfg, r.tool) } else { args(r.cfg, r.tool) };
-    let pw = if my { config_lines(r.cfg)? } else { password_line(r.cfg)? };
+    let a = if my { args_my(r.cfg, r.tool) } else if mongo { args_mongo(r.cfg, r.tool) } else { args(r.cfg, r.tool) };
+    let pw = if my { config_lines(r.cfg)? } else if mongo { config_mongo(r.cfg)? } else { password_line(r.cfg)? };
     let io = |e: std::io::Error| AppError::internal(format!("File error: {e}"));
     let (mut bytes, mut stderr) = (0f64, String::new());
     if let Some(ssh) = r.ssh {
         let ch = ssh.handle.channel_open_session().await.map_err(|e| AppError::new(ErrorCode::HostUnreachable, format!("Couldn't open a channel on the host: {e}")))?;
         let (mut read, write) = ch.split();
-        write.exec(true, format!("sh -c {}", shq(&if my { wrapper_my(tool, &a) } else { wrapper(tool, &a) }))).await.map_err(|e| AppError::internal(e.to_string()))?;
+        write.exec(true, format!("sh -c {}", shq(&if my { wrapper_my(tool, &a) } else if mongo { wrapper_mongo(tool, &a) } else { wrapper(tool, &a) }))).await.map_err(|e| AppError::internal(e.to_string()))?;
         let file = r.stdin_file.map(Path::to_path_buf);
         // Feeding the tool is its own task: the tool's answers must be read meanwhile or both sides would wait.
         let feeder = tokio::spawn(async move {
@@ -315,12 +373,13 @@ pub async fn run(mut r: Run<'_>) -> AppResult<()> {
     }
     // This computer: the same tool, the password in the child's environment (not on its command line).
     // MySQL's tools read the password from a private option file (listed first; `--defaults-file` so no other option file, such as ~/.my.cnf, can override it); PostgreSQL's from the environment.
-    let cfg_file = if my { Some(LocalConfig::create(&pw)?) } else { None };
-    let mut full: Vec<String> = cfg_file.iter().map(|c| format!("--defaults-file={}", c.0.display())).collect();
+    let cfg_file = if my || mongo { Some(LocalConfig::create(&pw)?) } else { None };
+    let opt = if mongo { "--config" } else { "--defaults-file" };
+    let mut full: Vec<String> = cfg_file.iter().map(|c| format!("{opt}={}", c.0.display())).collect();
     full.extend(a.iter().cloned());
     let mut cmd = tokio::process::Command::new(local_tool(tool));
     cmd.args(&full);
-    if !my {
+    if !my && !mongo {
         cmd.env("PGPASSWORD", String::from_utf8_lossy(&pw).trim_end_matches('\n'));
     }
     let mut child = cmd
@@ -475,6 +534,38 @@ mod docker_tests {
         assert_eq!(String::from_utf8(dump(&my, None).await.1).unwrap(), "MARIADB-DUMP\n");
         std::fs::remove_file(dir.join("mariadb-dump")).unwrap();
         assert!(String::from_utf8(dump(&my, None).await.1).unwrap().starts_with("mode=600"));
+        // MongoDB: the password reaches the tool in a private one-line config file, never in its arguments, and the file
+        // is gone afterwards; the archive goes through the tool's output.
+        script("mongodump", "cfg=${1#--config=}\necho \"mode=$(stat -f %Lp \"$cfg\" 2>/dev/null || stat -c %a \"$cfg\")\"\ncat \"$cfg\"\necho \"$cfg\" > \"$0.cfgpath\"\necho \"args: $*\" >&2");
+        let mut mg = cfg();
+        mg.engine = Engine::Mongodb;
+        mg.port = 27017;
+        mg.address = "h1:27018,h2:27017".into();
+        mg.database = Some("shop".into());
+        mg.auth_source = Some("admin".into());
+        mg.password = Some(Zeroizing::new("p\"w\\x".into()));
+        let (r, out, log) = dump(&mg, None).await;
+        r.unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.starts_with("mode=600\npassword: \"p\\\"w\\\\x\"\n"), "{out}");
+        assert!(log.iter().all(|l| !l.contains("p\"w")), "the password is on the command line: {log:?}");
+        assert!(log.iter().any(|l| l.contains("--archive --gzip --host=h1 --port=27018 --username=app --authenticationDatabase=admin --db=shop")), "{log:?}");
+        let used = std::fs::read_to_string(dir.join("mongodump.cfgpath")).unwrap();
+        assert!(!std::path::Path::new(used.trim()).exists(), "the config file was not removed");
+        // Restore replaces only this database's collections.
+        let r = args_mongo(&mg, Tool::Restore).join(" ");
+        assert!(r.contains("--nsInclude=shop.* --drop"), "{r}");
+        let mut ctl = cfg();
+        ctl.engine = Engine::Mongodb;
+        ctl.password = Some(Zeroizing::new("a\u{7}b".into()));
+        assert!(config_mongo(&ctl).is_err());
+        ctl.password = Some(Zeroizing::new("a\u{2028}b".into()));
+        assert!(config_mongo(&ctl).is_err());
+        ctl.password = Some(Zeroizing::new("p#:x -y".into()));
+        assert_eq!(config_mongo(&ctl).unwrap(), b"password: \"p#:x -y\"\n");
+        mg.tls = TlsMode::Require;
+        assert!(args_mongo(&mg, Tool::Dump).join(" ").contains("--tls --tlsInsecure"));
+        assert_eq!(wrapper_mongo("mongodump", &["--archive".into()]), "umask 077; f=$(mktemp) || exit 1; trap 'rm -f \"$f\"' EXIT HUP INT TERM; { IFS= read -r l1; printf '%s\\n' \"$l1\" > \"$f\"; }; mongodump --config=\"$f\" '--archive'");
         // Stop: the child is killed and nothing is reported as a success.
         script("pg_dump", "sleep 30");
         let stop = AtomicBool::new(false);

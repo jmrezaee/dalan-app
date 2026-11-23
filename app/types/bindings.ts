@@ -47,6 +47,11 @@ export const commands = {
 	mgCount: (connId: string, db: string, coll: string, filter: string) => typedError<MgCount, AppError>(__TAURI_INVOKE("mg_count", { connId, db, coll, filter })),
 	/**  One whole document by `_id` in canonical extended JSON, for the editor. */
 	mgDocGet: (connId: string, db: string, coll: string, id: string) => typedError<string, AppError>(__TAURI_INVOKE("mg_doc_get", { connId, db, coll, id })),
+	/**
+	 *  Writes a collection (or the documents matching `filter`) to a file the person picks, one extended JSON document per
+	 *  line. The file is written by Rust; `None` when the save dialog was cancelled.
+	 */
+	mgExport: (connId: string, transferId: string, db: string, coll: string, filter: string, progress: Channel<TransferProgress>) => typedError<TransferDone | null, AppError>(__TAURI_INVOKE("mg_export", { connId, transferId, db, coll, filter, progress })),
 	/**  One shell line. Reads run at once; a change is parsed, classified and held like every other change. */
 	mgShell: (connId: string, db: string, line: string) => typedError<MgShellResult_Serialize, AppError>(__TAURI_INVOKE("mg_shell", { connId, db, line })),
 	/**  Runs what `mg_shell` held, after the mode is asked again (and the database's name, for a dangerous command). */

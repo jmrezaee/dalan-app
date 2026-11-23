@@ -255,3 +255,54 @@ pub async fn mg_shell_commit(state: State<'_, AppState>, conn_id: String, pendin
     let reply = docs::run_reply(&*state.sql.mongo(&conn_id).await?, &write).await?;
     Ok(shell::reply_of(&shell::Shape::Doc, reply))
 }
+
+// ---- Export (S43)
+
+/// Writes a collection (or the documents matching `filter`) to a file the person picks, one extended JSON document per
+/// line. The file is written by Rust; `None` when the save dialog was cancelled.
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::too_many_arguments)]
+pub async fn mg_export(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    conn_id: String,
+    transfer_id: String,
+    db: String,
+    coll: String,
+    filter: String,
+    progress: tauri::ipc::Channel<crate::sql::transfer::TransferProgress>,
+) -> AppResult<Option<crate::commands::sql::TransferDone>> {
+    state.require_unlocked()?;
+    docs::parse_doc(&filter, "The filter")?;
+    let conn = state.sql.mongo(&conn_id).await?;
+    let Some(path) = crate::commands::sql::pick_save(&app, format!("{db}.{coll}.jsonl")).await? else {
+        return Ok(None);
+    };
+    // The file first: a failure here must not leave a stop flag behind.
+    let file = std::fs::File::create(&path).map_err(|e| crate::error::AppError::validation(format!("Couldn't create that file: {e}")))?;
+    let stop = state.sql.begin_transfer(&transfer_id);
+    let mut out = std::io::BufWriter::new(file);
+    let result = docs::export(&conn, &db, &coll, &filter, &mut out, &stop, &|rows, bytes| {
+        let _ = progress.send(crate::sql::transfer::TransferProgress { rows, bytes });
+    })
+    .await;
+    state.sql.end_transfer(&transfer_id);
+    let flushed = std::io::Write::flush(&mut out);
+    drop(out);
+    match (result, flushed) {
+        (Ok(rows), Ok(())) => {
+            let bytes = std::fs::metadata(&path).map(|m| m.len() as f64).unwrap_or(0.0);
+            Ok(Some(crate::commands::sql::TransferDone { path: path.display().to_string(), rows, bytes }))
+        }
+        (Err(e), _) => {
+            // An export that did not finish is not a file to keep.
+            let _ = std::fs::remove_file(&path);
+            Err(e)
+        }
+        (_, Err(e)) => {
+            let _ = std::fs::remove_file(&path);
+            Err(crate::error::AppError::internal(format!("File error: {e}")))
+        }
+    }
+}

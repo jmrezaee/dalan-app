@@ -3,7 +3,7 @@
 // real backend's job. Edits change the fake's documents so a test can see them come back.
 import { fail, type Handlers } from '../types'
 
-type Keys = 'mgTree' | 'mgFind' | 'mgCount' | 'mgDocGet' | 'mgDocPrepare' | 'mgDocCommit' | 'mgDocDiscard' | 'mgAggregate' | 'mgAggPrepare' | 'mgViewPrepare' | 'mgPipelineCode' | 'mgSchema' | 'mgIndexes' | 'mgIndexPrepare' | 'mgValidation' | 'mgValidationCheck' | 'mgValidationPrepare' | 'mgShell' | 'mgShellCommit'
+type Keys = 'mgTree' | 'mgFind' | 'mgCount' | 'mgDocGet' | 'mgDocPrepare' | 'mgDocCommit' | 'mgDocDiscard' | 'mgAggregate' | 'mgAggPrepare' | 'mgViewPrepare' | 'mgPipelineCode' | 'mgSchema' | 'mgIndexes' | 'mgIndexPrepare' | 'mgValidation' | 'mgValidationCheck' | 'mgValidationPrepare' | 'mgShell' | 'mgShellCommit' | 'mgExport'
 type Doc = Record<string, any>
 
 const store: Record<string, Doc[]> = {}
@@ -200,6 +200,13 @@ export const mongo: Pick<Handlers, Keys> = {
   mgValidationPrepare: (a, { m }) => {
     parseJson(a.validator, 'The rules')
     return hold(m, a.connId, a.validator.trim() ? `Change the validation rules of ${a.coll} (level ${a.level}, action ${a.action}). Existing documents are not touched.` : `Remove the validation rules of ${a.coll}.`, 'confirm', () => { rules[`${a.db}.${a.coll}`] = { validator: a.validator, level: a.level, action: a.action } })
+  },
+  mgExport: (a, { channel, send, tag }) => {
+    parseJson(a.filter, 'The filter')
+    const n = docs(a.db, a.coll).filter(d => matches(d, parseJson(a.filter, 'The filter'))).length
+    send(channel(a.progress), { rows: n, bytes: n * 80 })
+    tag(`export:${a.db}.${a.coll}.jsonl`)
+    return { path: `/tmp/${a.db}.${a.coll}.jsonl`, rows: n, bytes: n * 80 }
   },
   mgShell: (a, { m }) => {
     const line: string = a.line.trim().replace(/;$/, '')

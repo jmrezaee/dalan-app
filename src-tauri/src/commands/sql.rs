@@ -792,7 +792,7 @@ pub fn sql_session_discard(state: State<'_, AppState>, conn_id: String, pending_
 
 // ---- Transfer (S43, F26)
 
-async fn pick_save(app: &tauri::AppHandle, name: String) -> AppResult<Option<std::path::PathBuf>> {
+pub(crate) async fn pick_save(app: &tauri::AppHandle, name: String) -> AppResult<Option<std::path::PathBuf>> {
     let dialog_app = app.clone();
     let picked = tokio::task::spawn_blocking(move || dialog_app.dialog().file().set_file_name(&name).blocking_save_file())
         .await
@@ -1028,7 +1028,7 @@ pub async fn sql_backup_start(
     let cfg = sql::load(&state.store(), &db_id).await?;
     backup::tool_name(cfg.engine, Tool::Dump)?;
     let ssh = state.sql.ssh(&conn_id).await?;
-    let ext = if backup::is_my(cfg.engine) { "sql" } else { "dump" };
+    let ext = if backup::is_my(cfg.engine) { "sql" } else if backup::is_mongo(cfg.engine) { "archive.gz" } else { "dump" };
     let name = format!("{}-{}.{ext}", cfg.database.clone().unwrap_or_else(|| cfg.name.clone()), chrono_free_date());
     let Some(path) = pick_save(&app, name).await? else {
         return Ok(None);
@@ -1109,7 +1109,7 @@ pub async fn sql_restore_prepare(app: tauri::AppHandle, state: State<'_, AppStat
     let cfg = sql::load(&state.store(), &db_id).await?;
     // The tool must exist before anything is asked.
     let ssh_for_check = state.sql.ssh(&conn_id).await?;
-    if backup::is_my(cfg.engine) {
+    if backup::is_my(cfg.engine) || backup::is_mongo(cfg.engine) {
         backup::resolve_tool(ssh_for_check.as_deref(), cfg.engine, Tool::Restore).await?;
     } else {
         backup::tool_name(cfg.engine, Tool::Restore)?;

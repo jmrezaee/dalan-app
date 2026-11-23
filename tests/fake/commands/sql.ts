@@ -265,7 +265,10 @@ export const sql: Pick<Handlers, Keys> = {
     importHeld.delete(a.pendingId)
     return null
   },
-  sqlBackupCheck: () => ({ tool: 'pg_dump', runs_on: 'db-primary', version: 'pg_dump (PostgreSQL) 16.4', problem: null }),
+  sqlBackupCheck: (a, { m }) => {
+    const mongo = m.dbs.find(d => d.id === m.sqlConns.get(a.connId)?.db)?.engine === 'mongodb'
+    return mongo ? { tool: 'mongodump', runs_on: 'db-primary', version: 'mongodump version: 100.9.4', problem: null } : { tool: 'pg_dump', runs_on: 'db-primary', version: 'pg_dump (PostgreSQL) 16.4', problem: null }
+  },
   sqlBackupStart: (a, { channel, send, tag }) => {
     send(channel(a.progress), { rows: 0, bytes: 5 * 2 ** 20 })
     tag('backup:app.dump')

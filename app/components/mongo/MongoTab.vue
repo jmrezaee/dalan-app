@@ -75,16 +75,21 @@ function onTabKey(e: KeyboardEvent, i: number) {
             </button>
             <button type="button" class="mr-1.5 grid size-5 place-items-center rounded hover:bg-surface-hover" :aria-label="`Close ${t.coll}`" @click="store.closeColl(t.id)"><X class="size-3" aria-hidden="true" /></button>
           </div>
+          <div v-if="store.transferOpen" :class="cn('flex shrink-0 items-center border-r border-border text-sm text-muted', store.activeTab === 'transfer' && 'bg-bg text-text shadow-[inset_0_2px_0_var(--color-accent)]')">
+            <button :id="`${tabKey}-tab-transfer`" type="button" :aria-current="store.activeTab === 'transfer' ? 'true' : undefined" class="h-full cursor-default pl-3 pr-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" @click="store.activeTab = 'transfer'">Transfer</button>
+            <button type="button" class="mr-1.5 grid size-5 place-items-center rounded hover:bg-surface-hover" aria-label="Close Transfer" @click="store.closeTransfer()"><X class="size-3" aria-hidden="true" /></button>
+          </div>
           <div v-if="store.shellOpen" :class="cn('flex shrink-0 items-center border-r border-border text-sm text-muted', store.activeTab === 'shell' && 'bg-bg text-text shadow-[inset_0_2px_0_var(--color-accent)]')">
             <button :id="`${tabKey}-tab-shell`" type="button" :aria-current="store.activeTab === 'shell' ? 'true' : undefined" class="h-full cursor-default pl-3 pr-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" @click="store.activeTab = 'shell'">Shell</button>
             <button type="button" class="mr-1.5 grid size-5 place-items-center rounded hover:bg-surface-hover" aria-label="Close Shell" @click="store.closeShell()"><X class="size-3" aria-hidden="true" /></button>
           </div>
         </div>
+        <MongoTransfer v-if="store.transferOpen" v-show="store.activeTab === 'transfer'" :tab-key="tabKey" />
         <MongoShell v-if="store.shellOpen" v-show="store.activeTab === 'shell'" :tab-key="tabKey" />
         <template v-for="t in store.tabs" :key="t.id">
           <MongoCollection v-show="store.activeTab === t.id" :tab-key="tabKey" :tab-data="t" />
         </template>
-        <EmptyState v-if="!store.tabs.length && !store.shellOpen" :icon="FileJson" title="Open a collection" text="Pick a collection from the list. Reads run at once; changes show what they will do and ask first." />
+        <EmptyState v-if="!store.tabs.length && !store.shellOpen && !store.transferOpen" :icon="FileJson" title="Open a collection" text="Pick a collection from the list. Reads run at once; changes show what they will do and ask first." />
       </section>
     </div>
 

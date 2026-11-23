@@ -49,6 +49,11 @@ export function useTauri() {
     mgDocGet: (connId: string, db: string, coll: string, id: string) => unwrap(commands.mgDocGet(connId, db, coll, id)),
     mgDocPrepare: (connId: string, db: string, coll: string, op: MgDocOp) => unwrap(commands.mgDocPrepare(connId, db, coll, op)),
     mgDocCommit: (connId: string, pendingId: string, typedName: string | null = null) => unwrap(commands.mgDocCommit(connId, pendingId, typedName)),
+    mgExport: (connId: string, transferId: string, db: string, coll: string, filter: string, onProgress: (p: TransferProgress) => void) => {
+      const progress = new Channel<TransferProgress>()
+      progress.onmessage = onProgress
+      return unwrap(commands.mgExport(connId, transferId, db, coll, filter, progress as never))
+    },
     mgShell: (connId: string, db: string, line: string) => unwrap(commands.mgShell(connId, db, line)),
     mgShellCommit: (connId: string, pendingId: string, typedName: string | null) => unwrap(commands.mgShellCommit(connId, pendingId, typedName)),
     mgAggregate: (connId: string, request: MgAggRequest) => unwrap(commands.mgAggregate(connId, request)),

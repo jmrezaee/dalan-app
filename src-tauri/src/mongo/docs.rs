@@ -104,6 +104,41 @@ pub fn mg_doc(d: &Document) -> MgDoc {
     MgDoc { id: id_text(d), relaxed: text, cut }
 }
 
+/// Streams the documents of a collection that match `filter` to `out`, one compact canonical extended JSON document
+/// per line (what `mongoimport` reads), and returns how many were written. Stops (with `Ok`) when `stop` is set.
+pub async fn export(c: &MongoConn, db: &str, coll: &str, filter: &str, out: &mut (dyn std::io::Write + Send), stop: &std::sync::atomic::AtomicBool, progress: &(dyn Fn(f64, f64) + Sync)) -> AppResult<f64> {
+    use std::sync::atomic::Ordering;
+    let f = parse_doc(filter, "The filter")?;
+    let io = |e: std::io::Error| AppError::internal(format!("File error: {e}"));
+    let mut r = c.command(db, doc! { "find": coll, "filter": f, "batchSize": 1000 }).await?;
+    let (mut rows, mut bytes) = (0f64, 0f64);
+    loop {
+        let cur = r.get_document("cursor").map_err(|_| AppError::new(ErrorCode::DbRefused, "MongoDB's answer to find had no cursor."))?;
+        let batch = if cur.contains_key("firstBatch") { "firstBatch" } else { "nextBatch" };
+        for d in names(cur, batch) {
+            let line = Bson::Document(d).into_canonical_extjson().to_string();
+            out.write_all(line.as_bytes()).map_err(io)?;
+            out.write_all(b"\n").map_err(io)?;
+            rows += 1.0;
+            bytes += line.len() as f64 + 1.0;
+        }
+        progress(rows, bytes);
+        let id = match cur.get("id") {
+            Some(Bson::Int64(i)) => *i,
+            Some(Bson::Int32(i)) => i64::from(*i),
+            _ => 0,
+        };
+        if id == 0 {
+            return Ok(rows);
+        }
+        if stop.load(Ordering::SeqCst) {
+            let _ = c.command(db, doc! { "killCursors": coll, "cursors": [id] }).await;
+            return Err(AppError::new(ErrorCode::Internal, "Stopped."));
+        }
+        r = c.command(db, doc! { "getMore": id, "collection": coll, "batchSize": 1000 }).await?;
+    }
+}
+
 /// One whole document by `_id`, as canonical extended JSON: what the editor opens (never a projected copy).
 pub async fn get(c: &MongoConn, db: &str, coll: &str, id: &str) -> AppResult<String> {
     let id = parse_id(id)?;
@@ -524,5 +559,41 @@ mod docker_tests {
         assert!(run(&c, &del).await.is_err());
         assert!(run(&c, &rep).await.is_err());
         let _ = c.command("d8docs", doc! { "drop": "items" }).await;
+    }
+}
+
+#[cfg(test)]
+mod export_tests {
+    use super::*;
+    use crate::dbs::transport::{self, Target, TlsMode};
+    use crate::dbs::Engine;
+    use crate::mongo::conn::MongoLogin;
+    use std::sync::{atomic::AtomicBool, Arc};
+    use zeroize::Zeroizing;
+
+    #[tokio::test]
+    #[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+    async fn l3_mongo_export_writes_one_exact_document_per_line() {
+        let reopen: crate::sql::pg::Reopen = Arc::new(|| Box::pin(async { transport::direct_for(Engine::Mongodb, &Target { address: "127.0.0.1".into(), port: 17017, tls: false, tls_server_name: None }).await }));
+        let stream = (reopen)().await.unwrap();
+        let login = MongoLogin { user: "app".into(), password: Some(Zeroizing::new("test-mongo".into())), auth_db: "admin".into(), tls: TlsMode::Off, server_name: "127.0.0.1".into() };
+        let c = MongoConn::connect(stream, login, reopen).await.unwrap().0;
+        let _ = c.command("d10x", doc! { "drop": "e" }).await;
+        let rows: Vec<Document> = (0..2500).map(|i| doc! { "_id": i, "big": i64::from(i) * 10_000_000_000, "name": format!("né {i}") }).collect();
+        for ch in rows.chunks(500) {
+            c.command("d10x", doc! { "insert": "e", "documents": ch.to_vec() }).await.unwrap();
+        }
+        let mut out: Vec<u8> = vec![];
+        let n = export(&c, "d10x", "e", "", &mut out, &AtomicBool::new(false), &|_, _| {}).await.unwrap();
+        assert_eq!(n, 2500.0);
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(text.lines().count(), 2500);
+        let last = parse_doc(text.lines().last().unwrap(), "t").unwrap();
+        assert_eq!(last.get_i64("big").unwrap(), 2499 * 10_000_000_000);
+        assert_eq!(last.get_str("name").unwrap(), "né 2499");
+        let mut out: Vec<u8> = vec![];
+        assert_eq!(export(&c, "d10x", "e", r#"{"_id":{"$lt":10}}"#, &mut out, &AtomicBool::new(false), &|_, _| {}).await.unwrap(), 10.0);
+        assert!(export(&c, "d10x", "e", "{bad", &mut vec![], &AtomicBool::new(false), &|_, _| {}).await.is_err());
+        let _ = c.command("d10x", doc! { "drop": "e" }).await;
     }
 }
