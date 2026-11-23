@@ -689,7 +689,7 @@ mod docker_tests {
 
     const SEED: &str = r#"
 drop view if exists d7_open;
-drop table if exists d7_items, d7_orders, d7_customers, d7_nokey, d7_nums, d7_cmp;
+drop table if exists d7_items, d7_orders, d7_customers, d7_nokey, d7_nums, d7_cmp, d7_imp;
 create table d7_nums (n int primary key);
 insert into d7_nums values (1);
 insert into d7_nums select n + 1 from d7_nums;
@@ -714,6 +714,7 @@ create table d7_nokey (a int, b text);
 insert into d7_nokey values (1, 'a'), (2, 'b');
 create table d7_cmp (id int primary key, f float, d decimal(10,2), s varchar(20));
 insert into d7_cmp values (1, 0.1, 1.50, 'abc');
+create table d7_imp (id int primary key, name varchar(40), amt decimal(10,2), g int generated always as (id * 2) stored);
 create view d7_open as select * from d7_orders where status = 'open';
 "#;
 
@@ -1104,6 +1105,82 @@ create view d7_open as select * from d7_orders where status = 'open';
             assert_eq!(db.signal_session(id, true, &owner).await.unwrap(), Some(true));
             assert!(!child.wait().unwrap().success(), "the session was ended");
             assert_eq!(db.signal_session(id, true, &owner).await.unwrap(), None, "gone now");
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+    async fn l3_my_export_streams_every_format_and_import_loads_in_one_transaction() {
+        use super::super::transfer::ExportFormat;
+        let _one = ONE_AT_A_TIME.lock().await;
+        for (port, pw, container, root) in SERVERS {
+            seed(container, root);
+            let db = MyDb::new(conn(port, pw).await);
+            let export = |table: &'static str, filter: &'static str, f: ExportFormat, header: bool| {
+                let db = &db;
+                async move {
+                    let mut buf: Vec<u8> = Vec::new();
+                    let (rows, _) = db.export_table("shop", table, filter, f, header, &mut buf, &|_, _| {}, &AtomicBool::new(false)).await.unwrap();
+                    (String::from_utf8(buf).unwrap(), rows)
+                }
+            };
+            let (csv, rows) = export("d7_customers", "id <= 3", ExportFormat::Csv, true).await;
+            assert_eq!(rows, 3.0);
+            assert!(csv.starts_with("id,name,long_text\n1,customer 1,xxxx"), "{}", &csv[..60]);
+            assert_eq!(csv.lines().count(), 3 + 1);
+            let (tsv, _) = export("d7_customers", "id = 2", ExportFormat::Tsv, false).await;
+            assert_eq!(tsv, "2\tcustomer 2\t\n");
+            let (json, rows) = export("d7_orders", "id <= 10", ExportFormat::Json, true).await;
+            assert_eq!(rows, 10.0);
+            let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!((v[0]["id"].clone(), v[0]["total"].clone()), (serde_json::json!(1), serde_json::json!("1.25")));
+            assert_eq!(v[9]["note"], serde_json::Value::Null);
+            let (sql, _) = export("d7_nokey", "", ExportFormat::Sql, true).await;
+            assert_eq!(sql, "insert into `shop`.`d7_nokey` (`a`, `b`) values (1, 'a');\ninsert into `shop`.`d7_nokey` (`a`, `b`) values (2, 'b');\n");
+            // The statements run: load them back into a scratch table.
+            db.conn.query("create table d7_copy like d7_nokey", 0).await.unwrap();
+            for line in sql.lines() {
+                db.conn.query(&line.replace("`d7_nokey`", "`d7_copy`"), 0).await.unwrap();
+            }
+            assert_eq!(db.count("shop", "d7_copy", "").await.unwrap(), 2);
+            db.conn.query("drop table d7_copy", 0).await.unwrap();
+            let (big, rows) = export("d7_orders", "", ExportFormat::Json, true).await;
+            assert_eq!((rows, serde_json::from_str::<serde_json::Value>(&big).unwrap().as_array().unwrap().len()), (1200.0, 1200));
+            let mut buf = Vec::new();
+            assert_eq!(db.export_table("shop", "d7_orders", "1 = 1; drop table d7_orders", ExportFormat::Csv, true, &mut buf, &|_, _| {}, &AtomicBool::new(false)).await.unwrap_err().code, ErrorCode::Validation);
+            let err = db.export_table("shop", "d7_orders", "", ExportFormat::Csv, true, &mut buf, &|_, _| {}, &AtomicBool::new(true)).await.unwrap_err();
+            assert_eq!(err.message, "Stopped.");
+            assert_eq!(db.count("shop", "d7_orders", "").await.unwrap(), 1200, "the connection is in step afterwards");
+
+            // Import: mapped columns, a skipped one, empty values as NULL; a generated column is refused.
+            let csv = "ref,who,amt,skipme\n1,\"Ada, L\",10.50,x\n2,Bob,,y\n3,\"Cy \"\"C\"\"\",7,z\n";
+            let pv = db.import_preview("shop", "d7_imp", csv, ',', true).await.unwrap();
+            assert!(pv.table_columns.iter().any(|c| c.name == "g" && c.generated) && pv.total_rows == 3.0);
+            let mapping = vec![Some("id".to_string()), Some("name".to_string()), Some("amt".to_string()), None];
+            let plan = db.import_plan("shop", "d7_imp", csv, ',', true, &mapping).await.unwrap();
+            assert_eq!(plan.rows, 3);
+            assert_eq!(db.import_commit(&plan).await.unwrap(), 3);
+            assert_eq!(db.conn.query("select name, amt is null, g from d7_imp where id in (2, 3) order by id", 0).await.unwrap().rows, vec![vec![Some("Bob".into()), Some("1".into()), Some("4".into())], vec![Some("Cy \"C\"".into()), Some("0".into()), Some("6".into())]]);
+            // Duplicate keys: the server refuses, and none of this load stays.
+            let plan = db.import_plan("shop", "d7_imp", "id,name\n10,new\n1,dup\n", ',', true, &[Some("id".into()), Some("name".into())]).await.unwrap();
+            let err = db.import_commit(&plan).await.unwrap_err();
+            assert!(err.message.contains("Nothing was loaded"), "{}", err.message);
+            assert_eq!(db.count("shop", "d7_imp", "").await.unwrap(), 3);
+            assert_eq!(db.import_plan("shop", "d7_imp", csv, ',', true, &[Some("g".into()), None, None, None]).await.unwrap_err().code, ErrorCode::Validation);
+            // The SQL format leaves out the generated column, so the statements load back.
+            let (sql, _) = export("d7_imp", "", ExportFormat::Sql, true).await;
+            assert!(sql.lines().next().unwrap().contains("(`id`, `name`, `amt`) values"), "{sql}");
+            // A table that can't roll back is refused for import; a NOT NULL column gets an error, not a silent default.
+            db.conn.query("create table d7_myisam_imp (a int) engine = MyISAM", 0).await.unwrap();
+            let e = db.import_plan("shop", "d7_myisam_imp", "a\n1\n", ',', true, &[Some("a".into())]).await.unwrap_err();
+            db.conn.query("drop table d7_myisam_imp", 0).await.unwrap();
+            assert!(e.message.contains("isn't InnoDB"), "{}", e.message);
+            db.conn.query("create table d7_strict (a int primary key, b varchar(10) not null)", 0).await.unwrap();
+            let plan = db.import_plan("shop", "d7_strict", "a,b\n1,x\n2,\n", ',', true, &[Some("a".into()), Some("b".into())]).await.unwrap();
+            let e = db.import_commit(&plan).await.unwrap_err();
+            let left = db.count("shop", "d7_strict", "").await.unwrap();
+            db.conn.query("drop table d7_strict", 0).await.unwrap();
+            assert!(e.message.contains("Nothing was loaded") && left == 0, "{} {left}", e.message);
         }
     }
 }

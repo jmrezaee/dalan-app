@@ -23,11 +23,94 @@ pub enum Tool {
     Restore,
 }
 
+/// The tools that can do the job, in the order to try (MariaDB's own names first, then the MySQL ones it still ships).
+pub fn tool_candidates(engine: Engine, tool: Tool) -> AppResult<Vec<&'static str>> {
+    Ok(match (engine, tool) {
+        (Engine::Postgres, Tool::Dump) => vec!["pg_dump"],
+        (Engine::Postgres, Tool::Restore) => vec!["pg_restore"],
+        (Engine::Mysql, Tool::Dump) => vec!["mysqldump"],
+        (Engine::Mysql, Tool::Restore) => vec!["mysql"],
+        (Engine::Mariadb, Tool::Dump) => vec!["mariadb-dump", "mysqldump"],
+        (Engine::Mariadb, Tool::Restore) => vec!["mariadb", "mysql"],
+        (e, _) => return Err(AppError::validation(format!("Backups of {} databases arrive with their own update.", e.label()))),
+    })
+}
+
 pub fn tool_name(engine: Engine, tool: Tool) -> AppResult<&'static str> {
-    match (engine, tool) {
-        (Engine::Postgres, Tool::Dump) => Ok("pg_dump"),
-        (Engine::Postgres, Tool::Restore) => Ok("pg_restore"),
-        (e, _) => Err(AppError::validation(format!("Backups of {} databases arrive with their own update.", e.label()))),
+    Ok(tool_candidates(engine, tool)?[0])
+}
+
+pub fn is_my(engine: Engine) -> bool {
+    matches!(engine, Engine::Mysql | Engine::Mariadb)
+}
+
+/// The first candidate that is installed (on the host or here) and its version line.
+pub async fn resolve_tool(ssh: Option<&Connected>, engine: Engine, tool: Tool) -> AppResult<(String, String)> {
+    let candidates = tool_candidates(engine, tool)?;
+    for c in &candidates {
+        if let Ok(v) = tool_version(ssh, c).await {
+            return Ok((c.to_string(), v));
+        }
+    }
+    Err(missing(candidates[0], &runs_on(ssh)))
+}
+
+/// Arguments for `mysqldump` and `mysql` (the option file comes first, added by the caller).
+pub fn args_my(cfg: &SqlConfig, tool: Tool) -> Vec<String> {
+    let mut a: Vec<String> = match tool {
+        Tool::Dump => vec!["--single-transaction".into(), "--no-tablespaces".into(), "--routines".into(), "--triggers".into(), "--events".into()],
+        Tool::Restore => vec![],
+    };
+    // `-h localhost` would use the unix socket and ignore the port: always TCP.
+    a.extend(["--protocol=tcp".into(), "-h".into(), cfg.address.clone(), "-P".into(), cfg.port.to_string(), "-u".into(), cfg.user.clone()]);
+    match cfg.database.as_deref().filter(|d| !d.is_empty()) {
+        Some(d) => a.push(d.to_string()),
+        None if tool == Tool::Dump => a.push("--all-databases".into()),
+        None => {}
+    }
+    a
+}
+
+/// The first two lines of the tool's input: a MySQL option file with the password (read by the wrapper into a
+/// private temporary file, removed when the tool ends). Quotes and backslashes are escaped as option files want.
+fn config_lines(cfg: &SqlConfig) -> AppResult<Vec<u8>> {
+    let p = cfg.password.as_ref().map(|p| p.as_str()).unwrap_or("");
+    if p.contains('\n') || p.contains('\r') {
+        return Err(AppError::validation("This password has a line break in it, so it can't be handed to the dump tool. Use a different one for backups."));
+    }
+    Ok(format!("[client]\npassword=\"{}\"\n", p.replace('\\', "\\\\").replace('"', "\\\"")).into_bytes())
+}
+
+/// What `sh -c` runs on the host for MySQL and MariaDB: make a private option file from the first two input lines,
+/// run the tool with it, and remove the file whatever happens.
+pub fn wrapper_my(tool: &str, args: &[String]) -> String {
+    format!(
+        "umask 077; f=$(mktemp) || exit 1; trap 'rm -f \"$f\"' EXIT HUP INT TERM; {{ IFS= read -r l1; IFS= read -r l2; printf '%s\\n%s\\n' \"$l1\" \"$l2\" > \"$f\"; }}; {tool} --defaults-file=\"$f\" {}",
+        args.iter().map(|a| shq(a)).collect::<Vec<_>>().join(" ")
+    )
+}
+
+/// A private option file on this computer for a local run; deleted when dropped.
+struct LocalConfig(std::path::PathBuf);
+impl LocalConfig {
+    fn create(contents: &[u8]) -> AppResult<LocalConfig> {
+        use std::io::Write as _;
+        let path = std::env::temp_dir().join(format!("dalan-{}.cnf", uuid::Uuid::now_v7()));
+        let mut o = std::fs::OpenOptions::new();
+        o.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            o.mode(0o600);
+        }
+        let mut f = o.open(&path).map_err(|e| AppError::internal(format!("Couldn't make the option file: {e}")))?;
+        f.write_all(contents).map_err(|e| AppError::internal(format!("Couldn't write the option file: {e}")))?;
+        Ok(LocalConfig(path))
+    }
+}
+impl Drop for LocalConfig {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
     }
 }
 
@@ -143,19 +226,23 @@ fn finish(status: Option<i32>, stderr: &str, stopped: bool, tool: &str) -> AppRe
     }
     // The tool echoes the failing SQL (`Command was: …`), which can hold row data: it is not shown or logged.
     let last = stderr.lines().rev().find(|l| !l.trim().is_empty() && !l.starts_with("Command was")).unwrap_or("it gave no reason");
+    // `ERROR 1064 … near '<text>'` quotes the statement, which can be row data: keep the words, drop the quote.
+    let last = last.split(" near '").next().unwrap_or(last);
     Err(AppError::new(ErrorCode::DbRefused, format!("{tool} stopped: {last}")))
 }
 
 pub async fn run(mut r: Run<'_>) -> AppResult<()> {
-    let tool = tool_name(r.cfg.engine, r.tool)?;
-    let a = args(r.cfg, r.tool);
-    let pw = password_line(r.cfg)?;
+    let my = is_my(r.cfg.engine);
+    let tool: String = if my { resolve_tool(r.ssh, r.cfg.engine, r.tool).await?.0 } else { tool_name(r.cfg.engine, r.tool)?.to_string() };
+    let tool = tool.as_str();
+    let a = if my { args_my(r.cfg, r.tool) } else { args(r.cfg, r.tool) };
+    let pw = if my { config_lines(r.cfg)? } else { password_line(r.cfg)? };
     let io = |e: std::io::Error| AppError::internal(format!("File error: {e}"));
     let (mut bytes, mut stderr) = (0f64, String::new());
     if let Some(ssh) = r.ssh {
         let ch = ssh.handle.channel_open_session().await.map_err(|e| AppError::new(ErrorCode::HostUnreachable, format!("Couldn't open a channel on the host: {e}")))?;
         let (mut read, write) = ch.split();
-        write.exec(true, format!("sh -c {}", shq(&wrapper(tool, &a)))).await.map_err(|e| AppError::internal(e.to_string()))?;
+        write.exec(true, format!("sh -c {}", shq(&if my { wrapper_my(tool, &a) } else { wrapper(tool, &a) }))).await.map_err(|e| AppError::internal(e.to_string()))?;
         let file = r.stdin_file.map(Path::to_path_buf);
         // Feeding the tool is its own task: the tool's answers must be read meanwhile or both sides would wait.
         let feeder = tokio::spawn(async move {
@@ -227,9 +314,16 @@ pub async fn run(mut r: Run<'_>) -> AppResult<()> {
         return finish(status, &stderr, false, tool);
     }
     // This computer: the same tool, the password in the child's environment (not on its command line).
-    let mut child = tokio::process::Command::new(local_tool(tool))
-        .args(&a)
-        .env("PGPASSWORD", String::from_utf8_lossy(&pw).trim_end_matches('\n'))
+    // MySQL's tools read the password from a private option file (listed first; `--defaults-file` so no other option file, such as ~/.my.cnf, can override it); PostgreSQL's from the environment.
+    let cfg_file = if my { Some(LocalConfig::create(&pw)?) } else { None };
+    let mut full: Vec<String> = cfg_file.iter().map(|c| format!("--defaults-file={}", c.0.display())).collect();
+    full.extend(a.iter().cloned());
+    let mut cmd = tokio::process::Command::new(local_tool(tool));
+    cmd.args(&full);
+    if !my {
+        cmd.env("PGPASSWORD", String::from_utf8_lossy(&pw).trim_end_matches('\n'));
+    }
+    let mut child = cmd
         .stdin(if r.stdin_file.is_some() { std::process::Stdio::piped() } else { std::process::Stdio::null() })
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -360,6 +454,26 @@ mod docker_tests {
         assert_eq!(e.code, ErrorCode::DbToolMissing);
         assert!(e.message.contains("pg_dump isn't installed on this computer"), "{}", e.message);
         assert!(tool_version(None, "pg_dump").await.is_err());
+        // MySQL and MariaDB: the password reaches the tool in a private option file, not in its arguments, and the file
+        // is gone afterwards.
+        script("mysqldump", "cfg=${1#--defaults-file=}\necho \"mode=$(stat -f %Lp \"$cfg\" 2>/dev/null || stat -c %a \"$cfg\")\"\ncat \"$cfg\"\necho \"$cfg\" > \"$0.cfgpath\"\necho \"args: $*\" >&2");
+        let mut my = cfg();
+        my.engine = Engine::Mysql;
+        my.password = Some(Zeroizing::new("p\"w\\x".into()));
+        let (r, out, log) = dump(&my, None).await;
+        r.unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.starts_with("mode=600\n[client]\npassword=\"p\\\"w\\\\x\"\n"), "{out}");
+        assert!(log.iter().all(|l| !l.contains("p\"w")), "the password is on the command line: {log:?}");
+        assert!(log.iter().any(|l| l.contains("--single-transaction") && l.contains("-P 5432") && l.contains("--protocol=tcp") && l.contains("-u app") && l.contains(" shop")), "{log:?}");
+        let used = std::fs::read_to_string(dir.join("mysqldump.cfgpath")).unwrap();
+        assert!(!std::path::Path::new(used.trim()).exists(), "the option file was not removed");
+        // MariaDB prefers its own tool name and falls back to mysqldump.
+        my.engine = Engine::Mariadb;
+        script("mariadb-dump", "echo MARIADB-DUMP");
+        assert_eq!(String::from_utf8(dump(&my, None).await.1).unwrap(), "MARIADB-DUMP\n");
+        std::fs::remove_file(dir.join("mariadb-dump")).unwrap();
+        assert!(String::from_utf8(dump(&my, None).await.1).unwrap().starts_with("mode=600"));
         // Stop: the child is killed and nothing is reported as a success.
         script("pg_dump", "sleep 30");
         let stop = AtomicBool::new(false);
@@ -382,6 +496,33 @@ mod docker_tests {
         assert_eq!(e.code, ErrorCode::DbToolMissing, "{}", e.message);
         assert!(out.is_empty());
         assert_eq!(tool_version(Some(&ssh), "pg_dump").await.unwrap_err().code, ErrorCode::DbToolMissing);
+        // MySQL's wrapper: the first two input lines become a private option file for the tool, removed when it ends.
+        let mk = ssh.handle.channel_open_session().await.unwrap();
+        mk.exec(true, "mkdir -p /tmp/dalan-t && printf '#!/bin/sh\\ncfg=${1#--defaults-file=}\\necho \"path=$cfg\"\\nstat -c mode=%%a \"$cfg\"\\ncat \"$cfg\"\\ncat\\n' > /tmp/dalan-t/faketool && chmod +x /tmp/dalan-t/faketool").await.unwrap();
+        let mut mk = mk;
+        while let Some(m) = mk.wait().await {
+            if matches!(m, ChannelMsg::Close) {
+                break;
+            }
+        }
+        let ch = ssh.handle.channel_open_session().await.unwrap();
+        let (mut read, write) = ch.split();
+        write.exec(true, format!("sh -c {}", shq(&wrapper_my("/tmp/dalan-t/faketool", &[])))).await.unwrap();
+        write.data_bytes(b"[client]\npassword=\"secret\"\nSQL-BODY".to_vec()).await.unwrap();
+        write.eof().await.unwrap();
+        let mut got = Vec::new();
+        while let Some(m) = read.wait().await {
+            match m {
+                ChannelMsg::Data { data } => got.extend_from_slice(&data),
+                ChannelMsg::Close => break,
+                _ => {}
+            }
+        }
+        let got = String::from_utf8(got).unwrap();
+        assert!(got.contains("mode=600\n[client]\npassword=\"secret\"\nSQL-BODY"), "{got}");
+        let path = got.lines().next().unwrap().trim_start_matches("path=").to_string();
+        let (status, listing) = exec_collect(&ssh, &format!("test -e {} && echo still-there || echo gone", shq(&path))).await.unwrap();
+        assert_eq!((status, listing.trim()), (Some(0), "gone"), "the option file was not removed on the host");
         // The plumbing itself: the wrapper reads the first line of input into the environment, and the rest is the tool's input.
         let ch = ssh.handle.channel_open_session().await.unwrap();
         let (mut read, write) = ch.split();

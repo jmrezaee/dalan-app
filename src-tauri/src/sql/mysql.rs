@@ -230,7 +230,87 @@ fn scramble(plugin: &str, nonce: &[u8], pass: &str) -> AppResult<Vec<u8>> {
     }
 }
 
+/// The column definitions of a result set.
+async fn read_columns(s: &mut BoxStream, n: usize) -> AppResult<Vec<MyColumn>> {
+    let mut columns = Vec::with_capacity(n.min(4096));
+    for _ in 0..n {
+        let (_, def) = read_packet(s).await?;
+        let mut c = Cur(&def, 0);
+        for _ in 0..4 {
+            c.lenenc_bytes().ok_or_else(closed)?;
+        }
+        let name = String::from_utf8_lossy(c.lenenc_bytes().flatten().ok_or_else(closed)?).into_owned();
+        c.lenenc_bytes().ok_or_else(closed)?;
+        c.u8().ok_or_else(closed)?; // 0x0c
+        let charset = c.u16().ok_or_else(closed)?;
+        c.take(4).ok_or_else(closed)?;
+        let code = c.u8().ok_or_else(closed)?;
+        let flags = c.u16().ok_or_else(closed)?;
+        let (kind, type_name) = kind_of(code, flags, charset);
+        columns.push(MyColumn { name, type_name: type_name.into(), kind });
+    }
+    Ok(columns)
+}
+
 impl MyConn {
+    /// A query whose rows are handed to `f` one at a time and never kept (a big export). `f` returns `false` to stop;
+    /// the rest is still read (the server sends it all) and dropped, so the connection stays in step. Returns the
+    /// columns and how many rows `f` saw.
+    pub async fn stream(&self, sql: &str, mut f: impl FnMut(&[MyColumn], Vec<Option<String>>) -> bool) -> AppResult<(Vec<MyColumn>, u64)> {
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(closed());
+        }
+        let mut s = self.stream.lock().await;
+        self.closed.store(true, Ordering::SeqCst);
+        let out = async {
+            let mut q = vec![0x03];
+            q.extend_from_slice(sql.as_bytes());
+            write_packet(&mut s, 0, &q).await?;
+            let (_, head) = read_packet(&mut s).await?;
+            match head.first() {
+                Some(0xff) => return Err(server_error(&head)),
+                Some(0x00) => return Ok((vec![], 0)),
+                Some(0xfb) | None => return Err(closed()),
+                _ => {}
+            }
+            let n = Cur(&head, 0).lenenc_int().flatten().ok_or_else(closed)? as usize;
+            let columns = read_columns(&mut s, n).await?;
+            let (_, eof) = read_packet(&mut s).await?;
+            if eof.first() != Some(&0xfe) {
+                return Err(closed());
+            }
+            let (mut seen, mut go) = (0u64, true);
+            loop {
+                let (_, row) = read_packet(&mut s).await?;
+                match row.first() {
+                    Some(0xfe) if row.len() < 9 => break,
+                    // The query we interrupted ourselves answers with an error: not a failure.
+                    Some(0xff) if !go => break,
+                    Some(0xff) => return Err(server_error(&row)),
+                    None => return Err(closed()),
+                    _ => {}
+                }
+                if !go {
+                    continue;
+                }
+                let mut c = Cur(&row, 0);
+                let vals = columns.iter().map(|col| c.lenenc_bytes().map(|v| v.map(|b| text(col.kind, b)))).collect::<Option<Vec<_>>>().ok_or_else(closed)?;
+                seen += 1;
+                go = f(&columns, vals);
+                if !go {
+                    // Stopped: ask the server to stop sending (from a second connection), then drain what is in flight.
+                    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), self.cancel_running()).await;
+                }
+            }
+            Ok((columns, seen))
+        }
+        .await;
+        if !matches!(&out, Err(e) if e.code == ErrorCode::DbUnreachable) {
+            self.closed.store(false, Ordering::SeqCst);
+        }
+        out
+    }
+
     /// Greeting, optional TLS, sign-in. `reopen` is the way back to the server (for a cancel).
     pub async fn connect(stream: BoxStream, login: MyLogin, reopen: Reopen) -> AppResult<(MyConn, SqlServerInfo)> {
         let started = Instant::now();
@@ -388,23 +468,7 @@ impl MyConn {
             _ => {}
         }
         let n = Cur(&head, 0).lenenc_int().flatten().ok_or_else(closed)? as usize;
-        let mut columns = Vec::with_capacity(n.min(4096));
-        for _ in 0..n {
-            let (_, def) = read_packet(s).await?;
-            let mut c = Cur(&def, 0);
-            for _ in 0..4 {
-                c.lenenc_bytes().ok_or_else(closed)?;
-            }
-            let name = String::from_utf8_lossy(c.lenenc_bytes().flatten().ok_or_else(closed)?).into_owned();
-            c.lenenc_bytes().ok_or_else(closed)?;
-            c.u8().ok_or_else(closed)?; // 0x0c
-            let charset = c.u16().ok_or_else(closed)?;
-            c.take(4).ok_or_else(closed)?;
-            let code = c.u8().ok_or_else(closed)?;
-            let flags = c.u16().ok_or_else(closed)?;
-            let (kind, type_name) = kind_of(code, flags, charset);
-            columns.push(MyColumn { name, type_name: type_name.into(), kind });
-        }
+        let columns = read_columns(s, n).await?;
         let (_, eof) = read_packet(s).await?;
         if eof.first() != Some(&0xfe) {
             return Err(closed());

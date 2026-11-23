@@ -46,7 +46,7 @@ pub struct TransferProgress {
     pub bytes: f64,
 }
 
-fn json_value(kind: CellKind, v: Option<&str>) -> serde_json::Value {
+pub(super) fn json_value(kind: CellKind, v: Option<&str>) -> serde_json::Value {
     use serde_json::Value;
     let Some(v) = v else { return Value::Null };
     match kind {
@@ -274,6 +274,8 @@ pub struct ImportPlan {
     pub statement: String,
     pub csv: Vec<u8>,
     pub rows: u64,
+    /// MySQL and MariaDB load by batched `INSERT`: schema, table and the mapped columns. `None` for PostgreSQL's COPY.
+    pub target: Option<(String, String, Vec<String>)>,
 }
 
 pub fn read_limited(path: &std::path::Path) -> AppResult<String> {
@@ -283,6 +285,40 @@ pub fn read_limited(path: &std::path::Path) -> AppResult<String> {
     }
     let bytes = std::fs::read(path).map_err(|e| AppError::validation(format!("Couldn't read that file: {e}")))?;
     String::from_utf8(bytes).map_err(|_| AppError::validation("That file isn't UTF-8 text."))
+}
+
+/// Checks a mapping against the table's columns and the file, and writes the mapped columns as CSV (an empty value is
+/// NULL). Returns the target column names in file order, the CSV and the row count. Shared by every engine.
+pub fn map_csv(pv: &CsvPreview, text: &str, delim: char, header: bool, mapping: &[Option<String>]) -> AppResult<(Vec<String>, String, u64)> {
+    if mapping.len() != pv.file_columns.len() {
+        return Err(AppError::validation("The mapping doesn't match the file's columns."));
+    }
+    let mut targets: Vec<(usize, &str)> = Vec::new();
+    for (i, m) in mapping.iter().enumerate() {
+        let Some(name) = m else { continue };
+        let col = pv.table_columns.iter().find(|c| &c.name == name).ok_or_else(|| AppError::validation(format!("There is no column {name} in this table.")))?;
+        if col.generated {
+            return Err(AppError::validation(format!("{name} is filled in by the server and can't be loaded.")));
+        }
+        if targets.iter().any(|(_, n)| n == name) {
+            return Err(AppError::validation(format!("{name} is mapped twice.")));
+        }
+        targets.push((i, name));
+    }
+    if targets.is_empty() {
+        return Err(AppError::validation("Map at least one column."));
+    }
+    let records = parse_csv(text, delim);
+    let body = if header { &records[1.min(records.len())..] } else { &records[..] };
+    let mut csv = String::new();
+    for (n, r) in body.iter().enumerate() {
+        if r.len() != pv.file_columns.len() {
+            return Err(AppError::validation(format!("Row {} has {} fields, the first has {}. Nothing was loaded.", n + 1 + usize::from(header), r.len(), pv.file_columns.len())));
+        }
+        csv.push_str(&targets.iter().map(|(i, _)| copy_field(&r[*i])).collect::<Vec<_>>().join(","));
+        csv.push('\n');
+    }
+    Ok((targets.iter().map(|(_, n)| n.to_string()).collect(), csv, body.len() as u64))
 }
 
 impl PgConn {
@@ -309,36 +345,9 @@ impl PgConn {
     /// Checks the mapping against the table and builds the CSV for `COPY`. Every row must have the file's width.
     pub async fn import_plan(&self, schema: &str, table: &str, text: &str, delim: char, header: bool, mapping: &[Option<String>]) -> AppResult<ImportPlan> {
         let pv = self.import_preview(schema, table, text, delim, header).await?;
-        if mapping.len() != pv.file_columns.len() {
-            return Err(AppError::validation("The mapping doesn't match the file's columns."));
-        }
-        let mut targets: Vec<(usize, &str)> = Vec::new();
-        for (i, m) in mapping.iter().enumerate() {
-            let Some(name) = m else { continue };
-            let col = pv.table_columns.iter().find(|c| &c.name == name).ok_or_else(|| AppError::validation(format!("There is no column {name} in this table.")))?;
-            if col.generated {
-                return Err(AppError::validation(format!("{name} is filled in by the server and can't be loaded.")));
-            }
-            if targets.iter().any(|(_, n)| n == name) {
-                return Err(AppError::validation(format!("{name} is mapped twice.")));
-            }
-            targets.push((i, name));
-        }
-        if targets.is_empty() {
-            return Err(AppError::validation("Map at least one column."));
-        }
-        let records = parse_csv(text, delim);
-        let body = if header { &records[1.min(records.len())..] } else { &records[..] };
-        let mut csv = String::new();
-        for (n, r) in body.iter().enumerate() {
-            if r.len() != pv.file_columns.len() {
-                return Err(AppError::validation(format!("Row {} has {} fields, the first has {}. Nothing was loaded.", n + 1 + usize::from(header), r.len(), pv.file_columns.len())));
-            }
-            csv.push_str(&targets.iter().map(|(i, _)| copy_field(&r[*i])).collect::<Vec<_>>().join(","));
-            csv.push('\n');
-        }
-        let cols = targets.iter().map(|(_, n)| quote(n)).collect::<Vec<_>>().join(", ");
-        Ok(ImportPlan { statement: format!("COPY {}.{} ({cols}) FROM STDIN WITH (FORMAT csv)", quote(schema), quote(table)), rows: body.len() as u64, csv: csv.into_bytes() })
+        let (targets, csv, rows) = map_csv(&pv, text, delim, header, mapping)?;
+        let cols = targets.iter().map(|n| quote(n)).collect::<Vec<_>>().join(", ");
+        Ok(ImportPlan { statement: format!("COPY {}.{} ({cols}) FROM STDIN WITH (FORMAT csv)", quote(schema), quote(table)), rows, csv: csv.into_bytes(), target: None })
     }
 
     /// Loads the plan in one transaction. Any refusal by the server undoes everything.

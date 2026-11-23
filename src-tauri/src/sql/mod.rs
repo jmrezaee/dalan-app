@@ -10,6 +10,7 @@ pub mod diagram;
 pub mod grid;
 pub mod mydb;
 pub mod myextra;
+pub mod mytransfer;
 pub mod mysql;
 pub mod pg;
 pub mod structure;

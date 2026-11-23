@@ -837,18 +837,22 @@ pub async fn sql_export_table(
     progress: Channel<TransferProgress>,
 ) -> AppResult<Option<TransferDone>> {
     state.require_unlocked()?;
-    let pg = state.sql.pg(&conn_id).await?;
+    let my = state.sql.my(&conn_id).await?;
+    let pg = if my.is_some() { None } else { Some(state.sql.pg(&conn_id).await?) };
     let Some(path) = pick_save(&app, format!("{table}.{}", format.extension())).await? else {
         return Ok(None);
     };
     let stop = state.sql.begin_transfer(&transfer_id);
     let file = std::fs::File::create(&path).map_err(|e| crate::error::AppError::validation(format!("Couldn't create that file: {e}")))?;
     let mut out = std::io::BufWriter::new(file);
-    let result = pg
-        .export_table(&schema, &table, &filter, format, header, &mut out, &|rows, bytes| {
-            let _ = progress.send(TransferProgress { rows, bytes });
-        }, &stop)
-        .await;
+    let report = |rows, bytes| {
+        let _ = progress.send(TransferProgress { rows, bytes });
+    };
+    let result = match (&my, &pg) {
+        (Some(my), _) => my.export_table(&schema, &table, &filter, format, header, &mut out, &report, &stop).await,
+        (None, Some(pg)) => pg.export_table(&schema, &table, &filter, format, header, &mut out, &report, &stop).await,
+        _ => Err(crate::error::AppError::internal("no connection")),
+    };
     state.sql.end_transfer(&transfer_id);
     match result {
         Ok((rows, bytes)) => Ok(Some(TransferDone { path: path.display().to_string(), rows, bytes })),
@@ -910,6 +914,9 @@ pub async fn sql_import_preview(
     state.require_unlocked()?;
     let path = state.sql.file(&conn_id, &file_id)?;
     let text = tokio::task::spawn_blocking(move || crate::sql::transfer::read_limited(&path)).await.map_err(|e| crate::error::AppError::internal(e.to_string()))??;
+    if let Some(my) = state.sql.my(&conn_id).await? {
+        return my.import_preview(&schema, &table, &text, delimiter(&delimiter_name), header).await;
+    }
     state.sql.pg(&conn_id).await?.import_preview(&schema, &table, &text, delimiter(&delimiter_name), header).await
 }
 
@@ -944,7 +951,11 @@ pub async fn sql_import_prepare(
     }
     let path = state.sql.file(&conn_id, &file_id)?;
     let text = tokio::task::spawn_blocking(move || crate::sql::transfer::read_limited(&path)).await.map_err(|e| crate::error::AppError::internal(e.to_string()))??;
-    let plan = state.sql.pg(&conn_id).await?.import_plan(&schema, &table, &text, delimiter(&delimiter_name), header, &mapping).await?;
+    let plan = if let Some(my) = state.sql.my(&conn_id).await? {
+        my.import_plan(&schema, &table, &text, delimiter(&delimiter_name), header, &mapping).await?
+    } else {
+        state.sql.pg(&conn_id).await?.import_plan(&schema, &table, &text, delimiter(&delimiter_name), header, &mapping).await?
+    };
     let (rows, statement) = (plan.rows as f64, plan.statement.clone());
     let id = state.sql.import_pending.put(&conn_id, Class::Write, plan)?;
     Ok(CsvImportPending { id, db_name: target.name, environment: target.environment, rows, statement })
@@ -960,6 +971,9 @@ pub async fn sql_import_commit(state: State<'_, AppState>, conn_id: String, pend
     let target = sql::gate_target(&state.store(), &db_id).await?;
     gate::approve(target.mode, class, &target.name, None)?;
     let (plan, _) = state.sql.import_pending.take(&conn_id, &pending_id)?;
+    if let Some(my) = state.sql.my(&conn_id).await? {
+        return Ok(my.import_commit(&plan).await? as f64);
+    }
     Ok(state.sql.pg(&conn_id).await?.import_commit(&plan).await? as f64)
 }
 
@@ -992,8 +1006,9 @@ pub async fn sql_backup_check(state: State<'_, AppState>, conn_id: String) -> Ap
         Ok(t) => t,
         Err(e) => return Ok(BackupInfo { tool: String::new(), runs_on, version: None, problem: Some(e.message) }),
     };
-    Ok(match backup::tool_version(ssh.as_deref(), tool).await {
-        Ok(v) => BackupInfo { tool: tool.into(), runs_on, version: Some(v), problem: None },
+    // MariaDB's own tool names are tried before the MySQL ones.
+    Ok(match backup::resolve_tool(ssh.as_deref(), cfg.engine, Tool::Dump).await {
+        Ok((name, v)) => BackupInfo { tool: name, runs_on, version: Some(v), problem: None },
         Err(e) => BackupInfo { tool: tool.into(), runs_on, version: None, problem: Some(e.message) },
     })
 }
@@ -1013,7 +1028,8 @@ pub async fn sql_backup_start(
     let cfg = sql::load(&state.store(), &db_id).await?;
     backup::tool_name(cfg.engine, Tool::Dump)?;
     let ssh = state.sql.ssh(&conn_id).await?;
-    let name = format!("{}-{}.dump", cfg.database.clone().unwrap_or_else(|| cfg.name.clone()), chrono_free_date());
+    let ext = if backup::is_my(cfg.engine) { "sql" } else { "dump" };
+    let name = format!("{}-{}.{ext}", cfg.database.clone().unwrap_or_else(|| cfg.name.clone()), chrono_free_date());
     let Some(path) = pick_save(&app, name).await? else {
         return Ok(None);
     };
@@ -1029,7 +1045,7 @@ pub async fn sql_backup_start(
         progress: &|bytes| {
             let _ = progress.send(TransferProgress { rows: 0.0, bytes });
         },
-        log: &|l| log::debug!("pg_dump: {l}"),
+        log: &|l| log::debug!("dump tool: {l}"),
         stop: &stop,
     })
     .await;
@@ -1091,7 +1107,13 @@ pub async fn sql_restore_prepare(app: tauri::AppHandle, state: State<'_, AppStat
         ));
     }
     let cfg = sql::load(&state.store(), &db_id).await?;
-    backup::tool_name(cfg.engine, Tool::Restore)?;
+    // The tool must exist before anything is asked.
+    let ssh_for_check = state.sql.ssh(&conn_id).await?;
+    if backup::is_my(cfg.engine) {
+        backup::resolve_tool(ssh_for_check.as_deref(), cfg.engine, Tool::Restore).await?;
+    } else {
+        backup::tool_name(cfg.engine, Tool::Restore)?;
+    }
     let Some(path) = pick_open(&app, "Restore from a dump").await? else {
         return Ok(None);
     };
@@ -1134,7 +1156,7 @@ pub async fn sql_restore_commit(
         progress: &|bytes| {
             let _ = progress.send(TransferProgress { rows: 0.0, bytes });
         },
-        log: &|l| log::debug!("pg_restore: {l}"),
+        log: &|l| log::debug!("restore tool: {l}"),
         stop: &stop,
     })
     .await;

@@ -47,8 +47,6 @@ for (const engine of ['MySQL', 'MariaDB'] as const) {
       await tab.getByTestId('sql-run').click()
       await expect(page.getByTestId('sql-confirm')).toContainText('This will change 1 row.')
       await page.getByTestId('sql-confirm').getByRole('button', { name: 'Cancel' }).click()
-      // Not offered yet: transfer (import, export and backup).
-      await expect(tab.getByTestId('sql-open-transfer')).toHaveCount(0)
       await expect(tab.getByTestId('sql-explain')).toBeVisible()
       await tab.getByTestId('sql-object-orders').click()
       await tab.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Structure' }).click()
@@ -77,6 +75,18 @@ for (const engine of ['MySQL', 'MariaDB'] as const) {
       await page.keyboard.press('Enter')
       await tab.getByRole('button', { name: 'Review changes' }).click()
       await expect(page.getByTestId('sql-commit')).toContainText('Commit 1 change to legacy-crm?')
+    })
+
+    test('Transfer: export, and the backup panel names the SQL script format', async ({ page }) => {
+      await openApp(page, { scenario: 'team', unlocked: true })
+      const tab = await openMy(page, engine)
+      await tab.getByTestId('sql-open-transfer').click()
+      const t = tab.getByTestId('sql-transfer')
+      await t.getByLabel('Table').selectOption('public.customers')
+      await t.getByRole('button', { name: 'SQL inserts' }).click()
+      await t.getByRole('button', { name: 'Save as…' }).click()
+      await expect(t.getByRole('region', { name: 'Export' }).locator('[data-part=done]')).toContainText('Saved /tmp/customers.sql')
+      await expect(t.getByRole('region', { name: 'Backup' })).toContainText('SQL script (restorable with mysql)')
     })
   })
 }

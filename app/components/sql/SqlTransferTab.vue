@@ -164,7 +164,7 @@ const panel = 'flex flex-col gap-3 rounded-lg border border-border bg-surface p-
               </tr>
             </tbody>
           </table>
-          <p class="text-xs text-muted">Runs in one transaction with COPY. Nothing is kept unless every row goes in. Empty values load as NULL.</p>
+          <p class="text-xs text-muted">Runs in one transaction. Nothing is kept unless every row goes in. Empty values load as NULL (an empty text and NULL are not told apart).</p>
         </template>
         <p v-else class="text-xs text-muted">Pick a CSV file. Its columns are matched to the table's by name, and you check them before anything is loaded.</p>
         <p v-if="imp.done" role="status" class="text-xs text-success" data-part="done">{{ imp.done }}</p>
@@ -177,13 +177,13 @@ const panel = 'flex flex-col gap-3 rounded-lg border border-border bg-surface p-
         <p class="text-xs text-muted">Runs the dump tool {{ bk.info ? `on ${bk.info.runs_on}` : 'on the host' }}, so the dump is made next to the data and the tool's version matches the server. The password is never on a command line.</p>
         <dl class="grid grid-cols-[110px_minmax(0,1fr)] gap-y-1 rounded-md border border-border bg-bg p-2.5 text-xs">
           <dt class="text-muted">Tool</dt><dd class="font-mono" data-part="tool">{{ bk.info ? (bk.info.version ?? bk.info.tool) : '…' }}</dd>
-          <dt class="text-muted">Format</dt><dd>Custom (compressed, restorable)</dd>
+          <dt class="text-muted">Format</dt><dd>{{ store.isMy ? 'SQL script (restorable with mysql)' : 'Custom (compressed, restorable)' }}</dd>
         </dl>
         <p v-if="bk.info?.problem" role="alert" class="text-xs text-danger" data-part="problem">{{ bk.info.problem }}</p>
         <p v-if="bk.running" role="status" class="text-xs text-muted" data-part="progress">{{ bk.kind === 'restore' ? 'Restoring' : 'Dumping' }}… {{ mb(bk.bytes) }} {{ bk.kind === 'restore' ? 'sent' : 'copied to this computer as it goes' }}</p>
         <p v-if="bk.done" role="status" class="text-xs text-success" data-part="done">{{ bk.done }}</p>
         <p v-if="bk.error" role="alert" class="text-xs text-danger" data-part="error">{{ bk.error }}</p>
-        <p class="text-xs text-muted">Restore works the other way (pg_restore) and always asks for the target's name first.</p>
+        <p class="text-xs text-muted">Restore works the other way ({{ store.isMy ? 'the mysql client' : 'pg_restore' }}) and always asks for the target's name first.</p>
         <div class="mt-auto flex justify-end gap-2"><Button v-if="bk.running" variant="secondary" @click="store.stopTransfer(bk.id)">Stop</Button><Button variant="secondary" :disabled="bk.running || !!bk.info?.problem" @click="startRestore">Restore from file…</Button><Button :disabled="bk.running || !!bk.info?.problem" @click="backup">Back up…</Button></div>
       </section>
     </div>
