@@ -5,7 +5,7 @@ import type { Browser, Page } from '@playwright/test'
 
 // The download page (site/index.html, spec: replica/launch/landing-v2.md) opened from disk, as each visitor sees it.
 const url = new URL('../../site/index.html', `file://${fileURLToPath(import.meta.url)}`).href
-const VERSION = '0.2.0'
+const VERSION = '0.3.0'
 const releases = (name: string) => `https://github.com/OWNER/dalan-app/releases/download/v${VERSION}/${name}`
 
 const visitors = {
