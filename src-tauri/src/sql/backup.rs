@@ -407,6 +407,7 @@ mod docker_tests {
             password: Some(Zeroizing::new("secret-pw".into())),
             tls: TlsMode::Off,
             server_name: None,
+            auth_source: None,
         }
     }
 

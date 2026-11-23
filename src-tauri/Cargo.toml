@@ -23,6 +23,11 @@ redis = { version = "1", default-features = false, features = ["aio", "tokio-com
 # used as it is. mysql_async and mongodb cannot take a stream (checked in their sources), so MySQL and MariaDB are
 # driven over mysql_common's packets and MongoDB over bson, on our own stream. See the D0 note in replica/progress.md.
 bson = "3"
+# D8: MongoDB sign-in (SCRAM-SHA-256) written on these; all were already in the tree.
+hmac = "0.13"
+sha2 = "0.11"
+pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
+base64 = "0.22"
 mysql_common = { version = "0.37", default-features = false }
 sqlparser = "0.64"
 tokio-postgres = "0.7"

@@ -14,6 +14,7 @@ pub mod import;
 pub mod keys;
 pub mod known_hosts;
 pub mod logs;
+pub mod mongo;
 pub mod mosh;
 pub mod open_url;
 pub mod osdetect;

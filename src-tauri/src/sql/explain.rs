@@ -270,7 +270,7 @@ mod tests {
         assert_eq!(filter_columns("(lower(name) = 'x'::text) AND (a = 1) AND ((b = 1) OR (c = 2)) AND ((\"d\")::text = 'y'::text)"), ["a", "d"]);
         assert_eq!(filter_columns("(status = 'paid'::text)"), ["status"]);
         let looped = PLAN.replace("\"Actual Rows\": 30877, \"Actual Loops\": 1", "\"Actual Rows\": 1200, \"Actual Loops\": 25");
-        assert!(!parse(&looped, true).unwrap().hint.map_or(false, |h| h.text.contains("statistics look stale")));
+        assert!(!parse(&looped, true).unwrap().hint.is_some_and(|h| h.text.contains("statistics look stale")));
         // A plan without a costly filtered scan has no hint.
         let none = r#"[{"Plan": {"Node Type": "Result", "Plan Rows": 1}}]"#;
         assert!(parse(none, false).unwrap().hint.is_none());

@@ -85,6 +85,8 @@ pub struct SqlConfig {
     pub password: Option<Zeroizing<String>>,
     pub tls: TlsMode,
     pub server_name: Option<String>,
+    /// MongoDB: the database that holds the user (`authSource`).
+    pub auth_source: Option<String>,
 }
 
 /// Reads a saved database, password included, for opening it.
@@ -111,6 +113,7 @@ pub async fn load(store: &Store, db_id: &str) -> AppResult<SqlConfig> {
                     )
                 })?,
                 server_name: d.tls_server_name,
+                auth_source: d.options.auth_source,
             })
         })
         .await
@@ -319,6 +322,9 @@ async fn connect_my(
 pub async fn test(store: &Store, cfg: SqlConfig) -> AppResult<SqlServerInfo> {
     if matches!(cfg.engine, Engine::Mysql | Engine::Mariadb) {
         return test_my(store, cfg).await;
+    }
+    if cfg.engine == Engine::Mongodb {
+        return test_mongo(store, cfg).await;
     }
     let prompts = Arc::new(Prompts::non_interactive());
     let quiet: Emit = Arc::new(|_| {});
@@ -760,4 +766,34 @@ async fn test_my(store: &Store, cfg: SqlConfig) -> AppResult<SqlServerInfo> {
     let (conn, info) = mysql::MyConn::connect(stream, login, reopen).await?;
     conn.close().await;
     Ok(info)
+}
+
+/// "Test connection" for MongoDB: the route, then our own client's `hello` and sign-in, then closed. The first member of
+/// a seed list is the one tried.
+async fn test_mongo(store: &Store, cfg: SqlConfig) -> AppResult<SqlServerInfo> {
+    let prompts = Arc::new(Prompts::non_interactive());
+    let quiet: Emit = Arc::new(|_| {});
+    let (name, route_kind) = (cfg.name.clone(), cfg.route);
+    let cfg = Arc::new(cfg);
+    let (_ssh, reopen, stream, _) = route(store, &cfg, &prompts, &quiet).await.map_err(|e| {
+        if e.code == ErrorCode::AuthFailed && route_kind == RedisRoute::Host {
+            AppError::new(ErrorCode::AuthFailed, format!("The host for {name} needs an answer from you (a new host key or a password). Open a terminal on it once, then test again."))
+        } else {
+            e
+        }
+    })?;
+    let server_name = cfg.server_name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| cfg.address.clone());
+    let login = crate::mongo::conn::MongoLogin { user: cfg.user.clone(), password: cfg.password.clone(), auth_db: cfg.auth_source.clone().filter(|a| !a.is_empty()).unwrap_or_else(|| "admin".into()), tls: cfg.tls, server_name };
+    let (conn, info) = crate::mongo::conn::MongoConn::connect(stream, login, reopen).await?;
+    conn.close().await;
+    Ok(SqlServerInfo {
+        engine: "mongodb".into(),
+        version: match &info.replica_set {
+            Some(set) => format!("{} (replica set {set}{})", info.version, if info.is_primary { ", primary" } else { "" }),
+            None => info.version,
+        },
+        database: cfg.database.clone().unwrap_or_else(|| "admin".into()),
+        user: info.user,
+        latency_ms: info.latency_ms,
+    })
 }
