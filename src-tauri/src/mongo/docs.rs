@@ -8,6 +8,7 @@ use specta::Type;
 
 use super::conn::MongoConn;
 use crate::error::{AppError, AppResult, ErrorCode};
+use crate::sql::classify::Class;
 
 /// Most documents one page returns.
 pub const MAX_LIMIT: u32 = 500;
@@ -68,6 +69,12 @@ pub fn parse_doc(text: &str, what: &str) -> AppResult<Document> {
     }
 }
 
+/// Extended JSON of any shape (a stage's argument is often a number or a string, not an object).
+pub fn parse_value(text: &str, what: &str) -> AppResult<Bson> {
+    let v: serde_json::Value = serde_json::from_str(text).map_err(|e| bad(what, e))?;
+    Bson::try_from(v).map_err(|e| bad(what, e))
+}
+
 pub fn relaxed(d: &Document) -> String {
     serde_json::to_string_pretty(&Bson::Document(d.clone()).into_relaxed_extjson()).unwrap_or_default()
 }
@@ -84,7 +91,7 @@ pub fn parse_id(text: &str) -> AppResult<Bson> {
     Bson::try_from(v).map_err(|e| bad("The _id", e))
 }
 
-fn mg_doc(d: &Document) -> MgDoc {
+pub fn mg_doc(d: &Document) -> MgDoc {
     let mut text = relaxed(d);
     let cut = text.len() > CUT_AT;
     if cut {
@@ -107,7 +114,7 @@ pub async fn get(c: &MongoConn, db: &str, coll: &str, id: &str) -> AppResult<Str
     }
 }
 
-fn names(reply: &Document, key: &str) -> Vec<Document> {
+pub fn names(reply: &Document, key: &str) -> Vec<Document> {
     reply.get_array(key).map(|a| a.iter().filter_map(|b| b.as_document().cloned()).collect()).unwrap_or_default()
 }
 
@@ -237,6 +244,18 @@ pub enum Parsed {
     Insert(Document),
     Replace(Bson, Document),
     Delete(Bson),
+    /// A command built and checked in Rust (an aggregation that writes, an index, a view, validation rules): sent as
+    /// it is, after the gate. `class` is what the gate decides on.
+    Raw { class: Class, summary: String, cmd: Document },
+}
+
+impl Parsed {
+    pub fn class(&self) -> Class {
+        match self {
+            Parsed::Raw { class, .. } => *class,
+            _ => Class::Write,
+        }
+    }
 }
 
 /// A document whose top-level keys start with `$` would be sent as update operators, not stored as it is.
@@ -275,6 +294,7 @@ pub fn describe(w: &MgWrite) -> String {
         Parsed::Insert(_) => format!("Insert 1 document into {}.{}.", w.db, w.coll),
         Parsed::Replace(id, _) => format!("Replace the document with _id {} in {}.{}.", id.clone().into_relaxed_extjson(), w.db, w.coll),
         Parsed::Delete(id) => format!("Delete the document with _id {} from {}.{}. This can't be undone.", id.clone().into_relaxed_extjson(), w.db, w.coll),
+        Parsed::Raw { summary, .. } => summary.clone(),
     }
 }
 
@@ -282,7 +302,7 @@ pub fn describe(w: &MgWrite) -> String {
 pub async fn current(c: &MongoConn, w: &MgWrite) -> AppResult<Option<Document>> {
     let id = match &w.op {
         Parsed::Replace(id, _) | Parsed::Delete(id) => id.clone(),
-        Parsed::Insert(_) => return Ok(None),
+        Parsed::Insert(_) | Parsed::Raw { .. } => return Ok(None),
     };
     let r = c.command(&w.db, doc! { "find": &w.coll, "filter": { "_id": id }, "limit": 1_i64, "singleBatch": true }).await?;
     Ok(r.get_document("cursor").map(|c| names(c, "firstBatch")).unwrap_or_default().into_iter().next())
@@ -293,6 +313,16 @@ pub async fn current(c: &MongoConn, w: &MgWrite) -> AppResult<Option<Document>> 
 pub async fn run(c: &MongoConn, w: &MgWrite) -> AppResult<u32> {
     let (db, coll) = (&w.db, &w.coll);
     match &w.op {
+        Parsed::Raw { cmd, .. } => {
+            let r = c.command(db, cmd.clone()).await?;
+            // An aggregation that writes ($out, $merge) leaves a cursor: let it go.
+            if let Some(Bson::Int64(id)) = r.get_document("cursor").ok().and_then(|c| c.get("id")) {
+                if *id != 0 {
+                    let _ = c.command(db, doc! { "killCursors": coll, "cursors": [*id] }).await;
+                }
+            }
+            Ok(1)
+        }
         Parsed::Insert(d) => {
             c.command(db, doc! { "insert": coll, "documents": [d.clone()] }).await?;
             Ok(1)

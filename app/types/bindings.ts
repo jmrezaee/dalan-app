@@ -47,10 +47,26 @@ export const commands = {
 	mgCount: (connId: string, db: string, coll: string, filter: string) => typedError<MgCount, AppError>(__TAURI_INVOKE("mg_count", { connId, db, coll, filter })),
 	/**  One whole document by `_id` in canonical extended JSON, for the editor. */
 	mgDocGet: (connId: string, db: string, coll: string, id: string) => typedError<string, AppError>(__TAURI_INVOKE("mg_doc_get", { connId, db, coll, id })),
+	/**  The output of the pipeline up to a stage. Reads only: a `$out` or `$merge` ends the run before it. */
+	mgAggregate: (connId: string, request: MgAggRequest_Deserialize) => typedError<MgAggResult, AppError>(__TAURI_INVOKE("mg_aggregate", { connId, request })),
+	/**  Holds a pipeline that ends in `$out` or `$merge` (a write) for its confirmation. */
+	mgAggPrepare: (connId: string, request: MgAggRequest_Deserialize) => typedError<MgPending_Serialize, AppError>(__TAURI_INVOKE("mg_agg_prepare", { connId, request })),
+	/**  Holds `createView` for the pipeline. */
+	mgViewPrepare: (connId: string, db: string, coll: string, name: string, stages: MgStage[]) => typedError<MgPending_Serialize, AppError>(__TAURI_INVOKE("mg_view_prepare", { connId, db, coll, name, stages })),
+	/**  The pipeline as code to paste (mongosh, Node.js, Python) or as JSON. */
+	mgPipelineCode: (coll: string, stages: MgStage[], language: CodeLanguage) => typedError<string, AppError>(__TAURI_INVOKE("mg_pipeline_code", { coll, stages, language })),
+	mgSchema: (connId: string, db: string, coll: string, sample: number) => typedError<MgSchema_Serialize, AppError>(__TAURI_INVOKE("mg_schema", { connId, db, coll, sample })),
+	mgIndexes: (connId: string, db: string, coll: string) => typedError<MgIndex_Serialize[], AppError>(__TAURI_INVOKE("mg_indexes", { connId, db, coll })),
+	/**  Holds an index change: creating asks, dropping asks for the database's name. */
+	mgIndexPrepare: (connId: string, db: string, coll: string, op: MgIndexOp_Deserialize) => typedError<MgPending_Serialize, AppError>(__TAURI_INVOKE("mg_index_prepare", { connId, db, coll, op })),
+	mgValidation: (connId: string, db: string, coll: string) => typedError<MgValidation, AppError>(__TAURI_INVOKE("mg_validation", { connId, db, coll })),
+	/**  How many existing documents break these rules. */
+	mgValidationCheck: (connId: string, db: string, coll: string, validator: string) => typedError<MgValidationCheck, AppError>(__TAURI_INVOKE("mg_validation_check", { connId, db, coll, validator })),
+	mgValidationPrepare: (connId: string, db: string, coll: string, validator: string, level: string, action: string) => typedError<MgPending_Serialize, AppError>(__TAURI_INVOKE("mg_validation_prepare", { connId, db, coll, validator, level, action })),
 	/**  Parses and holds one document write. A Read-only database refuses here, before anything is held. */
 	mgDocPrepare: (connId: string, db: string, coll: string, op: MgDocOp) => typedError<MgPending_Serialize, AppError>(__TAURI_INVOKE("mg_doc_prepare", { connId, db, coll, op })),
 	/**  Runs what `mg_doc_prepare` held, once, after the mode is asked again. */
-	mgDocCommit: (connId: string, pendingId: string) => typedError<number, AppError>(__TAURI_INVOKE("mg_doc_commit", { connId, pendingId })),
+	mgDocCommit: (connId: string, pendingId: string, typedName: string | null) => typedError<number, AppError>(__TAURI_INVOKE("mg_doc_commit", { connId, pendingId, typedName })),
 	mgDocDiscard: (connId: string, pendingId: string) => typedError<null, AppError>(__TAURI_INVOKE("mg_doc_discard", { connId, pendingId })),
 	/**  Opens a SQL tab's connection. Returns at once; the steps, the host's questions and the result arrive on `events`. */
 	dbOpen: (dbId: string, events: Channel<DbEvent_Deserialize>) => typedError<DbOpened, AppError>(__TAURI_INVOKE("db_open", { dbId, events })),
@@ -604,6 +620,8 @@ export type Choice = "replace" | "keep_both" | "skip";
 
 /**  Ordered by how much care a statement needs: `Read < Write < Schema < Dangerous`. */
 export type Class = "read" | "write" | "schema" | "dangerous";
+
+export type CodeLanguage = "mongosh" | "node" | "python" | "json";
 
 export type CsvColumn = {
 	name: string,
@@ -1635,6 +1653,40 @@ export type LogSummary_Serialize = {
 	comment: string | null,
 };
 
+export type MgAggRequest = MgAggRequest_Serialize | MgAggRequest_Deserialize;
+
+export type MgAggRequest_Deserialize = {
+	db: string,
+	coll: string,
+	stages: MgStage[],
+	/**  Run up to and including this stage (its index in `stages`); `None` is all of them. */
+	upto?: number | null,
+	/**  How many output documents to bring back. */
+	sample: number,
+	/**  An index name or a key pattern like `{"status":1}`; empty for none. */
+	hint: string,
+};
+
+export type MgAggRequest_Serialize = {
+	db: string,
+	coll: string,
+	stages: MgStage[],
+	/**  Run up to and including this stage (its index in `stages`); `None` is all of them. */
+	upto: number | null,
+	/**  How many output documents to bring back. */
+	sample: number,
+	/**  An index name or a key pattern like `{"status":1}`; empty for none. */
+	hint: string,
+};
+
+export type MgAggResult = {
+	docs: MgDoc[],
+	more: boolean,
+	took_ms: number,
+	/**  The run stopped before a `$out` or `$merge`, which only runs after a confirmation. */
+	stopped_at_write: boolean,
+};
+
 export type MgCount = {
 	n: number | null,
 	/**  `true` when it is the collection's metadata estimate (no filter), not a count. */
@@ -1654,6 +1706,26 @@ export type MgDocOp = { kind: "insert"; doc: string } |
 /**  Replace the document with this `_id` by the edited one. */
 { kind: "replace"; id: string; doc: string } | { kind: "delete"; id: string };
 
+export type MgField = MgField_Serialize | MgField_Deserialize;
+
+export type MgField_Deserialize = {
+	/**  `a.b` for a nested field, `tags[]` for the items of an array. */
+	path: string,
+	/**  In how many of the sampled documents the field is present. */
+	present: number,
+	types: MgType[],
+	example?: string | null,
+};
+
+export type MgField_Serialize = {
+	/**  `a.b` for a nested field, `tags[]` for the items of an array. */
+	path: string,
+	/**  In how many of the sampled documents the field is present. */
+	present: number,
+	types: MgType[],
+	example: string | null,
+};
+
 export type MgFindRequest = {
 	db: string,
 	coll: string,
@@ -1664,6 +1736,42 @@ export type MgFindRequest = {
 	limit: number,
 	/**  A collation document, e.g. `{"locale":"en","strength":2}`; empty for none. */
 	collation: string,
+};
+
+export type MgIndex = MgIndex_Serialize | MgIndex_Deserialize;
+
+export type MgIndexOp = MgIndexOp_Serialize | MgIndexOp_Deserialize;
+
+export type MgIndexOp_Deserialize = { kind: "create"; keys: string; name: string; unique: boolean; sparse: boolean; ttl_seconds?: number | null; partial: string } | { kind: "drop"; name: string };
+
+export type MgIndexOp_Serialize = { kind: "create"; keys: string; name: string; unique: boolean; sparse: boolean; ttl_seconds: number | null; partial: string } | { kind: "drop"; name: string };
+
+export type MgIndex_Deserialize = {
+	name: string,
+	/**  The key pattern as extended JSON, in order: `{"status":1,"placed":-1}`. */
+	keys: string,
+	unique: boolean,
+	sparse: boolean,
+	ttl_seconds?: number | null,
+	partial?: string | null,
+	/**  How many times a query used it since the server (re)started or the index was made; `None` if unknown. */
+	uses?: number | null,
+	/**  Since when `uses` counts (UTC milliseconds). */
+	since_ms?: number | null,
+};
+
+export type MgIndex_Serialize = {
+	name: string,
+	/**  The key pattern as extended JSON, in order: `{"status":1,"placed":-1}`. */
+	keys: string,
+	unique: boolean,
+	sparse: boolean,
+	ttl_seconds: number | null,
+	partial: string | null,
+	/**  How many times a query used it since the server (re)started or the index was made; `None` if unknown. */
+	uses: number | null,
+	/**  Since when `uses` counts (UTC milliseconds). */
+	since_ms: number | null,
 };
 
 export type MgNode = {
@@ -1689,6 +1797,8 @@ export type MgPending_Deserialize = {
 	summary: string,
 	/**  The document as it is now (canonical JSON), for a replace or delete: "Show sample". */
 	sample?: string | null,
+	/**  `confirm`, or `typed` when the database's name must be typed first (a dangerous change). */
+	level: string,
 };
 
 export type MgPending_Serialize = {
@@ -1699,6 +1809,49 @@ export type MgPending_Serialize = {
 	summary: string,
 	/**  The document as it is now (canonical JSON), for a replace or delete: "Show sample". */
 	sample: string | null,
+	/**  `confirm`, or `typed` when the database's name must be typed first (a dangerous change). */
+	level: string,
+};
+
+export type MgSchema = MgSchema_Serialize | MgSchema_Deserialize;
+
+export type MgSchema_Deserialize = {
+	sampled: number,
+	fields: MgField_Deserialize[],
+	/**  The sample was cut (more fields than are listed). */
+	truncated: boolean,
+};
+
+export type MgSchema_Serialize = {
+	sampled: number,
+	fields: MgField_Serialize[],
+	/**  The sample was cut (more fields than are listed). */
+	truncated: boolean,
+};
+
+/**  One stage as the builder holds it: the operator (`$match`) and its argument as extended JSON text. */
+export type MgStage = {
+	op: string,
+	body: string,
+	enabled: boolean,
+};
+
+export type MgType = {
+	name: string,
+	count: number,
+};
+
+export type MgValidation = {
+	/**  The rules as canonical extended JSON; empty when there are none. */
+	validator: string,
+	level: string,
+	action: string,
+};
+
+export type MgValidationCheck = {
+	/**  How many documents the rules would reject. */
+	failing: number | null,
+	sample: MgDoc[],
 };
 
 export type ObjectKind = "schema" | "table" | "view" | "matview" | "foreign";
