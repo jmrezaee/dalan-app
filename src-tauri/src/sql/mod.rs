@@ -8,6 +8,7 @@ pub mod classify;
 pub mod explain;
 pub mod diagram;
 pub mod grid;
+pub mod mysql;
 pub mod pg;
 pub mod structure;
 pub mod transfer;
@@ -157,22 +158,17 @@ fn step(emit: &Emit, index: u32, state: RedisStepState, detail: Option<String>) 
     });
 }
 
-/// One whole attempt: host sign-in (if any), the stream, the database sign-in. The SSH connection is returned and
-/// must stay alive as long as the database connection does.
-pub async fn connect(
-    store: Store,
-    cfg: Arc<SqlConfig>,
-    prompts: Arc<Prompts>,
-    emit: Emit,
-    on_close: impl FnOnce(Option<String>) + Send + 'static,
-) -> AppResult<Opened> {
-    if cfg.engine != Engine::Postgres {
-        return Err(AppError::validation(format!(
-            "Opening {} databases arrives in a later update.",
-            cfg.engine.label()
-        )));
-    }
-    let (steps, hops) = plan(&store, &cfg).await?;
+/// The way to the server: the steps shown, the host sign-in (if any), and the first stream to the database. Shared
+/// by every engine; the engine's own sign-in comes after it.
+async fn route(
+    store: &Store,
+    cfg: &Arc<SqlConfig>,
+    prompts: &Arc<Prompts>,
+    emit: &Emit,
+) -> AppResult<(Option<Arc<Connected>>, Reopen, transport::BoxStream, u32)> {
+    let store = store.clone();
+    let (prompts, emit) = (Arc::clone(prompts), Arc::clone(emit));
+    let (steps, hops) = plan(&store, cfg).await?;
     emit(DbEvent::Plan { steps });
     // The host sign-in speaks Redis' event type; only its steps and questions matter here.
     let redis_emit: RedisEmit = {
@@ -232,6 +228,25 @@ pub async fn connect(
         }
     };
     step(&emit, reach, RedisStepState::Done, None);
+    Ok((ssh, reopen, stream, reach))
+}
+
+/// One whole attempt: host sign-in (if any), the stream, the database sign-in. The SSH connection is returned and
+/// must stay alive as long as the database connection does.
+pub async fn connect(
+    store: Store,
+    cfg: Arc<SqlConfig>,
+    prompts: Arc<Prompts>,
+    emit: Emit,
+    on_close: impl FnOnce(Option<String>) + Send + 'static,
+) -> AppResult<Opened> {
+    if cfg.engine != Engine::Postgres {
+        return Err(AppError::validation(format!(
+            "Opening {} databases arrives in a later update.",
+            cfg.engine.label()
+        )));
+    }
+    let (ssh, reopen, stream, reach) = route(&store, &cfg, &prompts, &emit).await?;
     step(&emit, reach + 1, RedisStepState::Active, None);
     let server_name = cfg
         .server_name
@@ -272,6 +287,9 @@ pub async fn connect(
 /// "Test connection" for a SQL database: the whole sign-in, then closed. A host that needs an answer from the user
 /// is not asked here.
 pub async fn test(store: &Store, cfg: SqlConfig) -> AppResult<SqlServerInfo> {
+    if matches!(cfg.engine, Engine::Mysql | Engine::Mariadb) {
+        return test_my(store, cfg).await;
+    }
     let prompts = Arc::new(Prompts::non_interactive());
     let quiet: Emit = Arc::new(|_| {});
     let name = cfg.name.clone();
@@ -587,4 +605,24 @@ pub async fn gate_target(store: &Store, db_id: &str) -> AppResult<GateTarget> {
             })
         })
         .await
+}
+
+/// "Test connection" for MySQL and MariaDB: the route, then our own client's whole sign-in, then closed.
+async fn test_my(store: &Store, cfg: SqlConfig) -> AppResult<SqlServerInfo> {
+    let prompts = Arc::new(Prompts::non_interactive());
+    let quiet: Emit = Arc::new(|_| {});
+    let (name, route_kind) = (cfg.name.clone(), cfg.route);
+    let cfg = Arc::new(cfg);
+    let (_ssh, reopen, stream, _) = route(store, &cfg, &prompts, &quiet).await.map_err(|e| {
+        if e.code == ErrorCode::AuthFailed && route_kind == RedisRoute::Host {
+            AppError::new(ErrorCode::AuthFailed, format!("The host for {name} needs an answer from you (a new host key or a password). Open a terminal on it once, then test again."))
+        } else {
+            e
+        }
+    })?;
+    let server_name = cfg.server_name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| cfg.address.clone());
+    let login = mysql::MyLogin { user: cfg.user.clone(), password: cfg.password.clone(), database: cfg.database.clone(), tls: cfg.tls, server_name };
+    let (conn, info) = mysql::MyConn::connect(stream, login, reopen).await?;
+    conn.close().await;
+    Ok(info)
 }
