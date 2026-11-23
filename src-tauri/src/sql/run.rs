@@ -520,7 +520,11 @@ impl PgConn {
 
 /// Where a statement's position is for the window: `Piece` characters are what the editor counts.
 pub fn pieces_for(text: &str, mode: RunMode, cursor: Option<u32>) -> AppResult<Vec<Piece>> {
-    let all = classify::split(text);
+    pieces_for_d(text, mode, cursor, classify::Dialect::Pg)
+}
+
+pub fn pieces_for_d(text: &str, mode: RunMode, cursor: Option<u32>, d: classify::Dialect) -> AppResult<Vec<Piece>> {
+    let all = classify::split_for(text, d);
     if all.is_empty() {
         return Err(AppError::validation("There is nothing to run."));
     }

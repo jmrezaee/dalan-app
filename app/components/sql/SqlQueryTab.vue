@@ -17,7 +17,7 @@ const q = computed(() => props.query)
 const editor = ref<{ focus: () => void, selected: () => string } | null>(null)
 
 const result = computed(() => (q.value.view.startsWith('r') ? q.value.results[Number(q.value.view.slice(1))] ?? null : null))
-const saved = computed(() => databases.saved.filter(s => s.engine === 'postgres' && s.kind === 'sql' && (!s.database_id || s.database_id === store.dbId)))
+const saved = computed(() => databases.saved.filter(s => s.engine === store.engine && s.kind === 'sql' && (!s.database_id || s.database_id === store.dbId)))
 const fmt = (n: number) => n.toLocaleString('en-US')
 
 // ---- Running
@@ -114,11 +114,11 @@ onMounted(() => { if (!databases.savedLoaded) void databases.refreshSaved() })
       <Button v-else size="sm" variant="destructive" :data-testid="tid('sql-stop')" @click="store.stop(q)"><Square />Stop</Button>
       <Button variant="secondary" size="sm" :disabled="q.running" @click="runSelection">Run selection</Button>
       <Button variant="secondary" size="sm" :disabled="q.running" @click="run('all')">Run all</Button>
-      <Button variant="secondary" size="sm" :disabled="q.running" :data-testid="tid('sql-explain')" @click="explainNow(false)">Explain</Button>
-      <Button variant="ghost" size="sm" :disabled="q.running" :data-testid="tid('sql-explain-analyze')" title="Runs the statement (a read) inside a transaction that is rolled back, and times each step" @click="explainNow(true)">Explain analyze</Button>
+      <Button v-if="!store.isMy" variant="secondary" size="sm" :disabled="q.running" :data-testid="tid('sql-explain')" @click="explainNow(false)">Explain</Button>
+      <Button v-if="!store.isMy" variant="ghost" size="sm" :disabled="q.running" :data-testid="tid('sql-explain-analyze')" title="Runs the statement (a read) inside a transaction that is rolled back, and times each step" @click="explainNow(true)">Explain analyze</Button>
       <Button variant="ghost" size="sm" @click="store.format(q)">Format</Button>
       <Button variant="ghost" size="sm" @click="save()"><Save />Save</Button>
-      <Button variant="secondary" size="sm" :aria-pressed="q.manual" :disabled="q.running || !!q.txn?.active" :title="q.manual ? 'Statements wait for Commit' : 'Each statement commits on its own'" :data-testid="tid('sql-manual')" @click="store.setManual(q, !q.manual)">{{ q.manual ? 'Manual' : 'Auto-commit' }}</Button>
+      <Button v-if="!store.isMy" variant="secondary" size="sm" :aria-pressed="q.manual" :disabled="q.running || !!q.txn?.active" :title="q.manual ? 'Statements wait for Commit' : 'Each statement commits on its own'" :data-testid="tid('sql-manual')" @click="store.setManual(q, !q.manual)">{{ q.manual ? 'Manual' : 'Auto-commit' }}</Button>
       <span class="ml-auto flex items-center gap-2 text-xs text-muted">
         <label :for="`${tabKey}-${q.id}-limit`">Limit</label>
         <Input :id="`${tabKey}-${q.id}-limit`" v-model="limitText" class="h-7 w-20 text-xs" inputmode="numeric" autocomplete="off" />

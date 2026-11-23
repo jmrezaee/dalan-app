@@ -115,7 +115,7 @@ function onTabKey(e: KeyboardEvent, i: number) {
         <SqlTransferTab v-if="store.special.includes('transfer')" v-show="store.activeTab === 'transfer'" :tab-key="tabKey" />
         <SqlDiagramTab v-for="g in store.diagrams" v-show="store.activeTab === g.id" :key="g.id" :tab-key="tabKey" :diagram="g" />
         <SqlQueryTab v-for="q in store.queries" v-show="store.activeTab === q.id" :key="q.id" :tab-key="tabKey" :query="q" />
-        <EmptyState v-if="!store.tabs.length && !store.queries.length && !store.diagrams.length && !store.special.length" :icon="ShieldCheck" title="Open a table or start a query" text="Pick a table from the list, or press New query. Only reads run for now: changes come with the next update." />
+        <EmptyState v-if="!store.tabs.length && !store.queries.length && !store.diagrams.length && !store.special.length" :icon="ShieldCheck" title="Open a table or start a query" text="Pick a table from the list, or press New query. Reads run at once; changes ask first." />
       </section>
     </div>
 

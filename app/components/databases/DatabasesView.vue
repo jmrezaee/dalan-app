@@ -59,7 +59,7 @@ function open(d: DbRow) {
     if (r) sessions.openRedis(r)
     return
   }
-  if (d.engine === 'postgres') {
+  if (d.engine === 'postgres' || d.engine === 'mysql' || d.engine === 'mariadb') {
     sessions.openSql(d)
     return
   }

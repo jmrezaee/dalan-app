@@ -331,6 +331,8 @@ impl MyConn {
         let conn = MyConn { stream: tokio::sync::Mutex::new(s), connection_id, flavour, version: version.clone(), reopen, login: login.clone(), closed: AtomicBool::new(false) };
         let row = tokio::time::timeout(CONNECT_TIMEOUT, async {
             conn.query("SET NAMES utf8mb4", 0).await?;
+            // Strings are escaped with backslashes and doubled quotes everywhere in Dalan: the session must agree.
+            conn.query("SET SESSION sql_mode = REPLACE(@@sql_mode, 'NO_BACKSLASH_ESCAPES', '')", 0).await?;
             conn.query("select database(), current_user()", 1).await
         })
         .await

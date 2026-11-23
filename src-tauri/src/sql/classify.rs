@@ -7,9 +7,25 @@
 use serde::Serialize;
 use specta::Type;
 use sqlparser::ast::{Expr, Query, SetExpr, Statement};
-use sqlparser::dialect::PostgreSqlDialect;
+use sqlparser::dialect::{Dialect as SqlDialect, MySqlDialect, PostgreSqlDialect};
 use sqlparser::parser::Parser;
 use sqlparser::tokenizer::{Token, Tokenizer, Whitespace};
+
+/// Which SQL the text is in: the tokenizer and parser differ (MySQL has `#` comments, backslash escapes and backticks).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dialect {
+    Pg,
+    My,
+}
+
+impl Dialect {
+    fn sql(self) -> Box<dyn SqlDialect> {
+        match self {
+            Dialect::Pg => Box::new(PostgreSqlDialect {}),
+            Dialect::My => Box::new(MySqlDialect {}),
+        }
+    }
+}
 
 /// Ordered by how much care a statement needs: `Read < Write < Schema < Dangerous`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Type)]
@@ -33,9 +49,13 @@ pub struct Piece {
 /// Splits a script at its `;`. Comments and blank space between statements are dropped. If the text can't be
 /// tokenised (an open quote), it comes back as one piece and the classifier will refuse it.
 pub fn split(sql: &str) -> Vec<Piece> {
+    split_for(sql, Dialect::Pg)
+}
+
+pub fn split_for(sql: &str, d: Dialect) -> Vec<Piece> {
     let chars: Vec<char> = sql.chars().collect();
-    let dialect = PostgreSqlDialect {};
-    let Ok(tokens) = Tokenizer::new(&dialect, sql).tokenize_with_location() else {
+    let dialect = d.sql();
+    let Ok(tokens) = Tokenizer::new(dialect.as_ref(), sql).tokenize_with_location() else {
         return whole(&chars);
     };
     // Line and column (1-based) to a character index.
@@ -109,9 +129,9 @@ fn whole(chars: &[char]) -> Vec<Piece> {
 }
 
 /// Every name in the statement, quoted or not, upper-cased: `"pg_terminate_backend"(pid)` is the same call.
-fn names(sql: &str) -> Vec<String> {
-    let dialect = PostgreSqlDialect {};
-    Tokenizer::new(&dialect, sql)
+fn names(sql: &str, d: Dialect) -> Vec<String> {
+    let dialect = d.sql();
+    Tokenizer::new(dialect.as_ref(), sql)
         .tokenize()
         .map(|ts| {
             ts.into_iter()
@@ -138,14 +158,23 @@ fn effectful(name: &str) -> bool {
 /// `true` when the statement names a function that acts outside the transaction (see `effectful`). Such a statement
 /// is never tried out before the confirmation: a rollback would not undo what it does.
 pub fn calls_effectful(sql: &str) -> bool {
-    names(sql).iter().any(|x| effectful(x))
+    calls_effectful_for(sql, Dialect::Pg)
+}
+
+pub fn calls_effectful_for(sql: &str, d: Dialect) -> bool {
+    names(sql, d).iter().any(|x| effectful(x) || (d == Dialect::My && effectful_my(x)))
+}
+
+/// MySQL and MariaDB functions with effects outside the statement: locks that outlive it, files, other servers.
+fn effectful_my(name: &str) -> bool {
+    matches!(name, "GET_LOCK" | "RELEASE_LOCK" | "RELEASE_ALL_LOCKS" | "LOAD_FILE" | "SYS_EXEC" | "SYS_EVAL" | "NEXTVAL" | "SETVAL" | "MASTER_POS_WAIT" | "SOURCE_POS_WAIT" | "WAIT_FOR_EXECUTED_GTID_SET" | "BENCHMARK")
 }
 
 /// `begin`, `commit`, `rollback`, `savepoint` and friends. The editor has its own Manual mode with Commit and Roll
 /// back; a raw one typed in a script would end or start a transaction behind the transaction bar's back.
 pub fn is_txn_control(sql: &str) -> bool {
     matches!(
-        words(sql).first().map(String::as_str),
+        words(sql, Dialect::Pg).first().map(String::as_str),
         Some("BEGIN" | "START" | "COMMIT" | "END" | "ROLLBACK" | "ABORT" | "SAVEPOINT" | "RELEASE")
     )
 }
@@ -160,9 +189,9 @@ pub fn at_cursor(pieces: &[Piece], cursor: usize) -> Option<&Piece> {
 }
 
 /// The words of a statement, upper-cased, comments skipped. Quoted names are not words.
-fn words(sql: &str) -> Vec<String> {
-    let dialect = PostgreSqlDialect {};
-    Tokenizer::new(&dialect, sql)
+fn words(sql: &str, d: Dialect) -> Vec<String> {
+    let dialect = d.sql();
+    Tokenizer::new(dialect.as_ref(), sql)
         .tokenize()
         .map(|ts| {
             ts.into_iter()
@@ -246,25 +275,32 @@ fn query_class(q: &Query) -> Class {
 
 /// Puts one statement (as `split` returns it) in a class.
 pub fn classify(sql: &str) -> Class {
-    let w = words(sql);
+    classify_for(sql, Dialect::Pg)
+}
+
+pub fn classify_for(sql: &str, d: Dialect) -> Class {
+    if d == Dialect::My {
+        return classify_my(sql);
+    }
+    let w = words(sql, d);
     let Some(first) = w.first().map(String::as_str) else {
         // Opens with a parenthesis or something else that isn't a word: only a parsed query is fine.
-        return parsed_class(sql);
+        return parsed_class(sql, d);
     };
     // Killing other sessions is dangerous wherever the call hides.
-    if names(sql).iter().any(|x| effectful(x)) {
+    if names(sql, d).iter().any(|x| effectful(x)) {
         return Class::Dangerous;
     }
     let has = |x: &str| w.iter().any(|y| y == x);
     match first {
         "SHOW" => Class::Read,
-        "SELECT" | "WITH" | "VALUES" | "UPDATE" | "DELETE" => parsed_class(sql),
+        "SELECT" | "WITH" | "VALUES" | "UPDATE" | "DELETE" => parsed_class(sql, d),
         // `table x` is `select * from x`; the parser doesn't know it.
-        "TABLE" => parsed_class(&format!("select * from {}", sql.trim().get(5..).unwrap_or("").trim())),
+        "TABLE" => parsed_class(&format!("select * from {}", sql.trim().get(5..).unwrap_or("").trim()), d),
         "EXPLAIN" => {
             if has("ANALYZE") || has("ANALYSE") {
                 // EXPLAIN ANALYZE runs the statement: it is as risky as the statement.
-                explain_inner(sql).max(Class::Write)
+                explain_inner(sql, d).max(Class::Write)
             } else {
                 Class::Read
             }
@@ -314,10 +350,10 @@ pub fn classify(sql: &str) -> Class {
 }
 
 /// The class of what an `EXPLAIN ANALYZE` would run. Unreadable inner statements are `Dangerous`.
-fn explain_inner(sql: &str) -> Class {
+fn explain_inner(sql: &str, d: Dialect) -> Class {
     // Parse the whole statement: sqlparser nests the explained statement.
-    let dialect = PostgreSqlDialect {};
-    match Parser::parse_sql(&dialect, sql) {
+    let dialect = d.sql();
+    match Parser::parse_sql(dialect.as_ref(), sql) {
         Ok(s) if s.len() == 1 => match &s[0] {
             Statement::Explain { statement, .. } => statement_class(statement),
             _ => Class::Dangerous,
@@ -326,18 +362,80 @@ fn explain_inner(sql: &str) -> Class {
     }
 }
 
-fn parsed_class(sql: &str) -> Class {
-    let dialect = PostgreSqlDialect {};
-    match Parser::parse_sql(&dialect, sql) {
+fn parsed_class(sql: &str, d: Dialect) -> Class {
+    let dialect = d.sql();
+    match Parser::parse_sql(dialect.as_ref(), sql) {
         Ok(s) if s.len() == 1 => statement_class(&s[0]),
+        _ => Class::Dangerous,
+    }
+}
+
+/// MySQL and MariaDB. Every DDL statement ends the open transaction on its own (implicit commit), so it can't be
+/// rolled back: those that change structure are `Schema`, those that destroy are `Dangerous`.
+fn classify_my(sql: &str) -> Class {
+    let w = words(sql, Dialect::My);
+    let Some(first) = w.first().map(String::as_str) else {
+        return parsed_class(sql, Dialect::My);
+    };
+    // MariaDB runs `/*M! ... */` as code; the tokenizer sees a comment. Nothing legitimate needs it here.
+    if calls_effectful_for(sql, Dialect::My) || sql.to_ascii_lowercase().contains("/*m!") {
+        return Class::Dangerous;
+    }
+    let has = |x: &str| w.iter().any(|y| y == x);
+    match first {
+        "SHOW" | "DESCRIBE" | "DESC" => Class::Read,
+        "EXPLAIN" => {
+            if has("ANALYZE") {
+                explain_inner(sql, Dialect::My).max(Class::Write)
+            } else {
+                Class::Read
+            }
+        }
+        "SELECT" | "WITH" | "VALUES" | "TABLE" | "UPDATE" | "DELETE" => {
+            // `into outfile` and `into dumpfile` write files on the server.
+            if has("OUTFILE") || has("DUMPFILE") {
+                Class::Dangerous
+            } else {
+                parsed_class(sql, Dialect::My)
+            }
+        }
+        // Server-wide settings, privileges, replication and locks that outlive the statement.
+        "SET" if has("GLOBAL") || has("PERSIST") || has("PERSIST_ONLY") || has("PASSWORD") => Class::Dangerous,
+        "START" if has("REPLICA") || has("SLAVE") || has("GROUP_REPLICATION") => Class::Dangerous,
+        "FLUSH" | "RESET" | "STOP" | "CHANGE" => Class::Dangerous,
+        "INSERT" | "REPLACE" | "CALL" | "DO" | "LOAD" | "HANDLER" | "LOCK" | "UNLOCK" | "SET" | "USE" | "BEGIN" | "START" | "COMMIT" | "ROLLBACK" | "SAVEPOINT"
+        | "RELEASE" | "XA" => Class::Write,
+        "PREPARE" | "EXECUTE" | "DEALLOCATE" | "KILL" | "SHUTDOWN" | "INSTALL" | "UNINSTALL" => Class::Dangerous,
+        "DROP" | "TRUNCATE" | "RENAME" => Class::Dangerous,
+        "ALTER" => {
+            // Anything that drops, discards or rewrites throws data away (`drop b` needs no COLUMN keyword).
+            if has("DROP") || has("DISCARD") || has("MODIFY") || has("CHANGE") || has("USER") || has("TRUNCATE") || has("CONVERT") {
+                Class::Dangerous
+            } else {
+                Class::Schema
+            }
+        }
+        "CREATE" => {
+            // `create or replace` destroys what was there.
+            if has("REPLACE") || has("USER") && (has("IDENTIFIED") || has("PASSWORD")) {
+                Class::Dangerous
+            } else {
+                Class::Schema
+            }
+        }
+        "GRANT" | "REVOKE" | "ANALYZE" | "OPTIMIZE" | "REPAIR" | "CHECK" | "CHECKSUM" | "COMMENT" => Class::Schema,
         _ => Class::Dangerous,
     }
 }
 
 /// `true` when `sql` is a statement D3 may run: a read that goes through a cursor (a plain query).
 pub fn is_query(sql: &str) -> bool {
-    let dialect = PostgreSqlDialect {};
-    matches!(Parser::parse_sql(&dialect, sql), Ok(s) if s.len() == 1 && matches!(s[0], Statement::Query(_)))
+    is_query_for(sql, Dialect::Pg)
+}
+
+pub fn is_query_for(sql: &str, d: Dialect) -> bool {
+    let dialect = d.sql();
+    matches!(Parser::parse_sql(dialect.as_ref(), sql), Ok(s) if s.len() == 1 && matches!(s[0], Statement::Query(_)))
 }
 
 /// Formats each statement on its own lines. A statement that has comments, or that sqlparser can't read, is kept as
@@ -463,6 +561,70 @@ mod tests {
         for (sql, want) in table {
             assert_eq!(classify(sql), *want, "{sql}");
         }
+    }
+
+    /// The unit table for MySQL and MariaDB.
+    #[test]
+    fn mysql_statements_are_classified() {
+        let table: &[(&str, Class)] = &[
+            ("select 1", Read),
+            ("select * from `t` where id = 1 # a note", Read),
+            ("show tables", Read),
+            ("describe t", Read),
+            ("explain select 1", Read),
+            ("explain analyze select 1", Write),
+            ("select * from t for update", Write),
+            ("select * from t into outfile '/tmp/x'", Dangerous),
+            ("select get_lock('a', 10)", Dangerous),
+            ("select load_file('/etc/passwd')", Dangerous),
+            ("select sleep(1)", Read),
+            ("insert into t values (1)", Write),
+            ("replace into t values (1)", Write),
+            ("update t set a = 1 where id = 2", Write),
+            ("update t set a = 1", Dangerous),
+            ("delete from t", Dangerous),
+            ("delete from t where id = 1", Write),
+            ("set @a = 1", Write),
+            ("start transaction", Write),
+            ("create table t (a int)", Schema),
+            ("alter table t add column b int", Schema),
+            ("alter table t drop column b", Dangerous),
+            ("alter table t modify a bigint", Dangerous),
+            ("drop table t", Dangerous),
+            ("truncate table t", Dangerous),
+            ("rename table a to b", Dangerous),
+            ("kill 12", Dangerous),
+            ("create user u identified by 'x'", Dangerous),
+            ("grant select on t to u", Schema),
+            ("load data local infile '/etc/passwd' into table t", Write),
+            ("frobnicate", Dangerous),
+            ("alter table t drop b", Dangerous),
+            ("alter table t drop partition p1", Dangerous),
+            ("alter table t discard tablespace", Dangerous),
+            ("create or replace table t (a int)", Dangerous),
+            ("set global max_connections = 1", Dangerous),
+            ("set persist sql_mode = ''", Dangerous),
+            ("set password = 'x'", Dangerous),
+            ("set @a = 1", Write),
+            ("flush privileges", Dangerous),
+            ("flush tables with read lock", Dangerous),
+            ("reset master", Dangerous),
+            ("start replica", Dangerous),
+            ("select nextval(s)", Dangerous),
+            // Comments hide nothing: MySQL's executable comments are code, and so is MariaDB's `/*M! */`.
+            ("select 1 /*M! into outfile '/tmp/x' */", Dangerous),
+            ("select 1 /*!50000 into outfile '/tmp/x' */", Dangerous),
+            ("/*!50000 drop table t */", Dangerous),
+            ("select * from t /*M!100100 for update */", Dangerous),
+            ("select 1 -- note\n", Read),
+            ("with a as (select 1) select * from a", Read),
+        ];
+        for (sql, want) in table {
+            assert_eq!(classify_for(sql, Dialect::My), *want, "{sql}");
+        }
+        // MySQL's own comment and string rules decide where a statement ends.
+        let p = split_for("select 'a\\';b'; # x; y\nselect `c;d`", Dialect::My);
+        assert_eq!(p.iter().map(|x| x.text.as_str()).collect::<Vec<_>>(), ["select 'a\\';b'", "select `c;d`"]);
     }
 
     #[test]

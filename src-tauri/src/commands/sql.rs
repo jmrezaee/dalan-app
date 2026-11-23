@@ -17,7 +17,7 @@ use crate::dbs::gate::{self, decide, strongest, Decision};
 use crate::redis::store::RedisWriteMode;
 use crate::sql::activity::{Activity, ActivityView};
 use crate::sql::classify::{classify, Class, Piece};
-use crate::sql::run::{pieces_for, HeldRun, RunMode, RunOpts, SqlCatalog, SqlRunEvent, TxnState};
+use crate::sql::run::{pieces_for_d, HeldRun, RunMode, RunOpts, SqlCatalog, SqlRunEvent, TxnState};
 use crate::sql;
 use crate::sql::diagram::Diagram;
 use crate::sql::explain::ExplainPlan;
@@ -80,6 +80,9 @@ pub async fn sql_objects(
     path: Vec<String>,
 ) -> AppResult<Vec<SqlObject>> {
     state.require_unlocked()?;
+    if let Some(my) = state.sql.my(&conn_id).await? {
+        return my.objects(&path).await;
+    }
     state.sql.pg(&conn_id).await?.objects(&path).await
 }
 
@@ -93,6 +96,9 @@ pub async fn sql_table_info(
     table: String,
 ) -> AppResult<SqlTableInfo> {
     state.require_unlocked()?;
+    if let Some(my) = state.sql.my(&conn_id).await? {
+        return my.table_info(&schema, &table).await;
+    }
     state
         .sql
         .pg(&conn_id)
@@ -110,6 +116,9 @@ pub async fn sql_table_page(
     request: PageRequest,
 ) -> AppResult<SqlPage> {
     state.require_unlocked()?;
+    if let Some(my) = state.sql.my(&conn_id).await? {
+        return my.table_page(&request).await;
+    }
     state.sql.pg(&conn_id).await?.table_page(&request).await
 }
 
@@ -124,12 +133,11 @@ pub async fn sql_count(
     filter: String,
 ) -> AppResult<f64> {
     state.require_unlocked()?;
-    let n = state
-        .sql
-        .pg(&conn_id)
-        .await?
-        .count(&schema, &table, &filter)
-        .await?;
+    let n = if let Some(my) = state.sql.my(&conn_id).await? {
+        my.count(&schema, &table, &filter).await?
+    } else {
+        state.sql.pg(&conn_id).await?.count(&schema, &table, &filter).await?
+    };
     // A count far below 2^53, so a JS number holds it exactly.
     Ok(n as f64)
 }
@@ -153,6 +161,9 @@ pub async fn sql_cell(
 ) -> AppResult<SqlCell> {
     state.require_unlocked()?;
     let key: Vec<(String, String)> = key.into_iter().map(|k| (k.column, k.value)).collect();
+    if let Some(my) = state.sql.my(&conn_id).await? {
+        return my.cell(&schema, &table, &key, &column).await;
+    }
     state
         .sql
         .pg(&conn_id)
@@ -249,7 +260,8 @@ pub async fn sql_run(
     events: Channel<SqlRunEvent>,
 ) -> AppResult<SqlRunReply> {
     state.require_unlocked()?;
-    let pieces = pieces_for(&text, mode, cursor)?;
+    let dialect = state.sql.dialect(&conn_id).await?;
+    let pieces = pieces_for_d(&text, mode, cursor, dialect)?;
     let db_id = state.sql.db_id(&conn_id)?;
     let target = sql::gate_target(&state.store(), &db_id).await?;
     if let Some(i) = pieces.iter().position(|p| sql::classify::is_txn_control(&p.text)) {
@@ -261,7 +273,7 @@ pub async fn sql_run(
         let _ = events.send(SqlRunEvent::Finished { elapsed_ms: 0 });
         return Ok(SqlRunReply { pending: None });
     }
-    let classes: Vec<Class> = pieces.iter().map(|p| classify(&p.text)).collect();
+    let classes: Vec<Class> = pieces.iter().map(|p| sql::classify::classify_for(&p.text, dialect)).collect();
     let decision = classes
         .iter()
         .fold(Decision::Run, |d, c| strongest(d, decide(target.mode, *c)));
@@ -410,7 +422,11 @@ pub async fn sql_catalog(
     refresh: bool,
 ) -> AppResult<SqlCatalog> {
     state.require_unlocked()?;
-    let c = state.sql.pg(&conn_id).await?.catalog(refresh).await?;
+    let c = if let Some(my) = state.sql.my(&conn_id).await? {
+        my.catalog(refresh).await?
+    } else {
+        state.sql.pg(&conn_id).await?.catalog(refresh).await?
+    };
     Ok((*c).clone())
 }
 
@@ -590,7 +606,8 @@ pub async fn sql_explain(
     timeout_ms: u32,
 ) -> AppResult<ExplainPlan> {
     state.require_unlocked()?;
-    let pieces = pieces_for(&text, mode, cursor)?;
+    let dialect = state.sql.dialect(&conn_id).await?;
+    let pieces = pieces_for_d(&text, mode, cursor, dialect)?;
     let piece = pieces.first().ok_or_else(|| crate::error::AppError::validation("There is nothing to explain."))?;
     if analyze && classify(&piece.text) != Class::Read {
         return Err(crate::error::AppError::validation(

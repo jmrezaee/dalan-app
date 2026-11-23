@@ -100,6 +100,9 @@ const tableId = (schema: string, table: string) => `${schema}.${table}`
 function setup() {
   const api = useTauri()
   const dbId = ref('')
+  /** MySQL and MariaDB tabs browse, query and gate; structure, explain, activity, diagram, transfer and grid edits come later. */
+  const engine = computed(() => useDatabasesStore().rows.find(d => d.id === dbId.value)?.engine ?? 'postgres')
+  const isMy = computed(() => engine.value === 'mysql' || engine.value === 'mariadb')
   /** Rust's connection id. Empty until `db_open` answers; events can arrive before that. */
   const connId = ref('')
   const status = ref<SqlStatus>('closed')
@@ -840,13 +843,13 @@ function setup() {
 
   /** Save (⌘S): a new saved query, or the one this tab was loaded from. `thisDatabaseOnly` ties it to this database. */
   async function save(q: QueryTab, name: string, thisDatabaseOnly: boolean) {
-    const row = await api.savedSave({ id: q.savedId, database_id: thisDatabaseOnly ? dbId.value : null, engine: 'postgres', kind: 'sql', name: name.trim(), folder: null, description: null, body: q.text })
+    const row = await api.savedSave({ id: q.savedId, database_id: thisDatabaseOnly ? dbId.value : null, engine: engine.value, kind: 'sql', name: name.trim(), folder: null, description: null, body: q.text })
     q.savedId = row.id
     q.saved = q.text
     q.title = row.name
   }
 
-  return { dbId, connId, status, steps, prompt, info, error, schemas, treeFilter, tabs, activeTab, current, special, openSpecial, closeSpecial, activityState, refreshActivity, prepareSession, confirmSession, discardSession, newTransferId, stopTransfer, exportTable, importPick, importPreview, importPrepare, importCommit, importDiscard, backupCheck, backupStart, restorePrepare, restoreCommit, restoreDiscard, setView, loadStructure, addOp, removeOp, reviewStructure, applyStructure, cancelStructure, migrationText, explain, diagrams, openDiagram, loadDiagram, closeDiagram, saveExport, changeCount, setCell, toggleDelete, discardEdits, review, commitReview, cancelReview, queries, catalog, history, newQuery, closeQuery, requestCloseQuery, finishAndClose, openTransactions, confirmRun, discardRun, txn, setManual, loadCatalog, run, stop, format, loadHistory, clearHistory, save, open, retry, respond, close, toggleSchema, openTable, closeTable, loadPage, apply, refresh, nextPage, prevPage, sortBy, countExactly, select, keyOf, jump }
+  return { dbId, connId, status, steps, prompt, info, error, schemas, treeFilter, tabs, activeTab, current, engine, isMy, special, openSpecial, closeSpecial, activityState, refreshActivity, prepareSession, confirmSession, discardSession, newTransferId, stopTransfer, exportTable, importPick, importPreview, importPrepare, importCommit, importDiscard, backupCheck, backupStart, restorePrepare, restoreCommit, restoreDiscard, setView, loadStructure, addOp, removeOp, reviewStructure, applyStructure, cancelStructure, migrationText, explain, diagrams, openDiagram, loadDiagram, closeDiagram, saveExport, changeCount, setCell, toggleDelete, discardEdits, review, commitReview, cancelReview, queries, catalog, history, newQuery, closeQuery, requestCloseQuery, finishAndClose, openTransactions, confirmRun, discardRun, txn, setManual, loadCatalog, run, stop, format, loadHistory, clearHistory, save, open, retry, respond, close, toggleSchema, openTable, closeTable, loadPage, apply, refresh, nextPage, prevPage, sortBy, countExactly, select, keyOf, jump }
 }
 
 // One store per SQL tab, like the Redis tabs: each has its own connection, tree and open tables.

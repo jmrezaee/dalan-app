@@ -97,6 +97,9 @@ const exportsDone: string[] = []
 const importHeld = new Map<string, number>()
 const restoreHeld = new Map<string, boolean>()
 
+const LABEL: Record<string, string> = { postgres: 'PostgreSQL', mysql: 'MySQL', mariadb: 'MariaDB' }
+const VERSION: Record<string, string> = { postgres: 'PostgreSQL 16.4 on x86_64-pc-linux-gnu', mysql: 'MySQL 8.4.2', mariadb: 'MariaDB 11.4.2' }
+
 const table = (name: string) => TABLES[name] ?? fail('not_found', `There is no table public.${name} (it may have been dropped).`)
 const cell = (c: SqlColumn_Serialize, v: string | null): Cell_Serialize => (v === null ? { kind: 'null', v: null, cut: false } : { kind: c.kind, v, cut: false })
 
@@ -381,8 +384,8 @@ export const sql: Pick<Handlers, Keys> = {
     const host = m.hosts.find(h => h.id === d.host_id)
     const steps = [
       ...(host ? [{ label: `Sign in to ${host.label}`, detail: null }] : []),
-      { label: `Reach PostgreSQL at ${d.address}:${d.port}`, detail: d.tls !== 'off' ? 'with TLS' : null },
-      { label: d.username ? `Sign in as ${d.username}` : 'Sign in to PostgreSQL', detail: null },
+      { label: `Reach ${LABEL[d.engine as string] ?? 'PostgreSQL'} at ${d.address}:${d.port}`, detail: d.tls !== 'off' ? 'with TLS' : null },
+      { label: d.username ? `Sign in as ${d.username}` : `Sign in to ${LABEL[d.engine as string] ?? 'PostgreSQL'}`, detail: null },
     ]
     queueMicrotask(() => {
       send(events, { type: 'plan', steps })
@@ -390,7 +393,7 @@ export const sql: Pick<Handlers, Keys> = {
         send(events, { type: 'step', index, state: 'active', detail: null })
         send(events, { type: 'step', index, state: 'done', detail: null })
       })
-      send(events, { type: 'ready', info: { engine: 'postgres', version: 'PostgreSQL 16.4 on x86_64-pc-linux-gnu', database: d.default_database ?? 'app', user: d.username ?? 'app', latency_ms: 4 } })
+      send(events, { type: 'ready', info: { engine: d.engine, version: VERSION[d.engine as string] ?? 'PostgreSQL 16.4 on x86_64-pc-linux-gnu', database: d.default_database ?? 'app', user: d.username ?? 'app', latency_ms: 4 } })
     })
     return { conn_id: connId }
   },

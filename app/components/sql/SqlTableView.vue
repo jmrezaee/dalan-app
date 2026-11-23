@@ -44,7 +44,7 @@ const total = computed(() => {
 // ---- Editing (F22): a table with a key, in a database that allows changes
 const databases = useDatabasesStore()
 const mode = computed(() => databases.rows.find(d => d.id === store.dbId)?.write_mode ?? 'confirm')
-const editable = computed(() => t.value.kind === 'table' && !!t.value.info?.columns.some(c => c.pk_position !== null) && mode.value !== 'read_only')
+const editable = computed(() => !store.isMy && t.value.kind === 'table' && !!t.value.info?.columns.some(c => c.pk_position !== null) && mode.value !== 'read_only')
 const changes = computed(() => store.changeCount(t.value))
 const noKey = computed(() => !!t.value.info && !t.value.info.columns.some(c => c.pk_position !== null))
 
@@ -101,9 +101,9 @@ const links = computed<Link[]>(() => {
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col" :data-testid="tid(`sql-table-${t.table}`)">
-    <div role="group" aria-label="View" class="flex h-9 shrink-0 items-center gap-0.5 border-b border-border px-2">
+    <div v-if="!store.isMy" role="group" aria-label="View" class="flex h-9 shrink-0 items-center gap-0.5 border-b border-border px-2">
       <button
-        v-for="v in VIEWS" :key="v.id" type="button" :aria-current="t.view === v.id ? 'true' : undefined"
+        v-for="v in (store.isMy ? VIEWS.slice(0, 1) : VIEWS)" :key="v.id" type="button" :aria-current="t.view === v.id ? 'true' : undefined"
         :class="['h-7 cursor-default rounded-md px-2.5 text-sm text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-accent', t.view === v.id && 'bg-surface-hover text-text']" @click="store.setView(t, v.id)"
       >{{ v.label }}<span v-if="v.count" class="ml-1 text-2xs text-muted">{{ v.count() }}</span></button>
     </div>

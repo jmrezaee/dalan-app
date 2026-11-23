@@ -8,6 +8,7 @@ pub mod classify;
 pub mod explain;
 pub mod diagram;
 pub mod grid;
+pub mod mydb;
 pub mod mysql;
 pub mod pg;
 pub mod structure;
@@ -240,14 +241,11 @@ pub async fn connect(
     emit: Emit,
     on_close: impl FnOnce(Option<String>) + Send + 'static,
 ) -> AppResult<Opened> {
-    if cfg.engine != Engine::Postgres {
-        return Err(AppError::validation(format!(
-            "Opening {} databases arrives in a later update.",
-            cfg.engine.label()
-        )));
-    }
     let (ssh, reopen, stream, reach) = route(&store, &cfg, &prompts, &emit).await?;
     step(&emit, reach + 1, RedisStepState::Active, None);
+    if matches!(cfg.engine, Engine::Mysql | Engine::Mariadb) {
+        return connect_my(&cfg, stream, reopen, ssh, &emit, reach).await;
+    }
     let server_name = cfg
         .server_name
         .clone()
@@ -278,10 +276,40 @@ pub async fn connect(
         Box::pin(async move {
             let stream = (reopen)().await?;
             let (conn, _) = PgConn::connect(stream, login, Arc::clone(&reopen), |_| {}).await?;
-            Ok(conn)
+            Ok(EditorConn::Pg(Box::new(conn)))
         })
     });
-    Ok((Arc::new(conn), info, ssh, opener))
+    Ok(Opened { db: Db::Pg(Arc::new(conn)), info, ssh, opener })
+}
+
+/// The MySQL and MariaDB sign-in on the stream the route gave, and the way to open an editor tab's own connection.
+async fn connect_my(
+    cfg: &Arc<SqlConfig>,
+    stream: transport::BoxStream,
+    reopen: Reopen,
+    ssh: Option<Arc<Connected>>,
+    emit: &Emit,
+    reach: u32,
+) -> AppResult<Opened> {
+    let server_name = cfg.server_name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| cfg.address.clone());
+    let login = mysql::MyLogin { user: cfg.user.clone(), password: cfg.password.clone(), database: cfg.database.clone(), tls: cfg.tls, server_name };
+    let (conn, info) = match mysql::MyConn::connect(stream, login.clone(), Arc::clone(&reopen)).await {
+        Ok(v) => v,
+        Err(e) => {
+            step(emit, reach + 1, RedisStepState::Failed, Some(e.message.clone()));
+            return Err(e);
+        }
+    };
+    step(emit, reach + 1, RedisStepState::Done, None);
+    let opener: Opener = Arc::new(move || {
+        let (reopen, login) = (Arc::clone(&reopen), login.clone());
+        Box::pin(async move {
+            let stream = (reopen)().await?;
+            let (conn, _) = mysql::MyConn::connect(stream, login, Arc::clone(&reopen)).await?;
+            Ok(EditorConn::My(Box::new(mydb::MyEditor::new(conn))))
+        })
+    });
+    Ok(Opened { db: Db::My(Arc::new(mydb::MyDb::new(conn))), info, ssh, opener })
 }
 
 /// "Test connection" for a SQL database: the whole sign-in, then closed. A host that needs an answer from the user
@@ -294,7 +322,7 @@ pub async fn test(store: &Store, cfg: SqlConfig) -> AppResult<SqlServerInfo> {
     let quiet: Emit = Arc::new(|_| {});
     let name = cfg.name.clone();
     let route = cfg.route;
-    let (_conn, info, _ssh, _opener) = connect(store.clone(), Arc::new(cfg), prompts, quiet, |_| {})
+    let Opened { info, .. } = connect(store.clone(), Arc::new(cfg), prompts, quiet, |_| {})
         .await
         .map_err(|e| {
             if e.code == ErrorCode::AuthFailed && route == RedisRoute::Host {
@@ -320,9 +348,12 @@ async fn run(
         _ = cancel.changed() => return,
     };
     match result {
-        Ok((conn, info, ssh, opener)) => {
+        Ok(Opened { db, info, ssh, opener }) => {
             *live.opener.lock().await = Some(opener);
-            *live.conn.lock().await = Some(conn);
+            match db {
+                Db::Pg(c) => *live.conn.lock().await = Some(c),
+                Db::My(c) => *live.my.lock().await = Some(c),
+            }
             emit(DbEvent::Ready { info });
             // Hold the SSH connection until the tab closes (backups use it too).
             *live.ssh.lock().await = ssh.clone();
@@ -340,12 +371,24 @@ async fn run(
 /// Opens one more connection to the same server by the same route (an editor tab's own).
 type Opener = Arc<
     dyn Fn() -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = AppResult<PgConn>> + Send>,
+            Box<dyn std::future::Future<Output = AppResult<EditorConn>> + Send>,
         > + Send
         + Sync,
 >;
 
-type Opened = (Arc<PgConn>, SqlServerInfo, Option<Arc<Connected>>, Opener);
+/// What a successful sign-in gives the tab: the engine's connection for browsing, the server's answer, the host's
+/// SSH connection (if the route has one) and the way to open an editor connection.
+pub struct Opened {
+    db: Db,
+    info: SqlServerInfo,
+    ssh: Option<Arc<Connected>>,
+    opener: Opener,
+}
+
+enum Db {
+    Pg(Arc<PgConn>),
+    My(Arc<mydb::MyDb>),
+}
 
 async fn attempt(
     store: &Store,
@@ -376,6 +419,8 @@ struct Live {
     prompts: Arc<Prompts>,
     cancel: watch::Sender<bool>,
     conn: tokio::sync::Mutex<Option<Arc<PgConn>>>,
+    /// MySQL and MariaDB tabs hold this instead.
+    my: tokio::sync::Mutex<Option<Arc<mydb::MyDb>>>,
     opener: tokio::sync::Mutex<Option<Opener>>,
     /// The SSH connection to the route's last host, for tools that run there (backup, restore).
     ssh: tokio::sync::Mutex<Option<Arc<Connected>>>,
@@ -383,9 +428,65 @@ struct Live {
     editors: tokio::sync::Mutex<HashMap<String, Arc<Editor>>>,
 }
 
+/// An editor tab's own connection, whichever engine: the same calls, answered by PostgreSQL or by MySQL.
+pub enum EditorConn {
+    Pg(Box<PgConn>),
+    My(Box<mydb::MyEditor>),
+}
+
+const MY_LATER: &str = "This isn't available for MySQL and MariaDB yet; it arrives in a later update.";
+
+impl EditorConn {
+    pub async fn run_script(&self, pieces: &[classify::Piece], opts: &run::RunOpts, cancel: &AtomicBool, allow_write: bool, emit: &(dyn Fn(run::SqlRunEvent) + Sync)) -> AppResult<()> {
+        match self {
+            EditorConn::Pg(c) => c.run_script(pieces, opts, cancel, allow_write, emit).await,
+            EditorConn::My(c) => c.run_script(pieces, opts, cancel, allow_write, emit).await,
+        }
+    }
+    pub async fn preview(&self, pieces: &[classify::Piece]) -> AppResult<Vec<Option<String>>> {
+        match self {
+            EditorConn::Pg(c) => c.preview(pieces).await,
+            EditorConn::My(c) => c.preview(pieces).await,
+        }
+    }
+    pub async fn cancel_running(&self) -> AppResult<()> {
+        match self {
+            EditorConn::Pg(c) => c.cancel_running().await,
+            EditorConn::My(c) => c.cancel_running().await,
+        }
+    }
+    pub fn has_txn(&self) -> bool {
+        matches!(self, EditorConn::Pg(c) if c.has_txn())
+    }
+    pub async fn txn_begin(&self) -> AppResult<()> {
+        match self {
+            EditorConn::Pg(c) => c.txn_begin().await,
+            EditorConn::My(_) => Err(AppError::validation(MY_LATER)),
+        }
+    }
+    pub async fn txn_end(&self, commit: bool) -> AppResult<()> {
+        match self {
+            EditorConn::Pg(c) => c.txn_end(commit).await,
+            EditorConn::My(_) => Ok(()),
+        }
+    }
+    pub async fn txn_state(&self) -> AppResult<run::TxnState> {
+        match self {
+            EditorConn::Pg(c) => c.txn_state().await,
+            EditorConn::My(_) => Ok(run::TxnState { active: false, statements: 0, age_s: 0, failed: false, locks: 0 }),
+        }
+    }
+    pub async fn explain(&self, text: &str, analyze: bool, timeout_ms: u32) -> AppResult<explain::ExplainPlan> {
+        match self {
+            EditorConn::Pg(c) => c.explain(text, analyze, timeout_ms).await,
+            EditorConn::My(_) => Err(AppError::validation(MY_LATER)),
+        }
+    }
+}
+
 /// An editor tab's connection and its stop flag.
 pub struct Editor {
-    pub conn: PgConn,
+    pub conn: EditorConn,
     /// Set by Stop; a run clears it when it starts.
     pub stop: AtomicBool,
     /// A run is going: only then does Stop send a cancel to the server.
@@ -434,6 +535,7 @@ impl SqlManager {
             prompts: Arc::new(Prompts::default()),
             cancel,
             conn: tokio::sync::Mutex::new(None),
+            my: tokio::sync::Mutex::new(None),
         });
         self.conns
             .lock()
@@ -450,6 +552,9 @@ impl SqlManager {
     /// The connection for one command. Errors while the tab is still connecting.
     pub async fn pg(&self, conn_id: &str) -> AppResult<Arc<PgConn>> {
         let live = self.get(conn_id)?;
+        if live.my.lock().await.is_some() {
+            return Err(AppError::validation(MY_LATER));
+        }
         let guard = live.conn.lock().await;
         guard.clone().ok_or_else(|| {
             AppError::new(
@@ -457,6 +562,16 @@ impl SqlManager {
                 "This database isn't connected right now.",
             )
         })
+    }
+
+    /// The MySQL or MariaDB connection of a tab, `None` for a PostgreSQL tab.
+    pub async fn my(&self, conn_id: &str) -> AppResult<Option<Arc<mydb::MyDb>>> {
+        Ok(self.get(conn_id)?.my.lock().await.clone())
+    }
+
+    /// The SQL the tab speaks (for splitting and classifying what is typed).
+    pub async fn dialect(&self, conn_id: &str) -> AppResult<classify::Dialect> {
+        Ok(if self.get(conn_id)?.my.lock().await.is_some() { classify::Dialect::My } else { classify::Dialect::Pg })
     }
 
     /// Manual transactions open right now, for the quit question (quitting rolls them back).
