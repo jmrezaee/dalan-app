@@ -116,7 +116,7 @@ const copyMigration = async () => {
     <div v-if="!s && !t.structureError" class="p-4 text-sm text-muted" aria-busy="true">Reading the structure…</div>
     <div v-else-if="s" class="min-h-0 flex-1 overflow-auto p-3 text-sm">
       <p class="mb-3 text-xs text-muted" data-part="stats">
-        <template v-if="s.stats.rows_estimate !== null">{{ fmt(s.stats.rows_estimate) }} rows · </template>{{ bytes(s.stats.table_bytes) }} table · {{ bytes(s.stats.index_bytes) }} indexes · {{ ago(s.stats.last_vacuum) }}
+        <template v-if="s.stats.rows_estimate !== null">{{ fmt(s.stats.rows_estimate) }} rows · </template>{{ bytes(s.stats.table_bytes) }} table · {{ bytes(s.stats.index_bytes) }} indexes<template v-if="!store.isMy"> · {{ ago(s.stats.last_vacuum) }}</template>
       </p>
       <p v-if="readOnly && t.kind === 'table'" class="mb-3 text-xs text-muted">This database is read-only in Dalan, so the structure can be read but not changed.</p>
 
@@ -169,7 +169,7 @@ const copyMigration = async () => {
               <td class="h-8 pr-2 font-mono">{{ i.name }}</td>
               <td class="pr-2 font-mono text-muted">{{ i.definition.replace(/^CREATE (UNIQUE )?INDEX \S+ ON \S+ /, '') }}<span v-if="i.unique" class="ml-1 text-text">unique</span></td>
               <td>{{ bytes(i.bytes) }}</td>
-              <td :class="i.scans === 0 ? 'text-warning' : ''">{{ i.scans === 0 ? 'no scans yet' : `${fmt(i.scans)} scans` }}</td>
+              <td :class="i.scans === 0 ? 'text-warning' : ''">{{ (i.scans ?? 0) < 0 ? '' : i.scans === 0 ? 'no scans yet' : `${fmt(i.scans)} scans` }}</td>
               <td class="text-right"><Button v-if="!readOnly && !constraintBacked(i.name)" variant="ghost" size="xs" :aria-label="`Drop ${i.name}`" @click="store.addOp(t, { op: 'drop_index', name: i.name })"><Trash2 /></Button></td>
             </tr>
           </tbody>

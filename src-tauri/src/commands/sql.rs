@@ -16,7 +16,7 @@ use crate::sql::pg::{PageRequest, SqlObject, SqlPage, SqlTableInfo};
 use crate::dbs::gate::{self, decide, strongest, Decision};
 use crate::redis::store::RedisWriteMode;
 use crate::sql::activity::{Activity, ActivityView};
-use crate::sql::classify::{classify, Class, Piece};
+use crate::sql::classify::{Class, Piece};
 use crate::sql::run::{pieces_for_d, HeldRun, RunMode, RunOpts, SqlCatalog, SqlRunEvent, TxnState};
 use crate::sql;
 use crate::sql::diagram::Diagram;
@@ -527,6 +527,9 @@ pub async fn sql_structure(
     table: String,
 ) -> AppResult<TableStructure> {
     state.require_unlocked()?;
+    if let Some(my) = state.sql.my(&conn_id).await? {
+        return my.structure(&schema, &table).await;
+    }
     state.sql.pg(&conn_id).await?.structure(&schema, &table).await
 }
 
@@ -557,10 +560,18 @@ pub async fn sql_structure_prepare(
     if decide(target.mode, Class::Schema) == Decision::Refuse {
         return Err(gate::read_only_error(&target.name));
     }
-    let pg = state.sql.pg(&conn_id).await?;
-    let rows = pg.structure(&schema, &table).await?.stats.rows_estimate;
-    let (statements, warnings) = sql::structure::statements(&schema, &table, &ops, rows)?;
-    let class = statements.iter().map(|s| classify(s)).max().unwrap_or(Class::Schema);
+    let dialect = state.sql.dialect(&conn_id).await?;
+    let (statements, warnings) = if let Some(my) = state.sql.my(&conn_id).await? {
+        let rows = my.structure(&schema, &table).await?.stats.rows_estimate;
+        let info = my.table_info(&schema, &table).await?;
+        let ddl = my.structure(&schema, &table).await?.ddl;
+        sql::myextra::statements_my(&schema, &table, &ops, rows, &info, &ddl)?
+    } else {
+        let pg = state.sql.pg(&conn_id).await?;
+        let rows = pg.structure(&schema, &table).await?.stats.rows_estimate;
+        sql::structure::statements(&schema, &table, &ops, rows)?
+    };
+    let class = statements.iter().map(|s| sql::classify::classify_for(s, dialect)).max().unwrap_or(Class::Schema);
     let decision = decide(target.mode, class);
     let id = state.sql.structure_pending.put(&conn_id, class, statements.clone())?;
     Ok(StructurePending {
@@ -588,6 +599,9 @@ pub async fn sql_structure_commit(
     let target = sql::gate_target(&state.store(), &db_id).await?;
     gate::approve(target.mode, class, &target.name, typed_name.as_deref())?;
     let (stmts, _) = state.sql.structure_pending.take(&conn_id, &pending_id)?;
+    if let Some(my) = state.sql.my(&conn_id).await? {
+        return my.structure_commit(&stmts).await;
+    }
     state.sql.pg(&conn_id).await?.structure_commit(&stmts).await
 }
 
@@ -616,7 +630,7 @@ pub async fn sql_explain(
     let dialect = state.sql.dialect(&conn_id).await?;
     let pieces = pieces_for_d(&text, mode, cursor, dialect)?;
     let piece = pieces.first().ok_or_else(|| crate::error::AppError::validation("There is nothing to explain."))?;
-    if analyze && classify(&piece.text) != Class::Read {
+    if analyze && sql::classify::classify_for(&piece.text, dialect) != Class::Read {
         return Err(crate::error::AppError::validation(
             "Explain analyze runs the statement, so it only works for reads. Use plain Explain for a change.",
         ));
@@ -642,6 +656,9 @@ pub async fn sql_diagram(
 ) -> AppResult<Diagram> {
     state.require_unlocked()?;
     let start: Vec<(String, String)> = tables.into_iter().map(|t| (t.schema, t.table)).collect();
+    if let Some(my) = state.sql.my(&conn_id).await? {
+        return my.diagram(&start, steps).await;
+    }
     state.sql.pg(&conn_id).await?.diagram(&start, steps).await
 }
 
@@ -678,6 +695,9 @@ pub async fn sql_save_export(
 #[specta::specta]
 pub async fn sql_activity(state: State<'_, AppState>, conn_id: String, view: ActivityView) -> AppResult<Activity> {
     state.require_unlocked()?;
+    if let Some(my) = state.sql.my(&conn_id).await? {
+        return my.activity(view).await;
+    }
     state.sql.pg(&conn_id).await?.activity(view).await
 }
 
@@ -720,12 +740,12 @@ pub async fn sql_session_prepare(
         return Err(gate::read_only_error(&target.name));
     }
     let end = matches!(action, SessionAction::End);
-    let (user, st, query, started) = state
-        .sql
-        .pg(&conn_id)
-        .await?
-        .session_info(pid)
-        .await?
+    let info = if let Some(my) = state.sql.my(&conn_id).await? {
+        my.session_info(u32::try_from(pid).map_err(|_| crate::error::AppError::validation("That isn't a session id."))?).await?
+    } else {
+        state.sql.pg(&conn_id).await?.session_info(pid).await?
+    };
+    let (user, st, query, started) = info
         .ok_or_else(|| crate::error::AppError::not_found("That session is gone, or it is one of Dalan's own."))?;
     let id = state.sql.session_pending.put(&conn_id, class, (pid, end, started))?;
     Ok(SessionPending {
@@ -757,6 +777,9 @@ pub async fn sql_session_commit(
     let target = sql::gate_target(&state.store(), &db_id).await?;
     gate::approve(target.mode, class, &target.name, typed_name.as_deref())?;
     let ((pid, end, started), _) = state.sql.session_pending.take(&conn_id, &pending_id)?;
+    if let Some(my) = state.sql.my(&conn_id).await? {
+        return Ok(my.signal_session(u32::try_from(pid).map_err(|_| crate::error::AppError::validation("That isn't a session id."))?, end, &started).await?.unwrap_or(false));
+    }
     Ok(state.sql.pg(&conn_id).await?.signal_session(pid, end, &started).await?.unwrap_or(false))
 }
 

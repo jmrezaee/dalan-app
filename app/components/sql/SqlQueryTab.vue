@@ -114,8 +114,8 @@ onMounted(() => { if (!databases.savedLoaded) void databases.refreshSaved() })
       <Button v-else size="sm" variant="destructive" :data-testid="tid('sql-stop')" @click="store.stop(q)"><Square />Stop</Button>
       <Button variant="secondary" size="sm" :disabled="q.running" @click="runSelection">Run selection</Button>
       <Button variant="secondary" size="sm" :disabled="q.running" @click="run('all')">Run all</Button>
-      <Button v-if="!store.isMy" variant="secondary" size="sm" :disabled="q.running" :data-testid="tid('sql-explain')" @click="explainNow(false)">Explain</Button>
-      <Button v-if="!store.isMy" variant="ghost" size="sm" :disabled="q.running" :data-testid="tid('sql-explain-analyze')" title="Runs the statement (a read) inside a transaction that is rolled back, and times each step" @click="explainNow(true)">Explain analyze</Button>
+      <Button variant="secondary" size="sm" :disabled="q.running" :data-testid="tid('sql-explain')" @click="explainNow(false)">Explain</Button>
+      <Button variant="ghost" size="sm" :disabled="q.running" :data-testid="tid('sql-explain-analyze')" title="Runs the statement (a read) inside a transaction that is rolled back, and times each step" @click="explainNow(true)">Explain analyze</Button>
       <Button variant="ghost" size="sm" @click="store.format(q)">Format</Button>
       <Button variant="ghost" size="sm" @click="save()"><Save />Save</Button>
       <Button variant="secondary" size="sm" :aria-pressed="q.manual" :disabled="q.running || !!q.txn?.active" :title="q.manual ? 'Statements wait for Commit' : 'Each statement commits on its own'" :data-testid="tid('sql-manual')" @click="store.setManual(q, !q.manual)">{{ q.manual ? 'Manual' : 'Auto-commit' }}</Button>

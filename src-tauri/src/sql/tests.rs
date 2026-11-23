@@ -976,7 +976,7 @@ async fn l3_pg_activity_shows_sessions_and_a_blocking_chain_and_signals_only_oth
         let pieces = pieces_for("update d2.e1 set qty = qty + 1 where id = 2", RunMode::All, None).unwrap();
         w2.run_script(&pieces, &RunOpts { limit: 0, timeout_ms: 20_000 }, &AtomicBool::new(false), true, &|_| {}).await.unwrap();
     });
-    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
     let a = c.activity(ActivityView::Sessions).await.unwrap();
     assert!(a.tiles.connections >= 3 && a.tiles.max_connections > 0 && a.tiles.waiting >= 1, "{:?}", a.tiles);
     let chain = a.chains.iter().find(|ch| ch.root.pid == holder_pid).expect("the holder heads a chain");

@@ -9,6 +9,7 @@ pub mod explain;
 pub mod diagram;
 pub mod grid;
 pub mod mydb;
+pub mod myextra;
 pub mod mysql;
 pub mod pg;
 pub mod structure;
@@ -482,7 +483,7 @@ impl EditorConn {
     pub async fn explain(&self, text: &str, analyze: bool, timeout_ms: u32) -> AppResult<explain::ExplainPlan> {
         match self {
             EditorConn::Pg(c) => c.explain(text, analyze, timeout_ms).await,
-            EditorConn::My(_) => Err(AppError::validation(MY_LATER)),
+            EditorConn::My(c) => c.explain(text, analyze, timeout_ms).await,
         }
     }
 }
@@ -657,8 +658,15 @@ impl SqlManager {
                 "This database isn't connected right now.",
             )
         })?;
+        let conn = opener().await?;
+        // Activity shows Dalan's own connections as such and never offers to kill them.
+        if let (EditorConn::My(e), Some(my)) = (&conn, live.my.lock().await.as_ref()) {
+            if let Ok(mut own) = my.own.lock() {
+                own.push(e.conn.connection_id);
+            }
+        }
         let editor = Arc::new(Editor {
-            conn: opener().await?,
+            conn,
             stop: AtomicBool::new(false),
             running: AtomicBool::new(false),
         });
@@ -669,7 +677,15 @@ impl SqlManager {
     /// The editor tab closed: its connection ends with it.
     pub async fn close_editor(&self, conn_id: &str, editor_id: &str) {
         if let Ok(live) = self.get(conn_id) {
-            live.editors.lock().await.remove(editor_id);
+            let gone = live.editors.lock().await.remove(editor_id);
+            // The server may hand the connection's id to somebody else: it is no longer Dalan's.
+            if let (Some(e), Some(my)) = (gone, live.my.lock().await.as_ref()) {
+                if let EditorConn::My(c) = &e.conn {
+                    if let Ok(mut own) = my.own.lock() {
+                        own.retain(|id| *id != c.conn.connection_id);
+                    }
+                }
+            }
         }
     }
 

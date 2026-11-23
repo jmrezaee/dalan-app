@@ -16,7 +16,7 @@ use super::run::{CatalogTable, FailKind, RunColumn, RunOpts, SqlCatalog, SqlRunE
 use super::values::{CellKind, SqlCell};
 use crate::error::{AppError, AppResult, ErrorCode};
 
-const SYSTEM: &str = "('mysql', 'information_schema', 'performance_schema', 'sys')";
+pub(super) const SYSTEM: &str = "('mysql', 'information_schema', 'performance_schema', 'sys')";
 const BATCH: usize = 500;
 
 /// A name in backticks.
@@ -100,15 +100,18 @@ pub fn check_filter(filter: &str) -> AppResult<()> {
 
 pub struct MyDb {
     pub conn: MyConn,
+    /// Connection ids of every connection Dalan holds on this server (this one and each editor's): activity shows them
+    /// but never lets them be killed.
+    pub(super) own: std::sync::Mutex<Vec<u32>>,
     /// One statement scope at a time, so a read-only transaction isn't interleaved with another's.
-    gate: tokio::sync::Mutex<()>,
-    catalog: tokio::sync::Mutex<Option<Arc<SqlCatalog>>>,
+    pub(super) gate: tokio::sync::Mutex<()>,
+    pub(super) catalog: tokio::sync::Mutex<Option<Arc<SqlCatalog>>>,
 }
 
 /// An editor tab's connection (its own, so a transaction in one never touches another).
 pub struct MyEditor {
     pub conn: MyConn,
-    gate: tokio::sync::Mutex<()>,
+    pub(super) gate: tokio::sync::Mutex<()>,
     /// A manual transaction is open on this connection.
     txn: std::sync::Mutex<Option<TxnInfo>>,
 }
@@ -121,11 +124,12 @@ impl MyEditor {
 
 impl MyDb {
     pub fn new(conn: MyConn) -> MyDb {
-        MyDb { conn, gate: tokio::sync::Mutex::new(()), catalog: tokio::sync::Mutex::new(None) }
+        let id = conn.connection_id;
+        MyDb { conn, own: std::sync::Mutex::new(vec![id]), gate: tokio::sync::Mutex::new(()), catalog: tokio::sync::Mutex::new(None) }
     }
 
     /// Runs `f` inside a read-only transaction that is always rolled back.
-    async fn read_only<T>(&self, f: impl AsyncFnOnce(&MyConn) -> AppResult<T>) -> AppResult<T> {
+    pub(super) async fn read_only<T>(&self, f: impl AsyncFnOnce(&MyConn) -> AppResult<T>) -> AppResult<T> {
         let _scope = self.gate.lock().await;
         self.conn.query("START TRANSACTION READ ONLY", 0).await?;
         let out = f(&self.conn).await;
@@ -740,8 +744,12 @@ create view d7_open as select * from d7_orders where status = 'open';
     }
 
     async fn conn(port: u16, pw: &str) -> MyConn {
+        conn_as(port, "app", pw).await
+    }
+
+    async fn conn_as(port: u16, user: &str, pw: &str) -> MyConn {
         let stream = (reopen_to(port))().await.unwrap();
-        let login = super::super::mysql::MyLogin { user: "app".into(), password: Some(Zeroizing::new(pw.into())), database: Some("shop".into()), tls: TlsMode::Off, server_name: "127.0.0.1".into() };
+        let login = super::super::mysql::MyLogin { user: user.into(), password: Some(Zeroizing::new(pw.into())), database: Some("shop".into()), tls: TlsMode::Off, server_name: "127.0.0.1".into() };
         // MySQL 8 without TLS needs a warm cache for caching_sha2: a first sign-in over TLS warms it.
         let warm = super::super::mysql::MyLogin { tls: TlsMode::Require, ..login.clone() };
         if let Ok((c, _)) = MyConn::connect((reopen_to(port))().await.unwrap(), warm, reopen_to(port)).await {
@@ -840,6 +848,22 @@ create view d7_open as select * from d7_orders where status = 'open';
     /// A customer's name as `c` sees it.
     async fn name(c: &MyConn, id: u32) -> String {
         c.query(&format!("select name from d7_customers where id = {id}"), 0).await.unwrap().rows[0][0].clone().unwrap()
+    }
+
+    /// A column with a string default that looks like a date, a comment and NOT NULL: the type changes and the rest stays.
+    async fn e_modify(db: &MyDb) {
+        use super::super::structure::StructureOp;
+        db.conn.query("drop table if exists d7_mod", 0).await.unwrap();
+        db.conn.query("create table d7_mod (id int primary key auto_increment, d varchar(20) not null default '2024-01-01' comment 'when', n int default 5)", 0).await.unwrap();
+        let info = db.table_info("shop", "d7_mod").await.unwrap();
+        let ddl = db.structure("shop", "d7_mod").await.unwrap().ddl;
+        let (stmts, _) = super::super::myextra::statements_my("shop", "d7_mod", &[StructureOp::ChangeType { column: "d".into(), type_name: "varchar(40)".into() }, StructureOp::SetNullable { column: "n".into(), nullable: false }], None, &info, &ddl).unwrap();
+        db.structure_commit(&stmts).await.unwrap();
+        let after = db.structure("shop", "d7_mod").await.unwrap().ddl;
+        assert!(after.contains("`d` varchar(40) NOT NULL DEFAULT '2024-01-01' COMMENT 'when'"), "{after}");
+        assert!(after.lines().any(|l| l.trim_start().starts_with("`n` int") && l.contains("NOT NULL DEFAULT") && l.contains('5')), "{after}");
+        assert!(after.contains("AUTO_INCREMENT"), "{after}");
+        db.conn.query("drop table d7_mod", 0).await.unwrap();
     }
 
     async fn run(e: &MyEditor, sql: &str, limit: u32, allow: bool, cancel: &AtomicBool) -> Vec<SqlRunEvent> {
@@ -978,6 +1002,108 @@ create view d7_open as select * from d7_orders where status = 'open';
             assert_eq!(db.grid_commit(&stale).await.unwrap_err().code, ErrorCode::SqlConflict, "{}", stale[0].shown);
             // A leading comment doesn't hide a DDL statement from the transaction bookkeeping.
             assert!(implicit_commit("/* x */ create table t (a int)") && !implicit_commit("create temporary table t (a int)") && implicit_commit("set autocommit = 1") && !implicit_commit("set @a = 1"));
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+    async fn l3_my_structure_explain_and_diagram_on_both_servers() {
+        use super::super::structure::StructureOp;
+        let _one = ONE_AT_A_TIME.lock().await;
+        for (port, pw, container, root) in SERVERS {
+            seed(container, root);
+            let db = MyDb::new(conn(port, pw).await);
+            let s = db.structure("shop", "d7_orders").await.unwrap();
+            assert!(s.columns.iter().any(|c| c.name == "total" && c.type_name.starts_with("decimal(12,2)") && c.nullable));
+            assert!(s.constraints.iter().any(|c| c.kind == "p" && c.columns == ["id"]));
+            let fk = s.constraints.iter().find(|c| c.kind == "f").expect("a foreign key");
+            assert!(fk.definition.contains("REFERENCES shop.d7_customers(id)"));
+            assert!(s.indexes.iter().any(|i| i.primary && i.unique) && s.ddl.to_lowercase().starts_with("create table"));
+            assert!(s.stats.table_bytes > 0);
+            // Apply: statements one by one, then the structure shows them; a failing second statement keeps the first.
+            let info = db.table_info("shop", "d7_nokey").await.unwrap();
+            let add = |n: &str| StructureOp::AddColumn { name: n.into(), type_name: "int".into(), nullable: true, default: Some("0".into()) };
+            let (stmts, _) = super::super::myextra::statements_my("shop", "d7_nokey", &[add("extra"), StructureOp::CreateIndex { name: "d7_extra_idx".into(), columns: vec!["extra".into()], unique: false }], None, &info, &db.structure("shop", "d7_nokey").await.unwrap().ddl).unwrap();
+            db.structure_commit(&stmts).await.unwrap();
+            let s = db.structure("shop", "d7_nokey").await.unwrap();
+            assert!(s.columns.iter().any(|c| c.name == "extra") && s.indexes.iter().any(|i| i.name == "d7_extra_idx"));
+            let (stmts, w) = super::super::myextra::statements_my("shop", "d7_nokey", &[add("second"), add("extra")], None, &info, &db.structure("shop", "d7_nokey").await.unwrap().ddl).unwrap();
+            assert!(w[0].contains("can't undo"));
+            let err = db.structure_commit(&stmts).await.unwrap_err();
+            assert!(err.message.contains("Statement 2 failed") && err.message.contains("already applied"), "{}", err.message);
+            assert!(db.structure("shop", "d7_nokey").await.unwrap().columns.iter().any(|c| c.name == "second"));
+            let info = db.table_info("shop", "d7_nokey").await.unwrap();
+            let (stmts, _) = super::super::myextra::statements_my("shop", "d7_nokey", &[StructureOp::DropIndex { name: "d7_extra_idx".into() }, StructureOp::DropColumn { name: "extra".into() }, StructureOp::DropColumn { name: "second".into() }], None, &info, &db.structure("shop", "d7_nokey").await.unwrap().ddl).unwrap();
+            db.structure_commit(&stmts).await.unwrap();
+            assert!(!db.structure("shop", "d7_nokey").await.unwrap().columns.iter().any(|c| c.name == "extra"));
+
+            // `modify` keeps what the column already has: change the type and nullability of a column with a default and a comment.
+            e_modify(&db).await;
+            // Explain: a plan; with timings on MySQL; MariaDB says so.
+            let e = MyEditor::new(conn(port, pw).await);
+            let plain = e.explain("select o.id, c.name from d7_orders o join d7_customers c on c.id = o.customer_id where o.total > 100", false, 30_000).await.unwrap();
+            assert!(!plain.analyzed && !plain.root.children.is_empty(), "{plain:?}");
+            if port == 13306 {
+                let timed = e.explain("select * from d7_orders where note like 'note 1%'", true, 30_000).await.unwrap();
+                assert!(timed.analyzed && timed.root.actual_rows.is_some());
+            } else {
+                assert!(e.explain("select 1", true, 30_000).await.is_err());
+            }
+            assert_eq!(e.conn.query("select 1", 0).await.unwrap().rows[0][0].as_deref(), Some("1"));
+
+            // Diagram: foreign keys out from orders.
+            let d = db.diagram(&[("shop".into(), "d7_orders".into())], 1).await.unwrap();
+            let names: Vec<&str> = d.tables.iter().map(|t| t.name.as_str()).collect();
+            assert!(names.contains(&"d7_orders") && names.contains(&"d7_customers"), "{names:?}");
+            assert!(d.edges.iter().any(|e| e.from_table == "d7_orders" && e.to_table == "d7_customers" && e.from_columns == ["customer_id"]));
+            assert!(d.tables.iter().find(|t| t.name == "d7_orders").unwrap().columns.iter().any(|c| c.name == "customer_id" && c.fk));
+            assert!(d.total_tables >= 4);
+            assert!(db.diagram(&[("shop".into(), "nope_not_here".into())], 1).await.is_err());
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+    async fn l3_my_activity_lists_sessions_and_ends_another_clients_session() {
+        use super::super::activity::ActivityView;
+        let _one = ONE_AT_A_TIME.lock().await;
+        for (port, _pw, container, root) in SERVERS {
+            seed(container, root);
+            // The PROCESS privilege shows other people's sessions: root has it.
+            let db = MyDb::new(conn_as(port, "root", root).await);
+            let a = db.activity(ActivityView::Sessions).await.unwrap();
+            assert!(a.tiles.max_connections > 0 && a.tiles.connections >= 1);
+            assert!(a.sessions.iter().any(|s| s.mine), "Dalan's own connection is marked");
+            for v in [ActivityView::Locks, ActivityView::Slow, ActivityView::Tables, ActivityView::Roles, ActivityView::Replication] {
+                let t = db.activity(v).await.unwrap().table.unwrap();
+                assert!(!t.columns.is_empty() && t.rows.iter().all(|r| r.len() == t.columns.len()), "{v:?}");
+            }
+            let client = if container.contains("mariadb") { "mariadb" } else { "mysql" };
+            let mut child = std::process::Command::new("docker")
+                .args(["exec", container, client, "-uroot", &format!("-p{root}"), "-e", "select sleep(60)"])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .unwrap();
+            let mut found = None;
+            for _ in 0..30 {
+                let a = db.activity(ActivityView::Sessions).await.unwrap();
+                found = a.sessions.iter().find(|s| s.query.contains("sleep(60)") && !s.mine).map(|s| s.pid);
+                if found.is_some() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+            let id = found.expect("the other client showed up") as u32;
+            let (user, _, query, owner) = db.session_info(id).await.unwrap().unwrap();
+            assert_eq!(user, "root");
+            assert!(query.contains("sleep(60)"));
+            // Dalan's own connections can't be touched, and a connection that now belongs to someone else is left alone.
+            assert!(db.session_info(db.conn.connection_id).await.unwrap().is_none());
+            assert_eq!(db.signal_session(id, true, "someone@else").await.unwrap(), None);
+            assert_eq!(db.signal_session(id, true, &owner).await.unwrap(), Some(true));
+            assert!(!child.wait().unwrap().success(), "the session was ended");
+            assert_eq!(db.signal_session(id, true, &owner).await.unwrap(), None, "gone now");
         }
     }
 }

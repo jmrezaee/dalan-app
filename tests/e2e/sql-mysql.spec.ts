@@ -47,12 +47,14 @@ for (const engine of ['MySQL', 'MariaDB'] as const) {
       await tab.getByTestId('sql-run').click()
       await expect(page.getByTestId('sql-confirm')).toContainText('This will change 1 row.')
       await page.getByTestId('sql-confirm').getByRole('button', { name: 'Cancel' }).click()
-      // Not offered yet: explain, diagram, activity, transfer, structure.
-      await expect(tab.getByTestId('sql-explain')).toHaveCount(0)
-      await expect(tab.getByTestId('sql-new-diagram')).toHaveCount(0)
-      await expect(tab.getByTestId('sql-open-activity')).toHaveCount(0)
+      // Not offered yet: transfer (import, export and backup).
+      await expect(tab.getByTestId('sql-open-transfer')).toHaveCount(0)
+      await expect(tab.getByTestId('sql-explain')).toBeVisible()
       await tab.getByTestId('sql-object-orders').click()
-      await expect(tab.getByRole('group', { name: 'View' })).toHaveCount(0)
+      await tab.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Structure' }).click()
+      await expect(tab.getByTestId('structure-col-id')).toContainText('pk')
+      await tab.getByTestId('sql-open-activity').click()
+      await expect(tab.getByTestId('session-18342')).toBeVisible()
     })
 
     test('Manual mode keeps a change in a transaction, and the grid edits are reviewed and committed', async ({ page }) => {

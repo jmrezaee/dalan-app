@@ -69,10 +69,10 @@ function onSchemaKey(e: KeyboardEvent, s: (typeof store.schemas)[number]) {
       <p v-if="!store.schemas.length" class="px-3 py-2 text-xs text-muted" aria-busy="true">Reading the schemas…</p>
     </div>
     <button type="button" class="flex h-9 shrink-0 cursor-default items-center gap-2 border-t border-border px-3 text-sm text-muted outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" :data-testid="tid('sql-new-query')" @click="store.newQuery()"><Plus class="size-4" aria-hidden="true" />New query</button>
-    <button v-if="!store.isMy" type="button" class="flex h-9 shrink-0 cursor-default items-center gap-2 border-t border-border px-3 text-sm text-muted outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" :data-testid="tid('sql-new-diagram')" @click="store.openDiagram(store.current?.schema, store.current?.table)"><Share2 class="size-4" aria-hidden="true" />Diagram</button>
-  <div v-if="!store.isMy" class="flex shrink-0 border-t border-border">
+    <button type="button" class="flex h-9 shrink-0 cursor-default items-center gap-2 border-t border-border px-3 text-sm text-muted outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" :data-testid="tid('sql-new-diagram')" @click="store.openDiagram(store.current?.schema, store.current?.table)"><Share2 class="size-4" aria-hidden="true" />Diagram</button>
+  <div class="flex shrink-0 border-t border-border">
       <button type="button" class="flex h-9 flex-1 cursor-default items-center gap-2 px-3 text-sm text-muted outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" :data-testid="tid('sql-open-activity')" @click="store.openSpecial('activity')"><Activity class="size-4" aria-hidden="true" />Activity</button>
-      <button type="button" class="flex h-9 flex-1 cursor-default items-center gap-2 px-3 text-sm text-muted outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" :data-testid="tid('sql-open-transfer')" @click="store.openSpecial('transfer')"><ArrowLeftRight class="size-4" aria-hidden="true" />Transfer</button>
+      <button v-if="!store.isMy" type="button" class="flex h-9 flex-1 cursor-default items-center gap-2 px-3 text-sm text-muted outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" :data-testid="tid('sql-open-transfer')" @click="store.openSpecial('transfer')"><ArrowLeftRight class="size-4" aria-hidden="true" />Transfer</button>
     </div>
   </nav>
 </template>

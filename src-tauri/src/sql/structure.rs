@@ -90,7 +90,7 @@ pub enum StructureOp {
 /// (`default 0, drop constraint x` would be a second ALTER action in the same statement). Strings are skipped
 /// over; outside them there is no `;`, no comment, no comma at the top level, and parentheses balance and never go
 /// below zero.
-fn safe_expr(what: &str, s: &str, type_like: bool) -> AppResult<String> {
+pub(super) fn safe_expr(what: &str, s: &str, type_like: bool) -> AppResult<String> {
     let t = s.trim();
     let bad = || AppError::validation(format!("{what} isn't something I can use here: {t}"));
     if t.is_empty() {
@@ -142,7 +142,7 @@ fn safe_expr(what: &str, s: &str, type_like: bool) -> AppResult<String> {
     Ok(t.to_string())
 }
 
-fn names(cols: &[String]) -> AppResult<String> {
+pub(super) fn names(cols: &[String]) -> AppResult<String> {
     if cols.is_empty() {
         return Err(AppError::validation("Pick at least one column."));
     }
