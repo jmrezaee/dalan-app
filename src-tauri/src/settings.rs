@@ -8,7 +8,9 @@ use rusqlite::{params, Connection};
 use crate::db::now_ms;
 use crate::error::{AppError, AppResult};
 
-const KEYS: [&str; 9] = [
+const KEYS: [&str; 11] = [
+    "redis",
+    "databases",
     "appearance",
     "terminal",
     "security",

@@ -239,6 +239,14 @@ const num = (v: string | number, fallback: number) => (Number.isFinite(Number(v)
             <span class="flex flex-1 flex-col">Keep console history<span class="text-xs text-muted">Remembers the commands you run in a database's Console, encrypted on this computer. Commands that carry a password are never saved.</span></span>
             <Switch :model-value="settings.redis.keep_history" aria-label="Keep console history" @update:model-value="(v: boolean) => settings.setRedis({ keep_history: v })" />
           </div>
+          <div class="row">
+            <span class="flex flex-1 flex-col">Rows a query shows<span class="text-xs text-muted">How many rows a new SQL query tab stops at. Each tab can change its own. 100 to 100,000.</span></span>
+            <div class="w-28"><NumberInput label="Rows a query shows" :model-value="settings.databases.row_limit" :min="100" :max="100000" @update:model-value="(v: string | number) => settings.setDatabases({ row_limit: Math.min(100000, Math.max(100, Math.round(Number(v)) || 1000)) })" /></div>
+          </div>
+          <div class="row">
+            <span class="flex flex-1 flex-col">Stop a query after<span class="text-xs text-muted">Seconds a SQL query may run in a new tab before the server is asked to stop it. 1 to 3600.</span></span>
+            <div class="w-28"><NumberInput label="Stop a query after" :model-value="settings.databases.timeout_s" :min="1" :max="3600" @update:model-value="(v: string | number) => settings.setDatabases({ timeout_s: Math.min(3600, Math.max(1, Math.round(Number(v)) || 30)) })" /></div>
+          </div>
           <p class="pt-3 text-xs text-muted">Values load 500 items at a time, and a string over 1 MB opens as a preview first. Those are fixed.</p>
         </template>
 

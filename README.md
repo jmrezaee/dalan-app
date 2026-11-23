@@ -2,9 +2,17 @@
 
 A private, local-first SSH client for you and your team. Built with Nuxt 4, Tauri 2 and Rust.
 
-## Databases (Redis)
+## Databases (Redis, PostgreSQL, MySQL, MariaDB, MongoDB)
 
-Dalan also opens Redis: saved under Vault > Databases, reached directly or **through a saved SSH host** (Dalan signs in to the host and talks to Redis from there; nothing listens on your computer). Single servers, Cluster and Sentinel.
+Dalan opens databases: saved under Vault > Databases, reached directly or **through a saved SSH host** (Dalan signs in to the host and talks to the database from there; nothing listens on your computer). The same write modes apply to every engine.
+
+- **SQL (PostgreSQL, MySQL, MariaDB):** tables with paging and filters, a query editor with a result per statement, reviewed grid edits, structure changes, plans, a relationship diagram, activity (sessions, cancel, end), CSV/JSON/SQL export, CSV import and backups with the engine's own tools. Every statement is classified in Rust: reads run, changes ask (with the number of rows they reach), dangerous ones ask for the database's name. The spec is `replica/databases/spec.md`.
+- **MongoDB:** collections with filter, projection, sort and collation; list, table and JSON views; edits with exact types; an aggregation builder; schema, indexes and validation; a shell in the familiar `db.collection` syntax (no JavaScript); export and `mongodump` backups.
+- **Limits:** Settings > Databases sets how many rows a SQL query shows and how long it may run.
+
+### Redis
+
+Redis: single servers, Cluster and Sentinel.
 
 - **Browser:** keys listed with `SCAN` (never `KEYS`), grouped into folders; values of every type in pages.
 - **Write modes, per database:** Read-only (writes are refused before they are sent), Confirm writes (every change shows the exact command first), Open. Dangerous commands and bulk actions always ask for the database's name. The check is in Rust; a production database needs the master password to become less protected.

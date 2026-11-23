@@ -54,6 +54,9 @@ export const useSettingsStore = defineStore('settings', () => {
   /** Settings > Databases: what a new Redis database starts with, how much one scan asks for, and console history. */
   const redis = reactive({ default_mode: 'confirm' as 'read_only' | 'confirm' | 'open', key_separator: ':', scan_count: 500, keep_history: true })
 
+  /** Settings > Databases, SQL: how many rows a query shows by default and how long it may run (seconds). */
+  const databases = reactive({ row_limit: 1000, timeout_s: 30 })
+
   /** Light or dark right now (resolves "system"). */
   const resolvedTheme = computed(() => (colorMode.value === 'light' ? 'light' : 'dark'))
 
@@ -93,6 +96,9 @@ export const useSettingsStore = defineStore('settings', () => {
       redis.key_separator = typeof r.key_separator === 'string' && /^\S{1,4}$/.test(r.key_separator) ? r.key_separator : ':'
       redis.scan_count = clamp(r.scan_count as number | undefined, 100, 5000, 500)
       redis.keep_history = r.keep_history !== false
+      const d = parse('databases')
+      databases.row_limit = clamp(d.row_limit as number | undefined, 100, 100_000, 1000)
+      databases.timeout_s = clamp(d.timeout_s as number | undefined, 1, 3600, 30)
       loaded.value = true
     }
     catch {
@@ -164,10 +170,15 @@ export const useSettingsStore = defineStore('settings', () => {
     save('redis', { ...redis })
   }
 
+  function setDatabases(patch: Partial<typeof databases>) {
+    Object.assign(databases, patch)
+    save('databases', { ...databases })
+  }
+
   function setHistory(enabled: boolean) {
     historyEnabled.value = enabled
     save('history', { enabled })
   }
 
-  return { detectOs, setDetectOs, postQuantum, setPostQuantum, localShell, setLocalShell, shortcutOverrides, combos, setShortcut, logsEnabled, setLogs, historyEnabled, setHistory, redis, setRedis, theme, terminal, autoLockMinutes, loaded, resolvedTheme, load, setTheme, setTerminal, setAutoLock, aiGet: api.aiGet, aiSave: api.aiSave, appInfo: api.appInfo, systemIntegrationGet: api.systemIntegrationGet, systemIntegrationSet: api.systemIntegrationSet, openDefaultApps: api.openDefaultApps, diagnosticsText: api.diagnosticsText, updateCheck: api.updateCheck, updateInstall: api.updateInstall }
+  return { detectOs, setDetectOs, postQuantum, setPostQuantum, localShell, setLocalShell, shortcutOverrides, combos, setShortcut, logsEnabled, setLogs, historyEnabled, setHistory, redis, setRedis, databases, setDatabases, theme, terminal, autoLockMinutes, loaded, resolvedTheme, load, setTheme, setTerminal, setAutoLock, aiGet: api.aiGet, aiSave: api.aiSave, appInfo: api.appInfo, systemIntegrationGet: api.systemIntegrationGet, systemIntegrationSet: api.systemIntegrationSet, openDefaultApps: api.openDefaultApps, diagnosticsText: api.diagnosticsText, updateCheck: api.updateCheck, updateInstall: api.updateInstall }
 })

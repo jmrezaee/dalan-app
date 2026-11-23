@@ -37,7 +37,7 @@ This is an internal rollout, not a public launch, so it has no Product Hunt or H
 3. Import the team pack (Hosts → New ▾ → Import) and your own `~/.ssh/config`.
 4. Generate or import your key (Keychain), then use **Export to host** on one server to check it works.
 5. Press ⌘K, type a server name, Enter. Trust the fingerprint the first time, after checking it against the team's list of known fingerprints.
-6. If you use Redis: Vault → Databases → New database, "Through a host" with the bastion you just imported. **Mark production databases as production and leave them Read-only** until you need to change something; the mode button in the tab asks for your master password to loosen one. Never paste a Redis password in chat: it goes in the database's settings, once.
+6. If you use databases (Redis, PostgreSQL, MySQL, MariaDB, MongoDB): Vault → Databases → New database, "Through a host" with the bastion you just imported. A tab for a SQL or MongoDB database opens on double-click; try a read first, then a change, and look at what Dalan asks before it sends it. **Mark production databases as production and leave them Read-only** until you need to change something; the mode button in the tab asks for your master password to loosen one. Never paste a Redis password in chat: it goes in the database's settings, once.
 
 ## The first 10 users (by hand)
 

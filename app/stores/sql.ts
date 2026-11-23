@@ -648,7 +648,7 @@ function setup() {
     const n = ++queryCount
     const q = reactive<QueryTab>({
       id: `q${n}`, title: title ?? `Query ${n}`, text, saved: savedId ? text : '', savedId, cursor: 0, running: false, results: [], messages: [], view: 'messages',
-      limit: 1000, timeoutS: 30, totalMs: null, manual: false, txn: null, pending: null, plan: null, closeAsk: false,
+      limit: useSettingsStore().databases.row_limit, timeoutS: useSettingsStore().databases.timeout_s, totalMs: null, manual: false, txn: null, pending: null, plan: null, closeAsk: false,
     })
     queries.value.push(q)
     activeTab.value = q.id
