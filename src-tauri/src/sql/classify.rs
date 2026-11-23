@@ -148,9 +148,30 @@ fn names(sql: &str, d: Dialect) -> Vec<String> {
 /// files or other servers). A read-only transaction does not stop them, so naming one makes a statement dangerous.
 fn effectful(name: &str) -> bool {
     const PREFIXES: &[&str] = &[
-        "PG_TERMINATE_", "PG_CANCEL_", "PG_RELOAD_", "PG_ROTATE_", "PG_ADVISORY_", "PG_TRY_ADVISORY_", "PG_READ_",
-        "PG_LS_", "PG_STAT_FILE", "PG_SWITCH_", "PG_CREATE_", "PG_DROP_", "PG_REPLICATION_", "PG_PROMOTE", "PG_BACKUP_",
-        "PG_START_BACKUP", "PG_STOP_BACKUP", "DBLINK", "LO_", "LOWRITE", "LOREAD", "NEXTVAL", "SETVAL", "ADMINPACK",
+        "PG_TERMINATE_",
+        "PG_CANCEL_",
+        "PG_RELOAD_",
+        "PG_ROTATE_",
+        "PG_ADVISORY_",
+        "PG_TRY_ADVISORY_",
+        "PG_READ_",
+        "PG_LS_",
+        "PG_STAT_FILE",
+        "PG_SWITCH_",
+        "PG_CREATE_",
+        "PG_DROP_",
+        "PG_REPLICATION_",
+        "PG_PROMOTE",
+        "PG_BACKUP_",
+        "PG_START_BACKUP",
+        "PG_STOP_BACKUP",
+        "DBLINK",
+        "LO_",
+        "LOWRITE",
+        "LOREAD",
+        "NEXTVAL",
+        "SETVAL",
+        "ADMINPACK",
     ];
     PREFIXES.iter().any(|p| name.starts_with(p))
 }
@@ -162,12 +183,28 @@ pub fn calls_effectful(sql: &str) -> bool {
 }
 
 pub fn calls_effectful_for(sql: &str, d: Dialect) -> bool {
-    names(sql, d).iter().any(|x| effectful(x) || (d == Dialect::My && effectful_my(x)))
+    names(sql, d)
+        .iter()
+        .any(|x| effectful(x) || (d == Dialect::My && effectful_my(x)))
 }
 
 /// MySQL and MariaDB functions with effects outside the statement: locks that outlive it, files, other servers.
 fn effectful_my(name: &str) -> bool {
-    matches!(name, "GET_LOCK" | "RELEASE_LOCK" | "RELEASE_ALL_LOCKS" | "LOAD_FILE" | "SYS_EXEC" | "SYS_EVAL" | "NEXTVAL" | "SETVAL" | "MASTER_POS_WAIT" | "SOURCE_POS_WAIT" | "WAIT_FOR_EXECUTED_GTID_SET" | "BENCHMARK")
+    matches!(
+        name,
+        "GET_LOCK"
+            | "RELEASE_LOCK"
+            | "RELEASE_ALL_LOCKS"
+            | "LOAD_FILE"
+            | "SYS_EXEC"
+            | "SYS_EVAL"
+            | "NEXTVAL"
+            | "SETVAL"
+            | "MASTER_POS_WAIT"
+            | "SOURCE_POS_WAIT"
+            | "WAIT_FOR_EXECUTED_GTID_SET"
+            | "BENCHMARK"
+    )
 }
 
 /// `begin`, `commit`, `rollback`, `savepoint` and friends. The editor has its own Manual mode with Commit and Roll
@@ -257,7 +294,9 @@ fn set_expr_class(e: &SetExpr) -> Class {
             }
         }
         SetExpr::Query(q) => query_class(q),
-        SetExpr::SetOperation { left, right, .. } => set_expr_class(left).max(set_expr_class(right)),
+        SetExpr::SetOperation { left, right, .. } => {
+            set_expr_class(left).max(set_expr_class(right))
+        }
         SetExpr::Values(_) | SetExpr::Table(_) => Class::Read,
         SetExpr::Insert(s) | SetExpr::Update(s) | SetExpr::Delete(s) | SetExpr::Merge(s) => {
             statement_class(s)
@@ -301,7 +340,10 @@ pub fn classify_for(sql: &str, d: Dialect) -> Class {
         "SHOW" => Class::Read,
         "SELECT" | "WITH" | "VALUES" | "UPDATE" | "DELETE" => parsed_class(sql, d),
         // `table x` is `select * from x`; the parser doesn't know it.
-        "TABLE" => parsed_class(&format!("select * from {}", sql.trim().get(5..).unwrap_or("").trim()), d),
+        "TABLE" => parsed_class(
+            &format!("select * from {}", sql.trim().get(5..).unwrap_or("").trim()),
+            d,
+        ),
         "EXPLAIN" => {
             if has("ANALYZE") || has("ANALYSE") {
                 // EXPLAIN ANALYZE runs the statement: it is as risky as the statement.
@@ -313,10 +355,10 @@ pub fn classify_for(sql: &str, d: Dialect) -> Class {
         // Arbitrary code or a shell command: as risky as anything, so the name must be typed.
         "DO" | "EXECUTE" => Class::Dangerous,
         "COPY" if has("PROGRAM") => Class::Dangerous,
-        "INSERT" | "MERGE" | "COPY" | "CALL" | "LOCK" | "SET" | "RESET" | "BEGIN"
-        | "START" | "COMMIT" | "END" | "ROLLBACK" | "ABORT" | "SAVEPOINT" | "RELEASE"
-        | "PREPARE" | "DEALLOCATE" | "DISCARD" | "LISTEN" | "UNLISTEN" | "NOTIFY"
-        | "DECLARE" | "FETCH" | "MOVE" | "CLOSE" | "IMPORT" | "SECURITY" => Class::Write,
+        "INSERT" | "MERGE" | "COPY" | "CALL" | "LOCK" | "SET" | "RESET" | "BEGIN" | "START"
+        | "COMMIT" | "END" | "ROLLBACK" | "ABORT" | "SAVEPOINT" | "RELEASE" | "PREPARE"
+        | "DEALLOCATE" | "DISCARD" | "LISTEN" | "UNLISTEN" | "NOTIFY" | "DECLARE" | "FETCH"
+        | "MOVE" | "CLOSE" | "IMPORT" | "SECURITY" => Class::Write,
         "VACUUM" => {
             if has("FULL") {
                 Class::Dangerous
@@ -405,16 +447,29 @@ fn classify_my(sql: &str) -> Class {
             }
         }
         // Server-wide settings, privileges, replication and locks that outlive the statement.
-        "SET" if has("GLOBAL") || has("PERSIST") || has("PERSIST_ONLY") || has("PASSWORD") => Class::Dangerous,
+        "SET" if has("GLOBAL") || has("PERSIST") || has("PERSIST_ONLY") || has("PASSWORD") => {
+            Class::Dangerous
+        }
         "START" if has("REPLICA") || has("SLAVE") || has("GROUP_REPLICATION") => Class::Dangerous,
         "FLUSH" | "RESET" | "STOP" | "CHANGE" => Class::Dangerous,
-        "INSERT" | "REPLACE" | "CALL" | "DO" | "LOAD" | "HANDLER" | "LOCK" | "UNLOCK" | "SET" | "USE" | "BEGIN" | "START" | "COMMIT" | "ROLLBACK" | "SAVEPOINT"
-        | "RELEASE" | "XA" => Class::Write,
-        "PREPARE" | "EXECUTE" | "DEALLOCATE" | "KILL" | "SHUTDOWN" | "INSTALL" | "UNINSTALL" => Class::Dangerous,
+        "INSERT" | "REPLACE" | "CALL" | "DO" | "LOAD" | "HANDLER" | "LOCK" | "UNLOCK" | "SET"
+        | "USE" | "BEGIN" | "START" | "COMMIT" | "ROLLBACK" | "SAVEPOINT" | "RELEASE" | "XA" => {
+            Class::Write
+        }
+        "PREPARE" | "EXECUTE" | "DEALLOCATE" | "KILL" | "SHUTDOWN" | "INSTALL" | "UNINSTALL" => {
+            Class::Dangerous
+        }
         "DROP" | "TRUNCATE" | "RENAME" => Class::Dangerous,
         "ALTER" => {
             // Anything that drops, discards or rewrites throws data away (`drop b` needs no COLUMN keyword).
-            if has("DROP") || has("DISCARD") || has("MODIFY") || has("CHANGE") || has("USER") || has("TRUNCATE") || has("CONVERT") {
+            if has("DROP")
+                || has("DISCARD")
+                || has("MODIFY")
+                || has("CHANGE")
+                || has("USER")
+                || has("TRUNCATE")
+                || has("CONVERT")
+            {
                 Class::Dangerous
             } else {
                 Class::Schema
@@ -428,7 +483,8 @@ fn classify_my(sql: &str) -> Class {
                 Class::Schema
             }
         }
-        "GRANT" | "REVOKE" | "ANALYZE" | "OPTIMIZE" | "REPAIR" | "CHECK" | "CHECKSUM" | "COMMENT" => Class::Schema,
+        "GRANT" | "REVOKE" | "ANALYZE" | "OPTIMIZE" | "REPAIR" | "CHECK" | "CHECKSUM"
+        | "COMMENT" => Class::Schema,
         _ => Class::Dangerous,
     }
 }
@@ -503,7 +559,10 @@ mod tests {
             ("insert into t values (1)", Write),
             ("update t set a = 1 where id = 2", Write),
             ("delete from t where id = 2", Write),
-            ("merge into t using s on t.id = s.id when matched then delete", Write),
+            (
+                "merge into t using s on t.id = s.id when matched then delete",
+                Write,
+            ),
             ("copy t from stdin", Write),
             ("call p()", Write),
             ("do $$ begin null; end $$", Dangerous),
@@ -511,7 +570,10 @@ mod tests {
             ("copy t to program 'sh'", Dangerous),
             ("select * from t for update", Write),
             ("select * into backup from t", Write),
-            ("with d as (delete from t where id = 1 returning *) select * from d", Write),
+            (
+                "with d as (delete from t where id = 1 returning *) select * from d",
+                Write,
+            ),
             ("explain analyze delete from t where id = 1", Write),
             ("lock table t", Write),
             ("set search_path = x", Write),
@@ -546,13 +608,19 @@ mod tests {
             ("create role r password 'x'", Dangerous),
             ("alter role r with password 'x'", Dangerous),
             ("select pg_terminate_backend(123)", Dangerous),
-            ("select pg_cancel_backend(pid) from pg_stat_activity", Dangerous),
+            (
+                "select pg_cancel_backend(pid) from pg_stat_activity",
+                Dangerous,
+            ),
             ("select \"pg_terminate_backend\"(1)", Dangerous),
             ("select pg_catalog.\"PG_CANCEL_BACKEND\"(1)", Dangerous),
             ("select /* x */ pg_terminate_backend /* y */ (1)", Dangerous),
             ("select pg_advisory_lock(1)", Dangerous),
             ("select pg_reload_conf()", Dangerous),
-            ("select * from dblink('host=x', 'select 1') as t(a int)", Dangerous),
+            (
+                "select * from dblink('host=x', 'select 1') as t(a int)",
+                Dangerous,
+            ),
             ("select pg_read_file('/etc/passwd')", Dangerous),
             ("select nextval('s')", Dangerous),
             ("select pg_sleep(1)", Read),
@@ -629,7 +697,10 @@ mod tests {
         }
         // MySQL's own comment and string rules decide where a statement ends.
         let p = split_for("select 'a\\';b'; # x; y\nselect `c;d`", Dialect::My);
-        assert_eq!(p.iter().map(|x| x.text.as_str()).collect::<Vec<_>>(), ["select 'a\\';b'", "select `c;d`"]);
+        assert_eq!(
+            p.iter().map(|x| x.text.as_str()).collect::<Vec<_>>(),
+            ["select 'a\\';b'", "select `c;d`"]
+        );
     }
 
     #[test]
@@ -652,12 +723,26 @@ mod tests {
 
     #[test]
     fn transaction_verbs_and_effectful_calls_are_recognised() {
-        for t in ["begin", "COMMIT", "rollback to savepoint a", "savepoint a", "start transaction", "end", "release a"] {
+        for t in [
+            "begin",
+            "COMMIT",
+            "rollback to savepoint a",
+            "savepoint a",
+            "start transaction",
+            "end",
+            "release a",
+        ] {
             assert!(is_txn_control(t), "{t}");
         }
-        assert!(!is_txn_control("select 1") && !is_txn_control("update t set begin = 1 where id = 2"));
-        assert!(calls_effectful("update t set a = pg_terminate_backend(1) where id = 1"));
-        assert!(calls_effectful("insert into t select \"dblink_exec\"('x', 'y')"));
+        assert!(
+            !is_txn_control("select 1") && !is_txn_control("update t set begin = 1 where id = 2")
+        );
+        assert!(calls_effectful(
+            "update t set a = pg_terminate_backend(1) where id = 1"
+        ));
+        assert!(calls_effectful(
+            "insert into t select \"dblink_exec\"('x', 'y')"
+        ));
         assert!(!calls_effectful("update t set a = 1 where id = 2"));
     }
 

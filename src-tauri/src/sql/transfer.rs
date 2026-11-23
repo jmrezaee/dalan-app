@@ -52,8 +52,16 @@ pub(super) fn json_value(kind: CellKind, v: Option<&str>) -> serde_json::Value {
     match kind {
         CellKind::Bool => Value::Bool(v == "t" || v == "true"),
         // A bigint beyond 2^53 stays text, so no digit is lost on the way into other tools.
-        CellKind::Int => v.parse::<i64>().ok().filter(|n| n.abs() < (1 << 53)).map_or_else(|| Value::String(v.into()), Value::from),
-        CellKind::Float => v.parse::<f64>().ok().and_then(serde_json::Number::from_f64).map_or_else(|| Value::String(v.into()), Value::Number),
+        CellKind::Int => v
+            .parse::<i64>()
+            .ok()
+            .filter(|n| n.abs() < (1 << 53))
+            .map_or_else(|| Value::String(v.into()), Value::from),
+        CellKind::Float => v
+            .parse::<f64>()
+            .ok()
+            .and_then(serde_json::Number::from_f64)
+            .map_or_else(|| Value::String(v.into()), Value::Number),
         CellKind::Json => serde_json::from_str(v).unwrap_or_else(|_| Value::String(v.into())),
         _ => Value::String(v.into()),
     }
@@ -63,7 +71,11 @@ fn sql_literal(kind: CellKind, v: Option<&str>) -> String {
     match v {
         None => "NULL".into(),
         Some(t) => match kind {
-            CellKind::Int | CellKind::Decimal | CellKind::Float if t.parse::<f64>().is_ok_and(f64::is_finite) => t.into(),
+            CellKind::Int | CellKind::Decimal | CellKind::Float
+                if t.parse::<f64>().is_ok_and(f64::is_finite) =>
+            {
+                t.into()
+            }
             CellKind::Bool if t == "t" || t == "true" => "true".into(),
             CellKind::Bool if t == "f" || t == "false" => "false".into(),
             _ => format!("'{}'", t.replace('\'', "''")),
@@ -93,11 +105,20 @@ impl PgConn {
         // The table must exist (and its name is quoted from what the catalog says).
         self.table_info(schema, table).await?;
         let from = format!("{}.{}", quote(schema), quote(table));
-        let select = if filter.is_empty() { format!("select * from {from}") } else { format!("select * from {from} where ({filter})") };
+        let select = if filter.is_empty() {
+            format!("select * from {from}")
+        } else {
+            format!("select * from {from} where ({filter})")
+        };
         let _scope = self.scope().await;
         self.dirty.store(true, Ordering::SeqCst);
-        self.client.batch_execute("BEGIN READ ONLY").await.map_err(|e| map_error(&e))?;
-        let result = self.export_inner(&from, &select, format, header, out, progress, stop).await;
+        self.client
+            .batch_execute("BEGIN READ ONLY")
+            .await
+            .map_err(|e| map_error(&e))?;
+        let result = self
+            .export_inner(&from, &select, format, header, out, progress, stop)
+            .await;
         if self.client.batch_execute("ROLLBACK").await.is_ok() {
             self.dirty.store(false, Ordering::SeqCst);
         }
@@ -119,10 +140,19 @@ impl PgConn {
         let (mut rows, mut bytes) = (0f64, 0f64);
         match format {
             ExportFormat::Csv | ExportFormat::Tsv => {
-                let delim = if format == ExportFormat::Tsv { ", DELIMITER E'\\t'" } else { "" };
+                let delim = if format == ExportFormat::Tsv {
+                    ", DELIMITER E'\\t'"
+                } else {
+                    ""
+                };
                 let sink = self
                     .client
-                    .copy_out(format!("COPY ({select}) TO STDOUT WITH (FORMAT csv, HEADER {header}{delim})").as_str())
+                    .copy_out(
+                        format!(
+                            "COPY ({select}) TO STDOUT WITH (FORMAT csv, HEADER {header}{delim})"
+                        )
+                        .as_str(),
+                    )
                     .await
                     .map_err(|e| map_error(&e))?;
                 futures_util::pin_mut!(sink);
@@ -141,10 +171,27 @@ impl PgConn {
                 }
             }
             ExportFormat::Json | ExportFormat::Sql => {
-                let stmt = self.client.prepare(select).await.map_err(|e| map_error(&e))?;
-                let cols: Vec<(String, CellKind)> = stmt.columns().iter().map(|c| (c.name().to_string(), kind_of(c.type_()))).collect();
-                self.client.batch_execute(&format!("DECLARE dalan_export NO SCROLL CURSOR FOR\n{select}")).await.map_err(|e| map_error(&e))?;
-                let names = cols.iter().map(|(n, _)| quote(n)).collect::<Vec<_>>().join(", ");
+                let stmt = self
+                    .client
+                    .prepare(select)
+                    .await
+                    .map_err(|e| map_error(&e))?;
+                let cols: Vec<(String, CellKind)> = stmt
+                    .columns()
+                    .iter()
+                    .map(|c| (c.name().to_string(), kind_of(c.type_())))
+                    .collect();
+                self.client
+                    .batch_execute(&format!(
+                        "DECLARE dalan_export NO SCROLL CURSOR FOR\n{select}"
+                    ))
+                    .await
+                    .map_err(|e| map_error(&e))?;
+                let names = cols
+                    .iter()
+                    .map(|(n, _)| quote(n))
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 let mut put = |s: &str, bytes: &mut f64| -> AppResult<()> {
                     out.write_all(s.as_bytes()).map_err(io)?;
                     *bytes += s.len() as f64;
@@ -154,16 +201,35 @@ impl PgConn {
                     put("[", &mut bytes)?;
                 }
                 'outer: loop {
-                    let msgs = self.client.simple_query("FETCH FORWARD 500 FROM dalan_export").await.map_err(|e| map_error(&e))?;
+                    let msgs = self
+                        .client
+                        .simple_query("FETCH FORWARD 500 FROM dalan_export")
+                        .await
+                        .map_err(|e| map_error(&e))?;
                     let mut got = 0;
                     for m in &msgs {
-                        let tokio_postgres::SimpleQueryMessage::Row(r) = m else { continue };
+                        let tokio_postgres::SimpleQueryMessage::Row(r) = m else {
+                            continue;
+                        };
                         got += 1;
                         let line = if format == ExportFormat::Json {
-                            let obj: serde_json::Map<String, serde_json::Value> = cols.iter().enumerate().map(|(i, (n, k))| (n.clone(), json_value(*k, r.get(i)))).collect();
-                            format!("{}\n  {}", if rows == 0.0 { "" } else { "," }, serde_json::Value::Object(obj))
+                            let obj: serde_json::Map<String, serde_json::Value> = cols
+                                .iter()
+                                .enumerate()
+                                .map(|(i, (n, k))| (n.clone(), json_value(*k, r.get(i))))
+                                .collect();
+                            format!(
+                                "{}\n  {}",
+                                if rows == 0.0 { "" } else { "," },
+                                serde_json::Value::Object(obj)
+                            )
                         } else {
-                            let vals = cols.iter().enumerate().map(|(i, (_, k))| sql_literal(*k, r.get(i))).collect::<Vec<_>>().join(", ");
+                            let vals = cols
+                                .iter()
+                                .enumerate()
+                                .map(|(i, (_, k))| sql_literal(*k, r.get(i)))
+                                .collect::<Vec<_>>()
+                                .join(", ");
                             // The table's own name goes in the statements: importing it elsewhere starts from there.
                             format!("insert into {from} ({names}) values ({vals});\n")
                         };
@@ -279,26 +345,47 @@ pub struct ImportPlan {
 }
 
 pub fn read_limited(path: &std::path::Path) -> AppResult<String> {
-    let len = std::fs::metadata(path).map_err(|e| AppError::validation(format!("Couldn't read that file: {e}")))?.len();
+    let len = std::fs::metadata(path)
+        .map_err(|e| AppError::validation(format!("Couldn't read that file: {e}")))?
+        .len();
     if len > MAX_IMPORT {
-        return Err(AppError::validation("That file is over 256 MB. Split it, or load it with psql."));
+        return Err(AppError::validation(
+            "That file is over 256 MB. Split it, or load it with psql.",
+        ));
     }
-    let bytes = std::fs::read(path).map_err(|e| AppError::validation(format!("Couldn't read that file: {e}")))?;
+    let bytes = std::fs::read(path)
+        .map_err(|e| AppError::validation(format!("Couldn't read that file: {e}")))?;
     String::from_utf8(bytes).map_err(|_| AppError::validation("That file isn't UTF-8 text."))
 }
 
 /// Checks a mapping against the table's columns and the file, and writes the mapped columns as CSV (an empty value is
 /// NULL). Returns the target column names in file order, the CSV and the row count. Shared by every engine.
-pub fn map_csv(pv: &CsvPreview, text: &str, delim: char, header: bool, mapping: &[Option<String>]) -> AppResult<(Vec<String>, String, u64)> {
+pub fn map_csv(
+    pv: &CsvPreview,
+    text: &str,
+    delim: char,
+    header: bool,
+    mapping: &[Option<String>],
+) -> AppResult<(Vec<String>, String, u64)> {
     if mapping.len() != pv.file_columns.len() {
-        return Err(AppError::validation("The mapping doesn't match the file's columns."));
+        return Err(AppError::validation(
+            "The mapping doesn't match the file's columns.",
+        ));
     }
     let mut targets: Vec<(usize, &str)> = Vec::new();
     for (i, m) in mapping.iter().enumerate() {
         let Some(name) = m else { continue };
-        let col = pv.table_columns.iter().find(|c| &c.name == name).ok_or_else(|| AppError::validation(format!("There is no column {name} in this table.")))?;
+        let col = pv
+            .table_columns
+            .iter()
+            .find(|c| &c.name == name)
+            .ok_or_else(|| {
+                AppError::validation(format!("There is no column {name} in this table."))
+            })?;
         if col.generated {
-            return Err(AppError::validation(format!("{name} is filled in by the server and can't be loaded.")));
+            return Err(AppError::validation(format!(
+                "{name} is filled in by the server and can't be loaded."
+            )));
         }
         if targets.iter().any(|(_, n)| n == name) {
             return Err(AppError::validation(format!("{name} is mapped twice.")));
@@ -309,54 +396,135 @@ pub fn map_csv(pv: &CsvPreview, text: &str, delim: char, header: bool, mapping: 
         return Err(AppError::validation("Map at least one column."));
     }
     let records = parse_csv(text, delim);
-    let body = if header { &records[1.min(records.len())..] } else { &records[..] };
+    let body = if header {
+        &records[1.min(records.len())..]
+    } else {
+        &records[..]
+    };
     let mut csv = String::new();
     for (n, r) in body.iter().enumerate() {
         if r.len() != pv.file_columns.len() {
-            return Err(AppError::validation(format!("Row {} has {} fields, the first has {}. Nothing was loaded.", n + 1 + usize::from(header), r.len(), pv.file_columns.len())));
+            return Err(AppError::validation(format!(
+                "Row {} has {} fields, the first has {}. Nothing was loaded.",
+                n + 1 + usize::from(header),
+                r.len(),
+                pv.file_columns.len()
+            )));
         }
-        csv.push_str(&targets.iter().map(|(i, _)| copy_field(&r[*i])).collect::<Vec<_>>().join(","));
+        csv.push_str(
+            &targets
+                .iter()
+                .map(|(i, _)| copy_field(&r[*i]))
+                .collect::<Vec<_>>()
+                .join(","),
+        );
         csv.push('\n');
     }
-    Ok((targets.iter().map(|(_, n)| n.to_string()).collect(), csv, body.len() as u64))
+    Ok((
+        targets.iter().map(|(_, n)| n.to_string()).collect(),
+        csv,
+        body.len() as u64,
+    ))
 }
 
 impl PgConn {
-    pub async fn import_preview(&self, schema: &str, table: &str, text: &str, delim: char, header: bool) -> AppResult<CsvPreview> {
+    pub async fn import_preview(
+        &self,
+        schema: &str,
+        table: &str,
+        text: &str,
+        delim: char,
+        header: bool,
+    ) -> AppResult<CsvPreview> {
         let info = self.table_info(schema, table).await?;
         let st = self.structure(schema, table).await?;
         let records = parse_csv(text, delim);
         let first = records.first().cloned().unwrap_or_default();
         let width = first.len();
-        let file_columns: Vec<String> = if header { first.clone() } else { (1..=width).map(|i| format!("column {i}")).collect() };
-        let body = if header { &records[1.min(records.len())..] } else { &records[..] };
+        let file_columns: Vec<String> = if header {
+            first.clone()
+        } else {
+            (1..=width).map(|i| format!("column {i}")).collect()
+        };
+        let body = if header {
+            &records[1.min(records.len())..]
+        } else {
+            &records[..]
+        };
         let table_columns: Vec<CsvColumn> = info
             .columns
             .iter()
-            .map(|c| CsvColumn { name: c.name.clone(), type_name: c.type_name.clone(), generated: st.columns.iter().any(|s| s.name == c.name && s.generated.is_some()) })
+            .map(|c| CsvColumn {
+                name: c.name.clone(),
+                type_name: c.type_name.clone(),
+                generated: st
+                    .columns
+                    .iter()
+                    .any(|s| s.name == c.name && s.generated.is_some()),
+            })
             .collect();
         let suggested = file_columns
             .iter()
-            .map(|f| table_columns.iter().find(|c| !c.generated && c.name.eq_ignore_ascii_case(f.trim())).map(|c| c.name.clone()))
+            .map(|f| {
+                table_columns
+                    .iter()
+                    .find(|c| !c.generated && c.name.eq_ignore_ascii_case(f.trim()))
+                    .map(|c| c.name.clone())
+            })
             .collect();
-        Ok(CsvPreview { file_columns, sample: body.iter().take(20).cloned().collect(), total_rows: body.len() as f64, table_columns, suggested })
+        Ok(CsvPreview {
+            file_columns,
+            sample: body.iter().take(20).cloned().collect(),
+            total_rows: body.len() as f64,
+            table_columns,
+            suggested,
+        })
     }
 
     /// Checks the mapping against the table and builds the CSV for `COPY`. Every row must have the file's width.
-    pub async fn import_plan(&self, schema: &str, table: &str, text: &str, delim: char, header: bool, mapping: &[Option<String>]) -> AppResult<ImportPlan> {
-        let pv = self.import_preview(schema, table, text, delim, header).await?;
+    pub async fn import_plan(
+        &self,
+        schema: &str,
+        table: &str,
+        text: &str,
+        delim: char,
+        header: bool,
+        mapping: &[Option<String>],
+    ) -> AppResult<ImportPlan> {
+        let pv = self
+            .import_preview(schema, table, text, delim, header)
+            .await?;
         let (targets, csv, rows) = map_csv(&pv, text, delim, header, mapping)?;
-        let cols = targets.iter().map(|n| quote(n)).collect::<Vec<_>>().join(", ");
-        Ok(ImportPlan { statement: format!("COPY {}.{} ({cols}) FROM STDIN WITH (FORMAT csv)", quote(schema), quote(table)), rows, csv: csv.into_bytes(), target: None })
+        let cols = targets
+            .iter()
+            .map(|n| quote(n))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Ok(ImportPlan {
+            statement: format!(
+                "COPY {}.{} ({cols}) FROM STDIN WITH (FORMAT csv)",
+                quote(schema),
+                quote(table)
+            ),
+            rows,
+            csv: csv.into_bytes(),
+            target: None,
+        })
     }
 
     /// Loads the plan in one transaction. Any refusal by the server undoes everything.
     pub async fn import_commit(&self, plan: &ImportPlan) -> AppResult<u64> {
         let _scope = self.scope().await;
         self.dirty.store(true, Ordering::SeqCst);
-        self.client.batch_execute("BEGIN").await.map_err(|e| map_error(&e))?;
+        self.client
+            .batch_execute("BEGIN")
+            .await
+            .map_err(|e| map_error(&e))?;
         let out: Result<u64, tokio_postgres::Error> = async {
-            let sink = self.client.copy_in::<_, Bytes>(plan.statement.as_str()).await?;
+            let sink = self
+                .client
+                .copy_in::<_, Bytes>(plan.statement.as_str())
+                .await?;
             futures_util::pin_mut!(sink);
             for chunk in plan.csv.chunks(64 * 1024) {
                 sink.send(Bytes::copy_from_slice(chunk)).await?;
@@ -364,11 +532,23 @@ impl PgConn {
             sink.finish().await
         }
         .await;
-        let ended = self.client.batch_execute(if out.is_ok() { "COMMIT" } else { "ROLLBACK" }).await;
+        let ended = self
+            .client
+            .batch_execute(if out.is_ok() { "COMMIT" } else { "ROLLBACK" })
+            .await;
         if ended.is_ok() {
             self.dirty.store(false, Ordering::SeqCst);
         }
-        let n = out.map_err(|e| AppError::new(ErrorCode::DbRefused, format!("{} Nothing was loaded.", e.as_db_error().map_or_else(|| e.to_string(), |d| d.message().to_string()))))?;
+        let n = out.map_err(|e| {
+            AppError::new(
+                ErrorCode::DbRefused,
+                format!(
+                    "{} Nothing was loaded.",
+                    e.as_db_error()
+                        .map_or_else(|| e.to_string(), |d| d.message().to_string())
+                ),
+            )
+        })?;
         ended.map_err(|e| map_error(&e))?;
         Ok(n)
     }
@@ -409,9 +589,18 @@ mod tests {
     #[test]
     fn values_keep_their_types_in_json_and_sql() {
         assert_eq!(json_value(CellKind::Int, Some("42")), serde_json::json!(42));
-        assert_eq!(json_value(CellKind::Int, Some("9223372036854775807")), serde_json::json!("9223372036854775807"));
-        assert_eq!(json_value(CellKind::Bool, Some("t")), serde_json::json!(true));
-        assert_eq!(json_value(CellKind::Json, Some("{\"a\":1}")), serde_json::json!({"a": 1}));
+        assert_eq!(
+            json_value(CellKind::Int, Some("9223372036854775807")),
+            serde_json::json!("9223372036854775807")
+        );
+        assert_eq!(
+            json_value(CellKind::Bool, Some("t")),
+            serde_json::json!(true)
+        );
+        assert_eq!(
+            json_value(CellKind::Json, Some("{\"a\":1}")),
+            serde_json::json!({"a": 1})
+        );
         assert_eq!(json_value(CellKind::Text, None), serde_json::Value::Null);
         assert_eq!(sql_literal(CellKind::Text, Some("it's")), "'it''s'");
         assert_eq!(sql_literal(CellKind::Int, Some("7")), "7");
@@ -420,6 +609,9 @@ mod tests {
         assert_eq!(sql_literal(CellKind::Text, None), "NULL");
         // NaN and Infinity are not numbers SQL accepts bare.
         assert_eq!(sql_literal(CellKind::Float, Some("NaN")), "'NaN'");
-        assert_eq!(sql_literal(CellKind::Float, Some("-Infinity")), "'-Infinity'");
+        assert_eq!(
+            sql_literal(CellKind::Float, Some("-Infinity")),
+            "'-Infinity'"
+        );
     }
 }

@@ -77,7 +77,10 @@ pub async fn db_test(state: State<'_, AppState>, input: DatabaseInput) -> AppRes
             "An SRV address is looked up when you open the database, so it can't be tested from here yet.",
         ));
     }
-    if matches!(input.engine, Engine::Postgres | Engine::Mysql | Engine::Mariadb | Engine::Mongodb) {
+    if matches!(
+        input.engine,
+        Engine::Postgres | Engine::Mysql | Engine::Mariadb | Engine::Mongodb
+    ) {
         // The whole sign-in: the saved password stands in for an empty field (as in the Redis form).
         let typed = input
             .password

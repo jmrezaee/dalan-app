@@ -61,12 +61,7 @@ pub fn read_only_error(db_name: &str) -> AppError {
 
 /// A held confirmation may run now: the mode is asked again (it may have changed since the dialog opened), and a
 /// typed confirmation must carry the database's exact name.
-pub fn approve(
-    mode: Mode,
-    class: Class,
-    db_name: &str,
-    typed_name: Option<&str>,
-) -> AppResult<()> {
+pub fn approve(mode: Mode, class: Class, db_name: &str, typed_name: Option<&str>) -> AppResult<()> {
     match decide(mode, class) {
         Decision::Run | Decision::Confirm => Ok(()),
         Decision::Typed if typed_name == Some(db_name) => Ok(()),
@@ -122,10 +117,15 @@ impl<T> PendingStore<T> {
 
     /// The class of what is held, without using it up (the typed name is checked first; a typo keeps the dialog).
     pub fn peek_class(&self, conn_id: &str, id: &str) -> AppResult<Class> {
-        let map = self.0.lock().map_err(|_| AppError::internal("gate lock poisoned"))?;
+        let map = self
+            .0
+            .lock()
+            .map_err(|_| AppError::internal("gate lock poisoned"))?;
         match map.get(id) {
             Some(h) if h.conn_id == conn_id && h.created.elapsed() < PENDING_FOR => Ok(h.class),
-            _ => Err(needed("That confirmation was already used or isn't for this tab. Nothing was sent.")),
+            _ => Err(needed(
+                "That confirmation was already used or isn't for this tab. Nothing was sent.",
+            )),
         }
     }
 
@@ -171,7 +171,8 @@ mod tests {
             (Mode::Open, [Run, Run, Confirm, Typed]),
         ];
         for (mode, want) in table {
-            let got = [Class::Read, Class::Write, Class::Schema, Class::Dangerous].map(|c| decide(mode, c));
+            let got = [Class::Read, Class::Write, Class::Schema, Class::Dangerous]
+                .map(|c| decide(mode, c));
             assert_eq!(got, want, "{mode:?}");
         }
         assert_eq!(strongest(Run, Typed), Typed);
@@ -180,7 +181,13 @@ mod tests {
 
     #[test]
     fn a_typed_name_must_match_and_a_read_only_database_refuses_even_with_it() {
-        assert!(approve(Mode::Confirm, Class::Dangerous, "app-prod", Some("app-prod")).is_ok());
+        assert!(approve(
+            Mode::Confirm,
+            Class::Dangerous,
+            "app-prod",
+            Some("app-prod")
+        )
+        .is_ok());
         assert!(approve(Mode::Confirm, Class::Dangerous, "app-prod", Some("app")).is_err());
         assert!(approve(Mode::Confirm, Class::Dangerous, "app-prod", None).is_err());
         assert!(approve(Mode::ReadOnly, Class::Write, "app-prod", Some("app-prod")).is_err());

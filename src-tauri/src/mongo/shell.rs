@@ -79,7 +79,11 @@ impl<'a> P<'a> {
     fn ident(&mut self) -> Option<String> {
         self.ws();
         let start = self.i;
-        while self.i < self.s.len() && (self.s[self.i].is_ascii_alphanumeric() || self.s[self.i] == b'_' || self.s[self.i] == b'$') {
+        while self.i < self.s.len()
+            && (self.s[self.i].is_ascii_alphanumeric()
+                || self.s[self.i] == b'_'
+                || self.s[self.i] == b'$')
+        {
             self.i += 1;
         }
         (self.i > start).then(|| String::from_utf8_lossy(&self.s[start..self.i]).into_owned())
@@ -102,8 +106,13 @@ impl<'a> P<'a> {
                     b't' => out.push(b'\t'),
                     b'r' => out.push(b'\r'),
                     b'u' => {
-                        let hex = std::str::from_utf8(self.s.get(self.i..self.i + 4).unwrap_or(b"")).unwrap_or("");
-                        let ch = u32::from_str_radix(hex, 16).ok().and_then(char::from_u32).ok_or_else(|| self.bad("a \\u escape needs four hex digits"))?;
+                        let hex =
+                            std::str::from_utf8(self.s.get(self.i..self.i + 4).unwrap_or(b""))
+                                .unwrap_or("");
+                        let ch = u32::from_str_radix(hex, 16)
+                            .ok()
+                            .and_then(char::from_u32)
+                            .ok_or_else(|| self.bad("a \\u escape needs four hex digits"))?;
                         self.i += 4;
                         out.extend_from_slice(ch.to_string().as_bytes());
                     }
@@ -120,19 +129,32 @@ impl<'a> P<'a> {
         if self.s[self.i] == b'-' || self.s[self.i] == b'+' {
             self.i += 1;
         }
-        while self.i < self.s.len() && (self.s[self.i].is_ascii_digit() || matches!(self.s[self.i], b'.' | b'e' | b'E') || (matches!(self.s[self.i], b'-' | b'+') && matches!(self.s[self.i - 1], b'e' | b'E'))) {
+        while self.i < self.s.len()
+            && (self.s[self.i].is_ascii_digit()
+                || matches!(self.s[self.i], b'.' | b'e' | b'E')
+                || (matches!(self.s[self.i], b'-' | b'+')
+                    && matches!(self.s[self.i - 1], b'e' | b'E')))
+        {
             self.i += 1;
         }
         let t = std::str::from_utf8(&self.s[start..self.i]).unwrap_or("");
         if let Ok(n) = t.parse::<i64>() {
             return Ok(i32::try_from(n).map_or(Bson::Int64(n), Bson::Int32));
         }
-        t.parse::<f64>().map(Bson::Double).map_err(|_| self.bad("not a number"))
+        t.parse::<f64>()
+            .map(Bson::Double)
+            .map_err(|_| self.bad("not a number"))
     }
 
     fn value(&mut self) -> AppResult<Bson> {
         self.depth += 1;
-        let r = if self.depth > MAX_DEPTH { Err(err("That value is nested too deeply (more than 100 levels).")) } else { self.value_inner() };
+        let r = if self.depth > MAX_DEPTH {
+            Err(err(
+                "That value is nested too deeply (more than 100 levels).",
+            ))
+        } else {
+            self.value_inner()
+        };
         self.depth -= 1;
         r
     }
@@ -204,8 +226,14 @@ impl<'a> P<'a> {
         }
         let options = String::from_utf8_lossy(&self.s[fs..self.i]).into_owned();
         // A regular expression's text can't hold a NUL byte (BSON stores it as a C string).
-        let cs = |t: String| bson::raw::CString::try_from(t).map_err(|_| err("A regular expression can't contain a NUL character."));
-        Ok(Bson::RegularExpression(bson::Regex { pattern: cs(pattern)?, options: cs(options)? }))
+        let cs = |t: String| {
+            bson::raw::CString::try_from(t)
+                .map_err(|_| err("A regular expression can't contain a NUL character."))
+        };
+        Ok(Bson::RegularExpression(bson::Regex {
+            pattern: cs(pattern)?,
+            options: cs(options)?,
+        }))
     }
 
     /// `true`, `null`, `ObjectId("…")`, `new Date()`, `NumberLong(5)` and the rest of the shell's helpers.
@@ -251,29 +279,73 @@ impl<'a> P<'a> {
         Ok(match name {
             "ObjectId" => match text(&args) {
                 None => Bson::ObjectId(bson::oid::ObjectId::new()),
-                Some(h) => Bson::ObjectId(bson::oid::ObjectId::parse_str(&h).map_err(|_| err("ObjectId() needs 24 hex digits."))?),
+                Some(h) => Bson::ObjectId(
+                    bson::oid::ObjectId::parse_str(&h)
+                        .map_err(|_| err("ObjectId() needs 24 hex digits."))?,
+                ),
             },
             "ISODate" | "Date" => match args.first() {
                 None => Bson::DateTime(bson::DateTime::now()),
-                Some(Bson::String(s)) => Bson::DateTime(bson::DateTime::parse_rfc3339_str(s).or_else(|_| bson::DateTime::parse_rfc3339_str(format!("{s}Z"))).or_else(|_| bson::DateTime::parse_rfc3339_str(format!("{s}T00:00:00Z"))).map_err(|_| err(format!("\"{s}\" isn't a date like 2025-03-01T10:00:00Z.")))?),
+                Some(Bson::String(s)) => Bson::DateTime(
+                    bson::DateTime::parse_rfc3339_str(s)
+                        .or_else(|_| bson::DateTime::parse_rfc3339_str(format!("{s}Z")))
+                        .or_else(|_| bson::DateTime::parse_rfc3339_str(format!("{s}T00:00:00Z")))
+                        .map_err(|_| {
+                            err(format!("\"{s}\" isn't a date like 2025-03-01T10:00:00Z."))
+                        })?,
+                ),
                 Some(Bson::Int32(i)) => Bson::DateTime(bson::DateTime::from_millis(i64::from(*i))),
                 Some(Bson::Int64(i)) => Bson::DateTime(bson::DateTime::from_millis(*i)),
                 Some(Bson::Double(d)) => Bson::DateTime(bson::DateTime::from_millis(*d as i64)),
                 _ => return Err(wrong(name)),
             },
-            "NumberLong" => Bson::Int64(text(&args).and_then(|t| t.parse().ok()).ok_or_else(|| wrong(name))?),
-            "NumberInt" => Bson::Int32(text(&args).and_then(|t| t.parse().ok()).ok_or_else(|| wrong(name))?),
-            "NumberDecimal" => Bson::Decimal128(text(&args).and_then(|t| t.parse::<bson::Decimal128>().ok()).ok_or_else(|| err("NumberDecimal() needs a decimal number in quotes, like \"1.10\"."))?),
+            "NumberLong" => Bson::Int64(
+                text(&args)
+                    .and_then(|t| t.parse().ok())
+                    .ok_or_else(|| wrong(name))?,
+            ),
+            "NumberInt" => Bson::Int32(
+                text(&args)
+                    .and_then(|t| t.parse().ok())
+                    .ok_or_else(|| wrong(name))?,
+            ),
+            "NumberDecimal" => Bson::Decimal128(
+                text(&args)
+                    .and_then(|t| t.parse::<bson::Decimal128>().ok())
+                    .ok_or_else(|| {
+                        err("NumberDecimal() needs a decimal number in quotes, like \"1.10\".")
+                    })?,
+            ),
             "UUID" => {
-                let u = bson::Uuid::parse_str(text(&args).ok_or_else(|| wrong(name))?).map_err(|_| err("UUID() needs a value like 123e4567-e89b-12d3-a456-426614174000."))?;
+                let u = bson::Uuid::parse_str(text(&args).ok_or_else(|| wrong(name))?).map_err(
+                    |_| err("UUID() needs a value like 123e4567-e89b-12d3-a456-426614174000."),
+                )?;
                 Bson::Binary(bson::Binary::from_uuid(u))
             }
             "Timestamp" => match (args.first(), args.get(1)) {
-                (Some(Bson::Int32(t)), Some(Bson::Int32(i))) => Bson::Timestamp(bson::Timestamp { time: u32::try_from(*t).map_err(|_| err("Timestamp() needs positive numbers."))?, increment: u32::try_from(*i).map_err(|_| err("Timestamp() needs positive numbers."))? }),
-                _ => return Err(err("Timestamp() needs two whole numbers: seconds and an increment.")),
+                (Some(Bson::Int32(t)), Some(Bson::Int32(i))) => Bson::Timestamp(bson::Timestamp {
+                    time: u32::try_from(*t)
+                        .map_err(|_| err("Timestamp() needs positive numbers."))?,
+                    increment: u32::try_from(*i)
+                        .map_err(|_| err("Timestamp() needs positive numbers."))?,
+                }),
+                _ => {
+                    return Err(err(
+                        "Timestamp() needs two whole numbers: seconds and an increment.",
+                    ))
+                }
             },
             "BinData" => match (args.first(), args.get(1)) {
-                (Some(Bson::Int32(sub)), Some(Bson::String(b64))) => Bson::Binary(bson::Binary::from_base64(b64, Some(bson::spec::BinarySubtype::from(u8::try_from(*sub).map_err(|_| err("BinData() subtype is a number from 0 to 255."))?))).map_err(|_| err("BinData() needs base64 text."))?),
+                (Some(Bson::Int32(sub)), Some(Bson::String(b64))) => Bson::Binary(
+                    bson::Binary::from_base64(
+                        b64,
+                        Some(bson::spec::BinarySubtype::from(
+                            u8::try_from(*sub)
+                                .map_err(|_| err("BinData() subtype is a number from 0 to 255."))?,
+                        )),
+                    )
+                    .map_err(|_| err("BinData() needs base64 text."))?,
+                ),
                 _ => return Err(err("BinData() needs a subtype number and base64 text.")),
             },
             _ => return Err(err(NOT_JS)),
@@ -288,9 +360,17 @@ pub enum Stmt {
     Use(String),
     Show(String),
     /// `db.<coll>.<method>(args)` with chained cursor methods.
-    Coll { coll: String, method: String, args: Vec<Bson>, chain: Vec<(String, Vec<Bson>)> },
+    Coll {
+        coll: String,
+        method: String,
+        args: Vec<Bson>,
+        chain: Vec<(String, Vec<Bson>)>,
+    },
     /// `db.<method>(args)`.
-    Db { method: String, args: Vec<Bson> },
+    Db {
+        method: String,
+        args: Vec<Bson>,
+    },
 }
 
 fn args_of(p: &mut P) -> AppResult<Vec<Bson>> {
@@ -311,13 +391,21 @@ fn args_of(p: &mut P) -> AppResult<Vec<Bson>> {
 pub fn parse(line: &str) -> AppResult<Stmt> {
     let t = line.trim().trim_end_matches(';').trim();
     if t.is_empty() {
-        return Err(err("Type a command, like db.orders.find({}) or show collections."));
+        return Err(err(
+            "Type a command, like db.orders.find({}) or show collections.",
+        ));
     }
     let lower = t.to_ascii_lowercase();
     if let Some(rest) = lower.strip_prefix("use ") {
         let name = rest.trim();
-        let name = t[t.len() - name.len()..].trim().trim_matches(|c| c == '"' || c == '\'');
-        if name.is_empty() || name.contains(|c: char| c.is_whitespace() || c == '/' || c == '\\' || c == '.' || c == '$' || c == '\0') {
+        let name = t[t.len() - name.len()..]
+            .trim()
+            .trim_matches(|c| c == '"' || c == '\'');
+        if name.is_empty()
+            || name.contains(|c: char| {
+                c.is_whitespace() || c == '/' || c == '\\' || c == '.' || c == '$' || c == '\0'
+            })
+        {
             return Err(err("Name a database after use, like use shop."));
         }
         return Ok(Stmt::Use(name.to_string()));
@@ -327,38 +415,95 @@ pub fn parse(line: &str) -> AppResult<Stmt> {
             "dbs" | "databases" => Ok(Stmt::Show("dbs".into())),
             "collections" | "tables" => Ok(Stmt::Show("collections".into())),
             "users" => Ok(Stmt::Show("users".into())),
-            other => Err(err(format!("show {other} isn't supported. Try show dbs, show collections or show users."))),
+            other => Err(err(format!(
+                "show {other} isn't supported. Try show dbs, show collections or show users."
+            ))),
         };
     }
     if lower == "it" {
-        return Err(err("`it` isn't supported. Add .skip(n) to read the next documents."));
+        return Err(err(
+            "`it` isn't supported. Add .skip(n) to read the next documents.",
+        ));
     }
     if !t.starts_with("db.") && !t.starts_with("db[") {
-        return Err(err(if t.contains(['=', '{']) || ["var ", "let ", "const ", "for ", "for(", "function", "while"].iter().any(|k| lower.starts_with(k)) { NOT_JS } else { "Commands start with db. , use or show, like db.orders.find({})." }));
+        return Err(err(
+            if t.contains(['=', '{'])
+                || [
+                    "var ", "let ", "const ", "for ", "for(", "function", "while",
+                ]
+                .iter()
+                .any(|k| lower.starts_with(k))
+            {
+                NOT_JS
+            } else {
+                "Commands start with db. , use or show, like db.orders.find({})."
+            },
+        ));
     }
-    let mut p = P { s: t.as_bytes(), i: 2, depth: 0 };
-    let first = if p.eat(b'.') { p.ident().ok_or_else(|| p.bad("a name after db."))? } else { return Err(err("Use db.getCollection(\"name\") for unusual collection names.")) };
+    let mut p = P {
+        s: t.as_bytes(),
+        i: 2,
+        depth: 0,
+    };
+    let first = if p.eat(b'.') {
+        p.ident().ok_or_else(|| p.bad("a name after db."))?
+    } else {
+        return Err(err(
+            "Use db.getCollection(\"name\") for unusual collection names.",
+        ));
+    };
     let stmt = if first == "getCollection" {
         let a = args_of(&mut p)?;
-        let Some(Bson::String(coll)) = a.first() else { return Err(err("getCollection() needs the collection's name in quotes.")) };
+        let Some(Bson::String(coll)) = a.first() else {
+            return Err(err(
+                "getCollection() needs the collection's name in quotes.",
+            ));
+        };
         p.expect(b'.')?;
         let method = p.ident().ok_or_else(|| p.bad("a method name"))?;
-        Stmt::Coll { coll: coll.clone(), method, args: args_of(&mut p)?, chain: vec![] }
+        Stmt::Coll {
+            coll: coll.clone(),
+            method,
+            args: args_of(&mut p)?,
+            chain: vec![],
+        }
     } else if p.peek() == Some(b'(') {
-        Stmt::Db { method: first, args: args_of(&mut p)? }
+        Stmt::Db {
+            method: first,
+            args: args_of(&mut p)?,
+        }
     } else {
         p.expect(b'.')?;
         let method = p.ident().ok_or_else(|| p.bad("a method name"))?;
-        Stmt::Coll { coll: first, method, args: args_of(&mut p)?, chain: vec![] }
+        Stmt::Coll {
+            coll: first,
+            method,
+            args: args_of(&mut p)?,
+            chain: vec![],
+        }
     };
-    let Stmt::Coll { coll, method, args, mut chain } = stmt else {
+    let Stmt::Coll {
+        coll,
+        method,
+        args,
+        mut chain,
+    } = stmt
+    else {
         return finish(p, stmt);
     };
     while p.eat(b'.') {
         let m = p.ident().ok_or_else(|| p.bad("a method name"))?;
         chain.push((m, args_of(&mut p)?));
     }
-    finish(p, Stmt::Coll { coll, method, args, chain })
+    finish(
+        p,
+        Stmt::Coll {
+            coll,
+            method,
+            args,
+            chain,
+        },
+    )
 }
 
 fn finish(mut p: P, s: Stmt) -> AppResult<Stmt> {
@@ -398,7 +543,9 @@ fn doc_arg(a: &[Bson], i: usize, what: &str) -> AppResult<Document> {
     match a.get(i) {
         None => Ok(Document::new()),
         Some(Bson::Document(d)) => Ok(d.clone()),
-        Some(_) => Err(err(format!("{what} must be a document like {{ \"a\": 1 }}."))),
+        Some(_) => Err(err(format!(
+            "{what} must be a document like {{ \"a\": 1 }}."
+        ))),
     }
 }
 
@@ -418,13 +565,25 @@ fn check_update(method: &str, u: &Bson) -> AppResult<()> {
 }
 
 fn same_pipeline_writes(p: &[Bson]) -> bool {
-    p.iter().any(|s| s.as_document().is_some_and(|d| d.keys().any(|k| k.eq_ignore_ascii_case("$out") || k.eq_ignore_ascii_case("$merge"))))
+    p.iter().any(|s| {
+        s.as_document().is_some_and(|d| {
+            d.keys()
+                .any(|k| k.eq_ignore_ascii_case("$out") || k.eq_ignore_ascii_case("$merge"))
+        })
+    })
 }
 
 /// The class of a raw `runCommand`, by the command's name: anything not known to be harmless is `Dangerous`.
 pub fn classify_command(cmd: &Document) -> Class {
-    let name = cmd.keys().next().map(|k| k.to_ascii_lowercase()).unwrap_or_default();
-    let flag = |k: &str| cmd.iter().any(|(key, v)| key.eq_ignore_ascii_case(k) && matches!(v, Bson::Boolean(true)));
+    let name = cmd
+        .keys()
+        .next()
+        .map(|k| k.to_ascii_lowercase())
+        .unwrap_or_default();
+    let flag = |k: &str| {
+        cmd.iter()
+            .any(|(key, v)| key.eq_ignore_ascii_case(k) && matches!(v, Bson::Boolean(true)))
+    };
     // An update or delete whose filter is empty and that reaches many documents is dangerous, whichever way it is typed.
     let empty_many = |list: &str, many_key: &str| {
         cmd.get_array(list).is_ok_and(|a| {
@@ -444,8 +603,17 @@ pub fn classify_command(cmd: &Document) -> Class {
         "usersinfo" if flag("showCredentials") => Class::Dangerous,
         "connectionstatus" if flag("showPrivileges") => Class::Dangerous,
         "validate" if flag("repair") => Class::Dangerous,
-        "find" | "count" | "distinct" | "listcollections" | "listindexes" | "listdatabases" | "collstats" | "dbstats" | "ping" | "hello" | "ismaster" | "buildinfo" | "serverstatus" | "currentop" | "connectionstatus" | "usersinfo" | "rolesinfo" | "getparameter" | "validate" | "explain" | "whatsmyuri" | "hostinfo" => Class::Read,
-        "aggregate" => cmd.get_array("pipeline").map_or(Class::Read, |p| if same_pipeline_writes(p) { Class::Write } else { Class::Read }),
+        "find" | "count" | "distinct" | "listcollections" | "listindexes" | "listdatabases"
+        | "collstats" | "dbstats" | "ping" | "hello" | "ismaster" | "buildinfo"
+        | "serverstatus" | "currentop" | "connectionstatus" | "usersinfo" | "rolesinfo"
+        | "getparameter" | "validate" | "explain" | "whatsmyuri" | "hostinfo" => Class::Read,
+        "aggregate" => cmd.get_array("pipeline").map_or(Class::Read, |p| {
+            if same_pipeline_writes(p) {
+                Class::Write
+            } else {
+                Class::Read
+            }
+        }),
         "delete" if empty_many("deletes", "limit") => Class::Dangerous,
         "update" if empty_many("updates", "multi") => Class::Dangerous,
         "insert" | "update" | "delete" | "findandmodify" => Class::Write,
@@ -456,7 +624,12 @@ pub fn classify_command(cmd: &Document) -> Class {
     }
 }
 
-fn find_cmd(coll: &str, args: &[Bson], chain: &[(String, Vec<Bson>)], limit_one: bool) -> AppResult<(Document, bool)> {
+fn find_cmd(
+    coll: &str,
+    args: &[Bson],
+    chain: &[(String, Vec<Bson>)],
+    limit_one: bool,
+) -> AppResult<(Document, bool)> {
     let mut cmd = doc! { "find": coll, "filter": doc_arg(args, 0, "The filter")? };
     let proj = doc_arg(args, 1, "The projection")?;
     if !proj.is_empty() {
@@ -526,7 +699,16 @@ fn find_cmd(coll: &str, args: &[Bson], chain: &[(String, Vec<Bson>)], limit_one:
 
 /// A statement as the command to run, its class and what it will say it does.
 pub fn plan(stmt: &Stmt, db: &str) -> AppResult<Plan> {
-    let p = |class, summary: String, cmd, shape| Ok(Plan { db: db.into(), class, summary, cmd, shape, matches: None });
+    let p = |class, summary: String, cmd, shape| {
+        Ok(Plan {
+            db: db.into(),
+            class,
+            summary,
+            cmd,
+            shape,
+            matches: None,
+        })
+    };
     match stmt {
         Stmt::Use(_) => Err(err("use changes the database; it has no command to run.")),
         Stmt::Show(what) => match what.as_str() {
@@ -713,7 +895,9 @@ fn show(b: &Bson) -> String {
     match b {
         Bson::String(s) => s.clone(),
         Bson::Document(d) => relaxed(d),
-        other => serde_json::to_string_pretty(&other.clone().into_relaxed_extjson()).unwrap_or_default(),
+        other => {
+            serde_json::to_string_pretty(&other.clone().into_relaxed_extjson()).unwrap_or_default()
+        }
     }
 }
 
@@ -721,22 +905,49 @@ fn show(b: &Bson) -> String {
 pub fn reply_of(shape: &Shape, mut r: Document) -> ShellReply {
     match shape {
         Shape::Cursor => {
-            let docs = r.get_document("cursor").map(|c| names(c, "firstBatch")).unwrap_or_default();
+            let docs = r
+                .get_document("cursor")
+                .map(|c| names(c, "firstBatch"))
+                .unwrap_or_default();
             let more = docs.len() > 100;
-            ShellReply { blocks: docs.iter().take(100).map(relaxed).collect(), note: more.then(|| "Showing the first 100 documents. Add .limit(n) or .skip(n) to see others.".into()) }
+            ShellReply {
+                blocks: docs.iter().take(100).map(relaxed).collect(),
+                note: more.then(|| {
+                    "Showing the first 100 documents. Add .limit(n) or .skip(n) to see others."
+                        .into()
+                }),
+            }
         }
-        Shape::Field(k) => ShellReply { blocks: vec![r.get(k).map(show).unwrap_or_else(|| "null".into())], note: None },
+        Shape::Field(k) => ShellReply {
+            blocks: vec![r.get(k).map(show).unwrap_or_else(|| "null".into())],
+            note: None,
+        },
         Shape::Names(k) => {
-            let list: Vec<Document> = if *k == "cursor" { r.get_document("cursor").map(|c| names(c, "firstBatch")).unwrap_or_default() } else { names(&r, k) };
-            let mut n: Vec<String> = list.iter().filter_map(|d| d.get_str("name").ok().map(str::to_string)).collect();
+            let list: Vec<Document> = if *k == "cursor" {
+                r.get_document("cursor")
+                    .map(|c| names(c, "firstBatch"))
+                    .unwrap_or_default()
+            } else {
+                names(&r, k)
+            };
+            let mut n: Vec<String> = list
+                .iter()
+                .filter_map(|d| d.get_str("name").ok().map(str::to_string))
+                .collect();
             n.sort();
-            ShellReply { blocks: n, note: None }
+            ShellReply {
+                blocks: n,
+                note: None,
+            }
         }
         Shape::Doc => {
             r.remove("ok");
             r.remove("$clusterTime");
             r.remove("operationTime");
-            ShellReply { blocks: vec![relaxed(&r)], note: None }
+            ShellReply {
+                blocks: vec![relaxed(&r)],
+                note: None,
+            }
         }
     }
 }
@@ -746,8 +957,14 @@ pub async fn execute(c: &MongoConn, plan: &Plan) -> AppResult<ShellReply> {
     let r = c.command(&plan.db, plan.cmd.clone()).await?;
     if let Some(Bson::Int64(id)) = r.get_document("cursor").ok().and_then(|c| c.get("id")) {
         if *id != 0 {
-            let coll = plan.cmd.get_str(plan.cmd.keys().next().map_or("", String::as_str)).unwrap_or("").to_string();
-            let _ = c.command(&plan.db, doc! { "killCursors": coll, "cursors": [*id] }).await;
+            let coll = plan
+                .cmd
+                .get_str(plan.cmd.keys().next().map_or("", String::as_str))
+                .unwrap_or("")
+                .to_string();
+            let _ = c
+                .command(&plan.db, doc! { "killCursors": coll, "cursors": [*id] })
+                .await;
         }
     }
     Ok(reply_of(&plan.shape, r))
@@ -768,19 +985,49 @@ mod tests {
         let Stmt::Coll { args, .. } = s else { panic!() };
         let d = args[0].as_document().unwrap();
         assert_eq!(d.get_str("status").unwrap(), "open");
-        assert!(matches!(d.get("big"), Some(Bson::Int64(9_007_199_254_740_993))));
-        assert!(matches!(d.get("d"), Some(Bson::Decimal128(_))) && matches!(d.get("when"), Some(Bson::DateTime(_))) && matches!(d.get("id"), Some(Bson::ObjectId(_))));
-        assert!(matches!(d.get("r"), Some(Bson::RegularExpression(r)) if r.pattern.as_str() == "^a.*" && r.options.as_str() == "i"));
+        assert!(matches!(
+            d.get("big"),
+            Some(Bson::Int64(9_007_199_254_740_993))
+        ));
+        assert!(
+            matches!(d.get("d"), Some(Bson::Decimal128(_)))
+                && matches!(d.get("when"), Some(Bson::DateTime(_)))
+                && matches!(d.get("id"), Some(Bson::ObjectId(_)))
+        );
+        assert!(
+            matches!(d.get("r"), Some(Bson::RegularExpression(r)) if r.pattern.as_str() == "^a.*" && r.options.as_str() == "i")
+        );
         assert_eq!(d.get_array("tags").unwrap().len(), 2);
-        assert_eq!(d.get_document("n").unwrap().get_f64("$lte").unwrap(), 1000.0);
-        assert!(matches!(parse("db.c.find({ d: new Date(0) })").unwrap(), Stmt::Coll { .. }));
+        assert_eq!(
+            d.get_document("n").unwrap().get_f64("$lte").unwrap(),
+            1000.0
+        );
+        assert!(matches!(
+            parse("db.c.find({ d: new Date(0) })").unwrap(),
+            Stmt::Coll { .. }
+        ));
     }
 
     #[test]
     fn javascript_and_the_rest_get_the_plain_message() {
-        for bad in ["var x = 1", "for (;;) {}", "db.orders.find({}).forEach(printjson)", "db.orders.find(x)", "db.orders.find({ a: Math.max(1) })", "db.a.find({}); db.b.find({})", "x = 5"] {
-            let e = parse(bad).and_then(|s| plan(&s, "d").map(|_| ())).unwrap_err();
-            assert!(e.message.contains("single commands, not JavaScript") || e.message.contains("isn't supported"), "{bad}: {}", e.message);
+        for bad in [
+            "var x = 1",
+            "for (;;) {}",
+            "db.orders.find({}).forEach(printjson)",
+            "db.orders.find(x)",
+            "db.orders.find({ a: Math.max(1) })",
+            "db.a.find({}); db.b.find({})",
+            "x = 5",
+        ] {
+            let e = parse(bad)
+                .and_then(|s| plan(&s, "d").map(|_| ()))
+                .unwrap_err();
+            assert!(
+                e.message.contains("single commands, not JavaScript")
+                    || e.message.contains("isn't supported"),
+                "{bad}: {}",
+                e.message
+            );
         }
         assert!(parse("db.orders.find({").is_err());
     }
@@ -791,7 +1038,9 @@ mod tests {
         assert_eq!(parse("use Shop").unwrap(), Stmt::Use("Shop".into()));
         assert!(parse("use a.b").is_err());
         assert_eq!(parse("show dbs").unwrap(), Stmt::Show("dbs".into()));
-        assert!(matches!(parse(r#"db.getCollection("a.b").find()"#).unwrap(), Stmt::Coll { coll, .. } if coll == "a.b"));
+        assert!(
+            matches!(parse(r#"db.getCollection("a.b").find()"#).unwrap(), Stmt::Coll { coll, .. } if coll == "a.b")
+        );
     }
 
     #[test]
@@ -837,46 +1086,116 @@ mod tests {
     fn raw_commands_get_the_same_care_as_the_helpers() {
         use Class::*;
         let c = |line: &str| pl(line).class;
-        assert_eq!(c("db.runCommand({ delete: 'o', deletes: [{ q: {}, limit: 0 }] })"), Dangerous);
-        assert_eq!(c("db.runCommand({ delete: 'o', deletes: [{ q: { a: 1 }, limit: 0 }] })"), Write);
-        assert_eq!(c("db.runCommand({ delete: 'o', deletes: [{ q: {}, limit: 1 }] })"), Write);
-        assert_eq!(c("db.runCommand({ DELETE: 'o', deletes: [{ q: {}, limit: 0 }] })"), Dangerous);
+        assert_eq!(
+            c("db.runCommand({ delete: 'o', deletes: [{ q: {}, limit: 0 }] })"),
+            Dangerous
+        );
+        assert_eq!(
+            c("db.runCommand({ delete: 'o', deletes: [{ q: { a: 1 }, limit: 0 }] })"),
+            Write
+        );
+        assert_eq!(
+            c("db.runCommand({ delete: 'o', deletes: [{ q: {}, limit: 1 }] })"),
+            Write
+        );
+        assert_eq!(
+            c("db.runCommand({ DELETE: 'o', deletes: [{ q: {}, limit: 0 }] })"),
+            Dangerous
+        );
         assert_eq!(c("db.runCommand({ update: 'o', updates: [{ q: {}, u: { $set: { a: 1 } }, multi: true }] })"), Dangerous);
         assert_eq!(c("db.runCommand({ update: 'o', updates: [{ q: { a: 1 }, u: { $set: { a: 1 } }, multi: true }] })"), Write);
         assert_eq!(c("db.runCommand({ Insert: 'o', documents: [{}] })"), Write);
-        assert_eq!(c("db.runCommand({ renameCollection: 'd.a', to: 'd.b', dropTarget: true })"), Dangerous);
-        assert_eq!(c("db.adminCommand({ renameCollection: 'd.a', to: 'd.b' })"), Schema);
-        assert_eq!(c("db.runCommand({ convertToCapped: 'o', size: 100 })"), Dangerous);
-        assert_eq!(c("db.runCommand({ usersInfo: 1, showCredentials: true })"), Dangerous);
+        assert_eq!(
+            c("db.runCommand({ renameCollection: 'd.a', to: 'd.b', dropTarget: true })"),
+            Dangerous
+        );
+        assert_eq!(
+            c("db.adminCommand({ renameCollection: 'd.a', to: 'd.b' })"),
+            Schema
+        );
+        assert_eq!(
+            c("db.runCommand({ convertToCapped: 'o', size: 100 })"),
+            Dangerous
+        );
+        assert_eq!(
+            c("db.runCommand({ usersInfo: 1, showCredentials: true })"),
+            Dangerous
+        );
         assert_eq!(c("db.runCommand({ usersInfo: 1 })"), Read);
-        assert_eq!(c("db.runCommand({ validate: 'o', repair: true })"), Dangerous);
+        assert_eq!(
+            c("db.runCommand({ validate: 'o', repair: true })"),
+            Dangerous
+        );
         assert_eq!(c("db.runCommand({ aggregate: 'o' })"), Read);
     }
 
     #[test]
     fn chains_nesting_updates_and_options_are_checked() {
-        for bad in ["db.c.deleteMany({ a: 1 }).explain()", "db.c.aggregate([]).limit(1)", "db.c.updateOne({ a: 1 }, { b: 2 })", "db.c.updateMany({}, {})", "db.c.replaceOne({ a: 1 }, { $set: { b: 2 } })", "db.createCollection('a', { create: 'b' })", "db.c.createIndex({ a: 1 }, { key: { b: 1 } })", "db.c.find().limit(-5)", "db.c.find({ t: Timestamp(-1, 1) })", "db.c.find({ b: BinData(300, 'AA==') })"] {
-            let e = parse(bad).and_then(|s| plan(&s, "d").map(|_| ())).unwrap_err();
+        for bad in [
+            "db.c.deleteMany({ a: 1 }).explain()",
+            "db.c.aggregate([]).limit(1)",
+            "db.c.updateOne({ a: 1 }, { b: 2 })",
+            "db.c.updateMany({}, {})",
+            "db.c.replaceOne({ a: 1 }, { $set: { b: 2 } })",
+            "db.createCollection('a', { create: 'b' })",
+            "db.c.createIndex({ a: 1 }, { key: { b: 1 } })",
+            "db.c.find().limit(-5)",
+            "db.c.find({ t: Timestamp(-1, 1) })",
+            "db.c.find({ b: BinData(300, 'AA==') })",
+        ] {
+            let e = parse(bad)
+                .and_then(|s| plan(&s, "d").map(|_| ()))
+                .unwrap_err();
             assert!(!e.message.is_empty(), "{bad}");
         }
-        assert!(plan(&parse("db.c.updateOne({ a: 1 }, [{ $set: { b: 1 } }])").unwrap(), "d").is_ok());
+        assert!(plan(
+            &parse("db.c.updateOne({ a: 1 }, [{ $set: { b: 1 } }])").unwrap(),
+            "d"
+        )
+        .is_ok());
         assert!(plan(&parse("db.c.replaceOne({ a: 1 }, { b: 2 })").unwrap(), "d").is_ok());
         // Deep nesting is refused, not a stack overflow.
         let deep = format!("db.c.find({})", "[".repeat(5000));
-        assert!(parse(&deep).unwrap_err().message.contains("nested too deeply"));
+        assert!(parse(&deep)
+            .unwrap_err()
+            .message
+            .contains("nested too deeply"));
         assert!(parse(&format!("db.c.find({}1{})", "[".repeat(50), "]".repeat(50))).is_ok());
         // `.limit(20)` is a real limit for count().
         let n = pl("db.c.find({ a: 1 }).limit(20).count()");
         assert_eq!(n.cmd.get_i64("limit").unwrap(), 20);
         assert!(pl("db.c.find().limit(0)").cmd.get("limit").is_none());
-        assert_eq!(pl("db.c.updateMany({ a: 1 }, { $set: { b: 1 } }, { collation: { locale: 'en' } })").cmd.get_array("updates").unwrap()[0].as_document().unwrap().get_document("collation").unwrap().get_str("locale").unwrap(), "en");
+        assert_eq!(
+            pl("db.c.updateMany({ a: 1 }, { $set: { b: 1 } }, { collation: { locale: 'en' } })")
+                .cmd
+                .get_array("updates")
+                .unwrap()[0]
+                .as_document()
+                .unwrap()
+                .get_document("collation")
+                .unwrap()
+                .get_str("locale")
+                .unwrap(),
+            "en"
+        );
     }
 
     #[test]
     fn find_chains_become_find_options() {
         let p = pl("db.orders.find({ a: 1 }, { b: 1 }).sort({ c: -1 }).skip(2).limit(5).hint('a_1').collation({ locale: 'en' })");
-        assert_eq!((p.cmd.get_i64("limit").unwrap(), p.cmd.get_i64("skip").unwrap()), (5, 2));
-        assert!(p.cmd.contains_key("sort") && p.cmd.contains_key("projection") && p.cmd.contains_key("hint") && p.cmd.contains_key("collation"));
+        assert_eq!(
+            (
+                p.cmd.get_i64("limit").unwrap(),
+                p.cmd.get_i64("skip").unwrap()
+            ),
+            (5, 2)
+        );
+        assert!(
+            p.cmd.contains_key("sort")
+                && p.cmd.contains_key("projection")
+                && p.cmd.contains_key("hint")
+                && p.cmd.contains_key("collation")
+        );
         let c = pl("db.orders.find({ a: 1 }).count()");
         assert_eq!(c.shape, Shape::Field("n"));
         assert!(pl("db.orders.find().explain()").cmd.contains_key("explain"));
@@ -896,9 +1215,28 @@ mod docker_tests {
     use zeroize::Zeroizing;
 
     async fn conn() -> MongoConn {
-        let reopen: crate::sql::pg::Reopen = Arc::new(|| Box::pin(async { transport::direct_for(Engine::Mongodb, &Target { address: "127.0.0.1".into(), port: 17017, tls: false, tls_server_name: None }).await }));
+        let reopen: crate::sql::pg::Reopen = Arc::new(|| {
+            Box::pin(async {
+                transport::direct_for(
+                    Engine::Mongodb,
+                    &Target {
+                        address: "127.0.0.1".into(),
+                        port: 17017,
+                        tls: false,
+                        tls_server_name: None,
+                    },
+                )
+                .await
+            })
+        });
         let stream = (reopen)().await.unwrap();
-        let login = MongoLogin { user: "app".into(), password: Some(Zeroizing::new("test-mongo".into())), auth_db: "admin".into(), tls: TlsMode::Off, server_name: "127.0.0.1".into() };
+        let login = MongoLogin {
+            user: "app".into(),
+            password: Some(Zeroizing::new("test-mongo".into())),
+            auth_db: "admin".into(),
+            tls: TlsMode::Off,
+            server_name: "127.0.0.1".into(),
+        };
         MongoConn::connect(stream, login, reopen).await.unwrap().0
     }
 
@@ -908,12 +1246,30 @@ mod docker_tests {
         if plan.class == Class::Read {
             return execute(c, &plan).await;
         }
-        let coll = plan.cmd.get_str(plan.cmd.keys().next().map_or("", String::as_str)).unwrap_or("").to_string();
+        let coll = plan
+            .cmd
+            .get_str(plan.cmd.keys().next().map_or("", String::as_str))
+            .unwrap_or("")
+            .to_string();
         let op = match plan.matches.clone() {
-            Some((coll, filter)) => Parsed::Match { class: plan.class, summary: plan.summary.clone(), cmd: plan.cmd.clone(), coll, filter },
-            None => Parsed::Raw { class: plan.class, summary: plan.summary.clone(), cmd: plan.cmd.clone() },
+            Some((coll, filter)) => Parsed::Match {
+                class: plan.class,
+                summary: plan.summary.clone(),
+                cmd: plan.cmd.clone(),
+                coll,
+                filter,
+            },
+            None => Parsed::Raw {
+                class: plan.class,
+                summary: plan.summary.clone(),
+                cmd: plan.cmd.clone(),
+            },
         };
-        let w = MgWrite { db: plan.db.clone(), coll, op };
+        let w = MgWrite {
+            db: plan.db.clone(),
+            coll,
+            op,
+        };
         Ok(reply_of(&Shape::Doc, run_reply(c, &w).await?))
     }
 
@@ -923,33 +1279,136 @@ mod docker_tests {
         let c = conn().await;
         let _ = go(&c, "d10", "db.dropDatabase()").await;
         go(&c, "d10", r#"db.orders.insertMany([{ _id: 1, status: "open", qty: 3 }, { _id: 2, status: "open", qty: 9 }, { _id: 3, status: "paid", qty: 1, when: ISODate("2025-03-01T10:00:00Z"), big: NumberLong("9007199254740993") }])"#).await.unwrap();
-        assert_eq!(go(&c, "d10", "db.orders.countDocuments({})").await.unwrap().blocks, ["3"]);
-        assert_eq!(go(&c, "d10", "db.orders.find({ status: 'open' }).sort({ qty: -1 }).limit(1)").await.unwrap().blocks.len(), 1);
-        assert!(go(&c, "d10", "db.orders.find({ status: 'open' }).sort({ qty: -1 }).limit(1)").await.unwrap().blocks[0].contains("\"qty\": 9"));
-        assert_eq!(go(&c, "d10", "db.orders.find({ status: 'open' }).count()").await.unwrap().blocks, ["2"]);
-        assert_eq!(go(&c, "d10", "db.orders.distinct('status')").await.unwrap().blocks[0].matches("open").count(), 1);
-        assert!(go(&c, "d10", "db.orders.find({ _id: 3 })").await.unwrap().blocks[0].contains("9007199254740993"));
-        assert!(go(&c, "d10", "db.orders.find({ when: { $gt: ISODate('2025-01-01') } })").await.unwrap().blocks.len() == 1);
-        assert!(go(&c, "d10", "db.orders.find().explain()").await.unwrap().blocks[0].contains("queryPlanner"));
-        assert!(go(&c, "d10", "show collections").await.unwrap().blocks.contains(&"orders".to_string()));
-        assert!(go(&c, "d10", "show dbs").await.unwrap().blocks.contains(&"d10".to_string()));
+        assert_eq!(
+            go(&c, "d10", "db.orders.countDocuments({})")
+                .await
+                .unwrap()
+                .blocks,
+            ["3"]
+        );
+        assert_eq!(
+            go(
+                &c,
+                "d10",
+                "db.orders.find({ status: 'open' }).sort({ qty: -1 }).limit(1)"
+            )
+            .await
+            .unwrap()
+            .blocks
+            .len(),
+            1
+        );
+        assert!(go(
+            &c,
+            "d10",
+            "db.orders.find({ status: 'open' }).sort({ qty: -1 }).limit(1)"
+        )
+        .await
+        .unwrap()
+        .blocks[0]
+            .contains("\"qty\": 9"));
+        assert_eq!(
+            go(&c, "d10", "db.orders.find({ status: 'open' }).count()")
+                .await
+                .unwrap()
+                .blocks,
+            ["2"]
+        );
+        assert_eq!(
+            go(&c, "d10", "db.orders.distinct('status')")
+                .await
+                .unwrap()
+                .blocks[0]
+                .matches("open")
+                .count(),
+            1
+        );
+        assert!(go(&c, "d10", "db.orders.find({ _id: 3 })")
+            .await
+            .unwrap()
+            .blocks[0]
+            .contains("9007199254740993"));
+        assert!(
+            go(
+                &c,
+                "d10",
+                "db.orders.find({ when: { $gt: ISODate('2025-01-01') } })"
+            )
+            .await
+            .unwrap()
+            .blocks
+            .len()
+                == 1
+        );
+        assert!(go(&c, "d10", "db.orders.find().explain()")
+            .await
+            .unwrap()
+            .blocks[0]
+            .contains("queryPlanner"));
+        assert!(go(&c, "d10", "show collections")
+            .await
+            .unwrap()
+            .blocks
+            .contains(&"orders".to_string()));
+        assert!(go(&c, "d10", "show dbs")
+            .await
+            .unwrap()
+            .blocks
+            .contains(&"d10".to_string()));
         assert_eq!(go(&c, "d10", "db.orders.aggregate([{ $group: { _id: '$status', n: { $sum: 1 } } }, { $sort: { _id: 1 } }])").await.unwrap().blocks.len(), 2);
         // The preview the gate shows: how many documents a change reaches.
-        let p = plan(&parse("db.orders.updateMany({ status: 'open' }, { $set: { seen: true } })").unwrap(), "d10").unwrap();
+        let p = plan(
+            &parse("db.orders.updateMany({ status: 'open' }, { $set: { seen: true } })").unwrap(),
+            "d10",
+        )
+        .unwrap();
         let (coll, f) = p.matches.clone().unwrap();
         let (n, sample) = match_preview(&c, "d10", &coll, &f).await.unwrap();
         assert_eq!((n, sample.len()), (2.0, 2));
-        let r = go(&c, "d10", "db.orders.updateMany({ status: 'open' }, { $set: { seen: true } })").await.unwrap();
+        let r = go(
+            &c,
+            "d10",
+            "db.orders.updateMany({ status: 'open' }, { $set: { seen: true } })",
+        )
+        .await
+        .unwrap();
         assert!(r.blocks[0].contains("\"nModified\": 2"), "{}", r.blocks[0]);
-        assert!(go(&c, "d10", "db.orders.deleteOne({ _id: 1 })").await.unwrap().blocks[0].contains("\"n\": 1"));
-        assert!(go(&c, "d10", "db.orders.createIndex({ status: 1 })").await.is_ok());
-        assert!(go(&c, "d10", "db.orders.getIndexes()").await.unwrap().blocks.len() == 2);
-        assert!(go(&c, "d10", "db.orders.dropIndex('status_1')").await.is_ok());
+        assert!(go(&c, "d10", "db.orders.deleteOne({ _id: 1 })")
+            .await
+            .unwrap()
+            .blocks[0]
+            .contains("\"n\": 1"));
+        assert!(go(&c, "d10", "db.orders.createIndex({ status: 1 })")
+            .await
+            .is_ok());
+        assert!(
+            go(&c, "d10", "db.orders.getIndexes()")
+                .await
+                .unwrap()
+                .blocks
+                .len()
+                == 2
+        );
+        assert!(go(&c, "d10", "db.orders.dropIndex('status_1')")
+            .await
+            .is_ok());
         // A server error comes back in its words.
-        assert!(go(&c, "d10", "db.orders.insertOne({ _id: 2 })").await.unwrap_err().message.contains("E11000"));
-        assert!(go(&c, "d10", "db.runCommand({ bogusCommand: 1 })").await.is_err());
+        assert!(go(&c, "d10", "db.orders.insertOne({ _id: 2 })")
+            .await
+            .unwrap_err()
+            .message
+            .contains("E11000"));
+        assert!(go(&c, "d10", "db.runCommand({ bogusCommand: 1 })")
+            .await
+            .is_err());
         go(&c, "d10", "db.orders.deleteMany({})").await.unwrap();
-        assert_eq!(go(&c, "d10", "db.orders.countDocuments({})").await.unwrap().blocks, ["0"]);
+        assert_eq!(
+            go(&c, "d10", "db.orders.countDocuments({})")
+                .await
+                .unwrap()
+                .blocks,
+            ["0"]
+        );
         go(&c, "d10", "db.dropDatabase()").await.unwrap();
     }
 }

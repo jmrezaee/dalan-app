@@ -10,27 +10,47 @@ use super::explain::{ExplainPlan, PlanHint, PlanNode};
 use super::mydb::{lit, q, MyDb, MyEditor, SYSTEM};
 use super::mysql::Flavour;
 use super::pg::SqlTableInfo;
-use super::structure::{safe_expr, StructureColumn, StructureConstraint, StructureIndex, StructureOp, StructureStats, StructureTrigger, TableStructure};
+use super::structure::{
+    safe_expr, StructureColumn, StructureConstraint, StructureIndex, StructureOp, StructureStats,
+    StructureTrigger, TableStructure,
+};
 use crate::error::{AppError, AppResult};
 
 fn s(r: &[Option<String>], i: usize) -> String {
     r.get(i).cloned().flatten().unwrap_or_default()
 }
 fn n(r: &[Option<String>], i: usize) -> f64 {
-    r.get(i).and_then(|v| v.as_deref()).and_then(|v| v.parse().ok()).unwrap_or(0.0)
+    r.get(i)
+        .and_then(|v| v.as_deref())
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.0)
 }
 
 // ---- Structure (S38)
 
 /// Statements for the operations on MySQL or MariaDB. `info` supplies what `modify column` must repeat (it replaces
 /// the whole definition), and which constraint names are foreign keys.
-pub fn statements_my(schema: &str, table: &str, ops: &[StructureOp], rows: Option<i64>, info: &SqlTableInfo, ddl: &str) -> AppResult<(Vec<String>, Vec<String>)> {
+pub fn statements_my(
+    schema: &str,
+    table: &str,
+    ops: &[StructureOp],
+    rows: Option<i64>,
+    info: &SqlTableInfo,
+    ddl: &str,
+) -> AppResult<(Vec<String>, Vec<String>)> {
     if ops.is_empty() {
         return Err(AppError::validation("There are no changes to apply."));
     }
     let t = format!("{}.{}", q(schema), q(table));
-    let col = |n: &str| info.columns.iter().find(|c| c.name == n).ok_or_else(|| AppError::validation(format!("There is no column {n} in this table.")));
-    let rows_text = rows.filter(|r| *r > 0).map_or(String::new(), |r| format!(" (about {r} rows)"));
+    let col = |n: &str| {
+        info.columns
+            .iter()
+            .find(|c| c.name == n)
+            .ok_or_else(|| AppError::validation(format!("There is no column {n} in this table.")))
+    };
+    let rows_text = rows
+        .filter(|r| *r > 0)
+        .map_or(String::new(), |r| format!(" (about {r} rows)"));
     let mut out = vec![];
     let mut warn = vec!["MySQL and MariaDB apply structure changes one statement at a time and can't undo them: if a later one fails, the earlier ones stay.".to_string()];
     // `modify column` replaces the whole definition (default, NOT NULL, AUTO_INCREMENT, ON UPDATE, charset, comment,
@@ -38,23 +58,58 @@ pub fn statements_my(schema: &str, table: &str, ops: &[StructureOp], rows: Optio
     let definition = |name: &str| -> AppResult<(String, String)> {
         let c = col(name)?;
         let prefix = format!("`{}` ", name.replace('`', "``"));
-        let line = ddl.lines().map(str::trim).find(|l| l.starts_with(&prefix)).ok_or_else(|| AppError::validation(format!("Couldn't read the definition of {name}. Change it with a query.")))?;
+        let line = ddl
+            .lines()
+            .map(str::trim)
+            .find(|l| l.starts_with(&prefix))
+            .ok_or_else(|| {
+                AppError::validation(format!(
+                    "Couldn't read the definition of {name}. Change it with a query."
+                ))
+            })?;
         let rest = line[prefix.len()..].trim_end_matches(',').to_string();
         if !rest.starts_with(&c.type_name) {
-            return Err(AppError::validation(format!("Couldn't read the definition of {name}. Change it with a query.")));
+            return Err(AppError::validation(format!(
+                "Couldn't read the definition of {name}. Change it with a query."
+            )));
         }
         Ok((c.type_name.clone(), rest[c.type_name.len()..].to_string()))
     };
-    let modify = |name: &str, ty: &str, tail: &str| -> String { format!("alter table {t} modify column {} {ty}{tail}", q(name)) };
+    let modify = |name: &str, ty: &str, tail: &str| -> String {
+        format!("alter table {t} modify column {} {ty}{tail}", q(name))
+    };
     // Where "NOT NULL" goes: after the type and its charset, before DEFAULT, COMMENT and the other attributes.
     let insert_not_null = |tail: &str| -> String {
-        let at = [" DEFAULT", " COMMENT", " AUTO_INCREMENT", " ON UPDATE", " GENERATED", " AS (", " VISIBLE", " INVISIBLE", " /*"].iter().filter_map(|m| tail.find(m)).min().unwrap_or(tail.len());
+        let at = [
+            " DEFAULT",
+            " COMMENT",
+            " AUTO_INCREMENT",
+            " ON UPDATE",
+            " GENERATED",
+            " AS (",
+            " VISIBLE",
+            " INVISIBLE",
+            " /*",
+        ]
+        .iter()
+        .filter_map(|m| tail.find(m))
+        .min()
+        .unwrap_or(tail.len());
         format!("{} NOT NULL{}", &tail[..at], &tail[at..])
     };
     for op in ops {
         match op {
-            StructureOp::AddColumn { name, type_name, nullable, default } => {
-                let mut x = format!("alter table {t} add column {} {}", q(name), safe_expr("The type", type_name, true)?);
+            StructureOp::AddColumn {
+                name,
+                type_name,
+                nullable,
+                default,
+            } => {
+                let mut x = format!(
+                    "alter table {t} add column {} {}",
+                    q(name),
+                    safe_expr("The type", type_name, true)?
+                );
                 if !nullable {
                     x.push_str(" not null");
                 }
@@ -67,24 +122,53 @@ pub fn statements_my(schema: &str, table: &str, ops: &[StructureOp], rows: Optio
                 out.push(format!("alter table {t} drop column {}", q(name)));
                 warn.push(format!("Dropping {name} deletes everything stored in it."));
             }
-            StructureOp::RenameColumn { from, to } => out.push(format!("alter table {t} rename column {} to {}", q(from), q(to))),
+            StructureOp::RenameColumn { from, to } => out.push(format!(
+                "alter table {t} rename column {} to {}",
+                q(from),
+                q(to)
+            )),
             StructureOp::ChangeType { column, type_name } => {
                 let (_, tail) = definition(column)?;
-                out.push(modify(column, &safe_expr("The type", type_name, true)?, &tail));
+                out.push(modify(
+                    column,
+                    &safe_expr("The type", type_name, true)?,
+                    &tail,
+                ));
                 warn.push(format!("Changing the type of {column} rewrites the table{rows_text}. Its other attributes (default, comment, auto_increment) are kept; a character set or collation stays as it was."));
             }
             StructureOp::SetNullable { column, nullable } => {
                 let (ty, tail) = definition(column)?;
-                let tail = if *nullable { tail.replace(" NOT NULL", "") } else if tail.contains(" NOT NULL") { tail } else { insert_not_null(&tail) };
+                let tail = if *nullable {
+                    tail.replace(" NOT NULL", "")
+                } else if tail.contains(" NOT NULL") {
+                    tail
+                } else {
+                    insert_not_null(&tail)
+                };
                 out.push(modify(column, &ty, &tail));
             }
             StructureOp::SetDefault { column, default } => out.push(match default {
-                Some(d) => format!("alter table {t} alter column {} set default {}", q(column), safe_expr("The default", d, false)?),
+                Some(d) => format!(
+                    "alter table {t} alter column {} set default {}",
+                    q(column),
+                    safe_expr("The default", d, false)?
+                ),
                 None => format!("alter table {t} alter column {} drop default", q(column)),
             }),
-            StructureOp::CreateIndex { name, columns, unique } => {
-                out.push(format!("create {}index {} on {t} ({})", if *unique { "unique " } else { "" }, q(name), columns.iter().map(|c| q(c)).collect::<Vec<_>>().join(", ")));
-                warn.push(format!("Building an index can slow writes to the table while it is built{rows_text}."));
+            StructureOp::CreateIndex {
+                name,
+                columns,
+                unique,
+            } => {
+                out.push(format!(
+                    "create {}index {} on {t} ({})",
+                    if *unique { "unique " } else { "" },
+                    q(name),
+                    columns.iter().map(|c| q(c)).collect::<Vec<_>>().join(", ")
+                ));
+                warn.push(format!(
+                    "Building an index can slow writes to the table while it is built{rows_text}."
+                ));
             }
             StructureOp::DropIndex { name } => out.push(format!("drop index {} on {t}", q(name))),
             StructureOp::DropConstraint { name } => {
@@ -96,10 +180,36 @@ pub fn statements_my(schema: &str, table: &str, ops: &[StructureOp], rows: Optio
                     out.push(format!("alter table {t} drop index {}", q(name)));
                 }
             }
-            StructureOp::AddForeignKey { name, columns, ref_schema, ref_table, ref_columns, on_delete } => {
-                let mut x = format!("alter table {t} add constraint {} foreign key ({}) references {}.{} ({})", q(name), columns.iter().map(|c| q(c)).collect::<Vec<_>>().join(", "), q(ref_schema), q(ref_table), ref_columns.iter().map(|c| q(c)).collect::<Vec<_>>().join(", "));
+            StructureOp::AddForeignKey {
+                name,
+                columns,
+                ref_schema,
+                ref_table,
+                ref_columns,
+                on_delete,
+            } => {
+                let mut x = format!(
+                    "alter table {t} add constraint {} foreign key ({}) references {}.{} ({})",
+                    q(name),
+                    columns.iter().map(|c| q(c)).collect::<Vec<_>>().join(", "),
+                    q(ref_schema),
+                    q(ref_table),
+                    ref_columns
+                        .iter()
+                        .map(|c| q(c))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
                 if let Some(a) = on_delete {
-                    if !["cascade", "restrict", "no action", "set null", "set default"].contains(&a.as_str()) {
+                    if ![
+                        "cascade",
+                        "restrict",
+                        "no action",
+                        "set null",
+                        "set default",
+                    ]
+                    .contains(&a.as_str())
+                    {
                         return Err(AppError::validation("on delete must be cascade, restrict, no action, set null or set default."));
                     }
                     x.push_str(&format!(" on delete {a}"));
@@ -171,9 +281,15 @@ impl MyDb {
     pub async fn structure_commit(&self, stmts: &[String]) -> AppResult<()> {
         let _scope = self.gate.lock().await;
         // A table another transaction holds locked must not make this wait for the server's default (a year).
-        let _ = self.conn.query("SET SESSION lock_wait_timeout = 10", 0).await;
+        let _ = self
+            .conn
+            .query("SET SESSION lock_wait_timeout = 10", 0)
+            .await;
         let out = self.run_structure(stmts).await;
-        let _ = self.conn.query("SET SESSION lock_wait_timeout = DEFAULT", 0).await;
+        let _ = self
+            .conn
+            .query("SET SESSION lock_wait_timeout = DEFAULT", 0)
+            .await;
         // Whatever happened, something may have changed: the completion list is read again.
         *self.catalog.lock().await = None;
         out
@@ -182,8 +298,19 @@ impl MyDb {
     async fn run_structure(&self, stmts: &[String]) -> AppResult<()> {
         for (i, st) in stmts.iter().enumerate() {
             if let Err(e) = self.conn.query(st, 0).await {
-                let done = if i == 0 { "Nothing was changed.".to_string() } else { format!("The first {i} statement{} {} already applied and can't be undone.", if i == 1 { "" } else { "s" }, if i == 1 { "was" } else { "were" }) };
-                return Err(AppError::new(e.code, format!("Statement {} failed: {} {done}", i + 1, e.message)));
+                let done = if i == 0 {
+                    "Nothing was changed.".to_string()
+                } else {
+                    format!(
+                        "The first {i} statement{} {} already applied and can't be undone.",
+                        if i == 1 { "" } else { "s" },
+                        if i == 1 { "was" } else { "were" }
+                    )
+                };
+                return Err(AppError::new(
+                    e.code,
+                    format!("Statement {} failed: {} {done}", i + 1, e.message),
+                ));
             }
         }
         Ok(())
@@ -338,7 +465,10 @@ impl MyDb {
     }
 
     /// A session as the confirmation shows it, and who it belongs to (user and host) for the check at kill time.
-    pub async fn session_info(&self, id: u32) -> AppResult<Option<(String, String, String, String)>> {
+    pub async fn session_info(
+        &self,
+        id: u32,
+    ) -> AppResult<Option<(String, String, String, String)>> {
         if self.own.lock().map(|o| o.contains(&id)).unwrap_or(true) {
             return Ok(None);
         }
@@ -349,12 +479,16 @@ impl MyDb {
     /// `KILL QUERY` or `KILL` of someone else's connection. `owner` is the `user@host` the confirmation showed: a
     /// connection id that now belongs to someone else is left alone. `None`: no such session.
     pub async fn signal_session(&self, id: u32, end: bool, owner: &str) -> AppResult<Option<bool>> {
-        let Some((_, _, _, now)) = self.session_info(id).await? else { return Ok(None) };
+        let Some((_, _, _, now)) = self.session_info(id).await? else {
+            return Ok(None);
+        };
         if now != owner {
             return Ok(None);
         }
         let _scope = self.gate.lock().await;
-        self.conn.query(&format!("KILL {}{id}", if end { "" } else { "QUERY " }), 0).await?;
+        self.conn
+            .query(&format!("KILL {}{id}", if end { "" } else { "QUERY " }), 0)
+            .await?;
         Ok(Some(true))
     }
 }
@@ -363,15 +497,36 @@ impl MyDb {
 
 /// One `EXPLAIN FORMAT=TREE` / `EXPLAIN ANALYZE` line's numbers: `(cost=.. rows=N)` and `(actual time=a..b rows=R loops=L)`.
 fn parse_line(text: &str) -> (String, f64, Option<(f64, f64, f64)>) {
-    let num = |hay: &str, key: &str| -> Option<f64> { hay.split(key).nth(1).map(|t| t.chars().take_while(|c| c.is_ascii_digit() || *c == '.' || *c == 'e' || *c == '+').collect::<String>()).and_then(|t| t.parse().ok()) };
-    let name = text.split("  (cost=").next().unwrap_or(text).split(" (cost=").next().unwrap_or(text).trim().to_string();
+    let num = |hay: &str, key: &str| -> Option<f64> {
+        hay.split(key)
+            .nth(1)
+            .map(|t| {
+                t.chars()
+                    .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == 'e' || *c == '+')
+                    .collect::<String>()
+            })
+            .and_then(|t| t.parse().ok())
+    };
+    let name = text
+        .split("  (cost=")
+        .next()
+        .unwrap_or(text)
+        .split(" (cost=")
+        .next()
+        .unwrap_or(text)
+        .trim()
+        .to_string();
     let first = text.split("(actual").next().unwrap_or(text);
     let est = num(first.split("(cost=").nth(1).unwrap_or(""), "rows=").unwrap_or(0.0);
     let actual = text.split("(actual time=").nth(1).and_then(|a| {
         let (time, rest) = a.split_once(" rows=")?;
         let total: f64 = time.split("..").nth(1)?.parse().ok()?;
         let (rows, loops) = rest.split_once(" loops=")?;
-        Some((total, rows.parse().ok()?, loops.trim_end_matches(')').trim().parse().ok()?))
+        Some((
+            total,
+            rows.parse().ok()?,
+            loops.trim_end_matches(')').trim().parse().ok()?,
+        ))
     });
     (name, est, actual)
 }
@@ -399,8 +554,24 @@ pub fn parse_tree(text: &str) -> AppResult<PlanNode> {
         let (name, est, actual) = parse_line(line.trim_start().trim_start_matches("-> "));
         close(&mut stack, &mut root, level);
         let total = actual.map(|(t, _, l)| t * l);
-        let scan = name.strip_prefix("Table scan on ").map(|t| (String::new(), t.trim().to_string(), String::new()));
-        stack.push((level, PlanNode { name, detail: None, est_rows: est, actual_rows: actual.map(|(_, r, l)| r * l), self_ms: None, pct: None, total_ms: total, children: vec![], loops: actual.map_or(1.0, |(_, _, l)| l), scan }));
+        let scan = name
+            .strip_prefix("Table scan on ")
+            .map(|t| (String::new(), t.trim().to_string(), String::new()));
+        stack.push((
+            level,
+            PlanNode {
+                name,
+                detail: None,
+                est_rows: est,
+                actual_rows: actual.map(|(_, r, l)| r * l),
+                self_ms: None,
+                pct: None,
+                total_ms: total,
+                children: vec![],
+                loops: actual.map_or(1.0, |(_, _, l)| l),
+                scan,
+            },
+        ));
     }
     close(&mut stack, &mut root, 0);
     root.ok_or_else(|| AppError::internal("The server's plan wasn't readable."))
@@ -409,7 +580,9 @@ pub fn parse_tree(text: &str) -> AppResult<PlanNode> {
 fn shares(node: &mut PlanNode, whole: f64) {
     let kids: f64 = node.children.iter().filter_map(|c| c.total_ms).sum();
     node.self_ms = node.total_ms.map(|t| (t - kids).max(0.0));
-    node.pct = node.self_ms.map(|t| if whole > 0.0 { t / whole * 100.0 } else { 0.0 });
+    node.pct = node
+        .self_ms
+        .map(|t| if whole > 0.0 { t / whole * 100.0 } else { 0.0 });
     for c in &mut node.children {
         shares(c, whole);
     }
@@ -423,25 +596,47 @@ fn flat<'a>(n: &'a PlanNode, out: &mut Vec<&'a PlanNode>) {
 fn hint(root: &PlanNode, analyzed: bool) -> Option<PlanHint> {
     let mut all = vec![];
     flat(root, &mut all);
-    let worst = all.iter().filter(|n| n.scan.is_some()).max_by(|a, b| a.self_ms.unwrap_or(a.est_rows).total_cmp(&b.self_ms.unwrap_or(b.est_rows)))?;
-    let big = if analyzed { worst.pct.unwrap_or(0.0) >= 20.0 } else { worst.est_rows >= 10_000.0 };
+    let worst = all.iter().filter(|n| n.scan.is_some()).max_by(|a, b| {
+        a.self_ms
+            .unwrap_or(a.est_rows)
+            .total_cmp(&b.self_ms.unwrap_or(b.est_rows))
+    })?;
+    let big = if analyzed {
+        worst.pct.unwrap_or(0.0) >= 20.0
+    } else {
+        worst.est_rows >= 10_000.0
+    };
     if !big {
         return None;
     }
-    let table = worst.scan.as_ref()?.1.split_whitespace().next()?.to_string();
+    let table = worst
+        .scan
+        .as_ref()?
+        .1
+        .split_whitespace()
+        .next()?
+        .to_string();
     let mut text = format!("The scan on {table} reads every row");
     if let (true, Some(p)) = (analyzed, worst.pct) {
         text.push_str(&format!(" and takes {p:.0}% of the time"));
     }
     text.push_str(". An index on the columns you filter by would let it skip the rest.");
     // The tree names the table as the query wrote it (often an alias), so no ready-made statement is offered.
-    Some(PlanHint { text, actions: vec![] })
+    Some(PlanHint {
+        text,
+        actions: vec![],
+    })
 }
 
 impl MyEditor {
     /// MySQL 8: `EXPLAIN FORMAT=TREE` and `EXPLAIN ANALYZE` (a tree of text). MariaDB: its classic table, one step per
     /// row (no timings: its `ANALYZE` answers in another shape that isn't read yet).
-    pub async fn explain(&self, text: &str, analyze: bool, timeout_ms: u32) -> AppResult<ExplainPlan> {
+    pub async fn explain(
+        &self,
+        text: &str,
+        analyze: bool,
+        timeout_ms: u32,
+    ) -> AppResult<ExplainPlan> {
         let _scope = self.gate.lock().await;
         let _ = self.conn.set_timeout(timeout_ms).await;
         let manual = self.has_txn();
@@ -455,9 +650,18 @@ impl MyEditor {
         let started = std::time::Instant::now();
         let out = match self.conn.flavour {
             Flavour::MySql => {
-                let sql = if analyze { format!("EXPLAIN ANALYZE {text}") } else { format!("EXPLAIN FORMAT=TREE {text}") };
+                let sql = if analyze {
+                    format!("EXPLAIN ANALYZE {text}")
+                } else {
+                    format!("EXPLAIN FORMAT=TREE {text}")
+                };
                 self.conn.query(&sql, 0).await.and_then(|r| {
-                    let tree = r.rows.iter().map(|r| s(r, 0)).collect::<Vec<_>>().join("\n");
+                    let tree = r
+                        .rows
+                        .iter()
+                        .map(|r| s(r, 0))
+                        .collect::<Vec<_>>()
+                        .join("\n");
                     parse_tree(&tree)
                 })
             }
@@ -465,31 +669,73 @@ impl MyEditor {
                 if analyze {
                     Err(AppError::validation("Explain with timings isn't available for MariaDB yet. Plain Explain shows the plan."))
                 } else {
-                    self.conn.query(&format!("EXPLAIN {text}"), 0).await.map(|r| {
-                        let at = |name: &str| r.columns.iter().position(|c| c.name == name);
-                        let children = r
-                            .rows
-                            .iter()
-                            .map(|row| {
-                                let get = |name: &str| at(name).and_then(|i| row[i].clone()).unwrap_or_default();
-                                let table = get("table");
-                                let kind = get("type");
-                                let label = match kind.as_str() {
-                                    "ALL" => "Table scan",
-                                    "index" => "Index scan",
-                                    "range" => "Index range scan",
-                                    "ref" | "ref_or_null" => "Index lookup",
-                                    "eq_ref" => "Unique lookup",
-                                    "const" | "system" => "Constant row",
-                                    _ => "Step",
-                                };
-                                let key = get("key");
-                                let extra = get("Extra");
-                                PlanNode { name: format!("{label} on {table}"), detail: Some([if key.is_empty() { String::new() } else { format!("key: {key}") }, extra].iter().filter(|x| !x.is_empty()).cloned().collect::<Vec<_>>().join(" · ")), est_rows: get("rows").parse().unwrap_or(0.0), actual_rows: None, self_ms: None, pct: None, total_ms: None, children: vec![], loops: 1.0, scan: (kind == "ALL").then(|| (String::new(), table, String::new())) }
-                            })
-                            .collect();
-                        PlanNode { name: "Query".into(), detail: None, est_rows: 0.0, actual_rows: None, self_ms: None, pct: None, total_ms: None, children, loops: 1.0, scan: None }
-                    })
+                    self.conn
+                        .query(&format!("EXPLAIN {text}"), 0)
+                        .await
+                        .map(|r| {
+                            let at = |name: &str| r.columns.iter().position(|c| c.name == name);
+                            let children = r
+                                .rows
+                                .iter()
+                                .map(|row| {
+                                    let get = |name: &str| {
+                                        at(name).and_then(|i| row[i].clone()).unwrap_or_default()
+                                    };
+                                    let table = get("table");
+                                    let kind = get("type");
+                                    let label = match kind.as_str() {
+                                        "ALL" => "Table scan",
+                                        "index" => "Index scan",
+                                        "range" => "Index range scan",
+                                        "ref" | "ref_or_null" => "Index lookup",
+                                        "eq_ref" => "Unique lookup",
+                                        "const" | "system" => "Constant row",
+                                        _ => "Step",
+                                    };
+                                    let key = get("key");
+                                    let extra = get("Extra");
+                                    PlanNode {
+                                        name: format!("{label} on {table}"),
+                                        detail: Some(
+                                            [
+                                                if key.is_empty() {
+                                                    String::new()
+                                                } else {
+                                                    format!("key: {key}")
+                                                },
+                                                extra,
+                                            ]
+                                            .iter()
+                                            .filter(|x| !x.is_empty())
+                                            .cloned()
+                                            .collect::<Vec<_>>()
+                                            .join(" · "),
+                                        ),
+                                        est_rows: get("rows").parse().unwrap_or(0.0),
+                                        actual_rows: None,
+                                        self_ms: None,
+                                        pct: None,
+                                        total_ms: None,
+                                        children: vec![],
+                                        loops: 1.0,
+                                        scan: (kind == "ALL")
+                                            .then(|| (String::new(), table, String::new())),
+                                    }
+                                })
+                                .collect();
+                            PlanNode {
+                                name: "Query".into(),
+                                detail: None,
+                                est_rows: 0.0,
+                                actual_rows: None,
+                                self_ms: None,
+                                pct: None,
+                                total_ms: None,
+                                children,
+                                loops: 1.0,
+                                scan: None,
+                            }
+                        })
                 }
             }
         };
@@ -502,7 +748,14 @@ impl MyEditor {
             shares(&mut root, whole);
         }
         let h = hint(&root, analyze);
-        Ok(ExplainPlan { analyzed: analyze, planning_ms: None, execution_ms: analyze.then(|| started.elapsed().as_secs_f64() * 1000.0), buffers_read: None, hint: h, root })
+        Ok(ExplainPlan {
+            analyzed: analyze,
+            planning_ms: None,
+            execution_ms: analyze.then(|| started.elapsed().as_secs_f64() * 1000.0),
+            buffers_read: None,
+            hint: h,
+            root,
+        })
     }
 }
 
@@ -516,11 +769,17 @@ mod tests {
     fn the_trees_lines_become_nodes_with_their_numbers() {
         let t = parse_tree(TREE).unwrap();
         assert_eq!(t.name, "Limit: 50 row(s)");
-        assert_eq!((t.est_rows, t.actual_rows, t.total_ms), (50.0, Some(50.0), Some(80.0)));
+        assert_eq!(
+            (t.est_rows, t.actual_rows, t.total_ms),
+            (50.0, Some(50.0), Some(80.0))
+        );
         let join = &t.children[0];
         assert_eq!(join.children.len(), 2);
         let scan = &join.children[0];
-        assert_eq!((scan.name.as_str(), scan.est_rows, scan.actual_rows), ("Table scan on o", 1200.0, Some(30877.0)));
+        assert_eq!(
+            (scan.name.as_str(), scan.est_rows, scan.actual_rows),
+            ("Table scan on o", 1200.0, Some(30877.0))
+        );
         assert!(scan.scan.is_some());
         // Loops multiply the actual rows and the time of the inner lookup.
         assert_eq!(join.children[1].actual_rows, Some(30877.0));
@@ -535,7 +794,9 @@ mod tests {
         let scan = &t.children[0].children[0];
         assert!(scan.pct.unwrap() > 70.0);
         let h = hint(&t, true).unwrap();
-        assert!(h.text.starts_with("The scan on o reads every row and takes"));
+        assert!(h
+            .text
+            .starts_with("The scan on o reads every row and takes"));
         assert!(h.actions.is_empty());
     }
 
@@ -544,30 +805,94 @@ mod tests {
         use super::super::pg::{SqlColumn, SqlForeignKey};
         use super::super::values::CellKind;
         let info = SqlTableInfo {
-            columns: vec![SqlColumn { name: "qty".into(), type_name: "int".into(), kind: CellKind::Int, nullable: false, default: Some("1".into()), pk_position: None }],
-            references: vec![SqlForeignKey { name: "fk_o".into(), columns: vec!["o".into()], schema: "s".into(), table: "orders".into(), target_columns: vec!["id".into()] }],
+            columns: vec![SqlColumn {
+                name: "qty".into(),
+                type_name: "int".into(),
+                kind: CellKind::Int,
+                nullable: false,
+                default: Some("1".into()),
+                pk_position: None,
+            }],
+            references: vec![SqlForeignKey {
+                name: "fk_o".into(),
+                columns: vec!["o".into()],
+                schema: "s".into(),
+                table: "orders".into(),
+                target_columns: vec!["id".into()],
+            }],
             referenced_by: vec![],
         };
         let ops = vec![
-            StructureOp::ChangeType { column: "qty".into(), type_name: "bigint".into() },
-            StructureOp::SetNullable { column: "qty".into(), nullable: true },
+            StructureOp::ChangeType {
+                column: "qty".into(),
+                type_name: "bigint".into(),
+            },
+            StructureOp::SetNullable {
+                column: "qty".into(),
+                nullable: true,
+            },
             StructureOp::DropIndex { name: "i".into() },
-            StructureOp::DropConstraint { name: "fk_o".into() },
+            StructureOp::DropConstraint {
+                name: "fk_o".into(),
+            },
             StructureOp::DropConstraint { name: "uq".into() },
-            StructureOp::RenameColumn { from: "a".into(), to: "b".into() },
+            StructureOp::RenameColumn {
+                from: "a".into(),
+                to: "b".into(),
+            },
         ];
         let ddl = "CREATE TABLE `t` (\n  `id` int NOT NULL AUTO_INCREMENT,\n  `qty` int NOT NULL DEFAULT '1' COMMENT 'how many',\n  `s` varchar(40) CHARACTER SET latin1 DEFAULT '2024-01-01',\n  PRIMARY KEY (`id`)\n)";
         let (s, w) = statements_my("shop", "t", &ops, Some(500), &info, ddl).unwrap();
         // The column's own line is kept: its default as the server prints it, its comment.
         assert_eq!(s[0], "alter table `shop`.`t` modify column `qty` bigint NOT NULL DEFAULT '1' COMMENT 'how many'");
-        assert_eq!(s[1], "alter table `shop`.`t` modify column `qty` int DEFAULT '1' COMMENT 'how many'");
+        assert_eq!(
+            s[1],
+            "alter table `shop`.`t` modify column `qty` int DEFAULT '1' COMMENT 'how many'"
+        );
         assert_eq!(s[2], "drop index `i` on `shop`.`t`");
         assert_eq!(s[3], "alter table `shop`.`t` drop foreign key `fk_o`");
         assert_eq!(s[4], "alter table `shop`.`t` drop index `uq`");
-        assert!(w[0].contains("can't undo them") && w.iter().any(|x| x.contains("rewrites the table (about 500 rows)")));
-        assert!(statements_my("s", "t", &[StructureOp::ChangeType { column: "nope".into(), type_name: "int".into() }], None, &info, ddl).is_err());
-        assert!(statements_my("s", "t", &[StructureOp::SetDefault { column: "qty".into(), default: Some("1; drop table t".into()) }], None, &info, ddl).is_err());
+        assert!(
+            w[0].contains("can't undo them")
+                && w.iter()
+                    .any(|x| x.contains("rewrites the table (about 500 rows)"))
+        );
+        assert!(statements_my(
+            "s",
+            "t",
+            &[StructureOp::ChangeType {
+                column: "nope".into(),
+                type_name: "int".into()
+            }],
+            None,
+            &info,
+            ddl
+        )
+        .is_err());
+        assert!(statements_my(
+            "s",
+            "t",
+            &[StructureOp::SetDefault {
+                column: "qty".into(),
+                default: Some("1; drop table t".into())
+            }],
+            None,
+            &info,
+            ddl
+        )
+        .is_err());
         // A column whose line can't be found is not guessed at.
-        assert!(statements_my("s", "t", &[StructureOp::ChangeType { column: "qty".into(), type_name: "int".into() }], None, &info, "CREATE TABLE `t` (\n  `other` int\n)").is_err());
+        assert!(statements_my(
+            "s",
+            "t",
+            &[StructureOp::ChangeType {
+                column: "qty".into(),
+                type_name: "int".into()
+            }],
+            None,
+            &info,
+            "CREATE TABLE `t` (\n  `other` int\n)"
+        )
+        .is_err());
     }
 }

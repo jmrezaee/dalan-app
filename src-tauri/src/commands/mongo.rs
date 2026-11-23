@@ -9,16 +9,20 @@ use tauri::State;
 use crate::dbs::gate::{self, decide, Decision};
 use crate::error::AppResult;
 use crate::mongo::aggregate::{self, CodeLanguage, MgAggRequest, MgAggResult, MgStage};
+use crate::mongo::docs::{self, MgCount, MgDocOp, MgFindRequest, MgNode, MgPage, MgWrite, Parsed};
 use crate::mongo::schema::{self, MgIndex, MgIndexOp, MgSchema, MgValidation, MgValidationCheck};
 use crate::mongo::shell::{self, ShellReply};
-use crate::mongo::docs::{self, MgCount, MgDocOp, MgFindRequest, MgNode, MgPage, MgWrite, Parsed};
 use crate::sql;
 use crate::state::AppState;
 
 /// `[]` lists databases, `[db]` its collections and views.
 #[tauri::command]
 #[specta::specta]
-pub async fn mg_tree(state: State<'_, AppState>, conn_id: String, path: Vec<String>) -> AppResult<Vec<MgNode>> {
+pub async fn mg_tree(
+    state: State<'_, AppState>,
+    conn_id: String,
+    path: Vec<String>,
+) -> AppResult<Vec<MgNode>> {
     state.require_unlocked()?;
     docs::tree(&*state.sql.mongo(&conn_id).await?, &path).await
 }
@@ -26,7 +30,11 @@ pub async fn mg_tree(state: State<'_, AppState>, conn_id: String, path: Vec<Stri
 /// One page of documents.
 #[tauri::command]
 #[specta::specta]
-pub async fn mg_find(state: State<'_, AppState>, conn_id: String, request: MgFindRequest) -> AppResult<MgPage> {
+pub async fn mg_find(
+    state: State<'_, AppState>,
+    conn_id: String,
+    request: MgFindRequest,
+) -> AppResult<MgPage> {
     state.require_unlocked()?;
     docs::find(&*state.sql.mongo(&conn_id).await?, &request).await
 }
@@ -34,7 +42,13 @@ pub async fn mg_find(state: State<'_, AppState>, conn_id: String, request: MgFin
 /// The collection's size (an estimate with no filter) or the exact number of matches.
 #[tauri::command]
 #[specta::specta]
-pub async fn mg_count(state: State<'_, AppState>, conn_id: String, db: String, coll: String, filter: String) -> AppResult<MgCount> {
+pub async fn mg_count(
+    state: State<'_, AppState>,
+    conn_id: String,
+    db: String,
+    coll: String,
+    filter: String,
+) -> AppResult<MgCount> {
     state.require_unlocked()?;
     docs::count(&*state.sql.mongo(&conn_id).await?, &db, &coll, &filter).await
 }
@@ -42,7 +56,13 @@ pub async fn mg_count(state: State<'_, AppState>, conn_id: String, db: String, c
 /// One whole document by `_id` in canonical extended JSON, for the editor.
 #[tauri::command]
 #[specta::specta]
-pub async fn mg_doc_get(state: State<'_, AppState>, conn_id: String, db: String, coll: String, id: String) -> AppResult<String> {
+pub async fn mg_doc_get(
+    state: State<'_, AppState>,
+    conn_id: String,
+    db: String,
+    coll: String,
+    id: String,
+) -> AppResult<String> {
     state.require_unlocked()?;
     docs::get(&*state.sql.mongo(&conn_id).await?, &db, &coll, &id).await
 }
@@ -70,32 +90,75 @@ async fn hold(state: &AppState, conn_id: &str, mut write: MgWrite) -> AppResult<
         return Err(gate::read_only_error(&target.name));
     }
     let conn = state.sql.mongo(conn_id).await?;
-    let mut sample = docs::current(&conn, &write).await?.map(|d| docs::canonical(&d));
+    let mut sample = docs::current(&conn, &write)
+        .await?
+        .map(|d| docs::canonical(&d));
     // A change by filter says how many documents it reaches and shows a few of them.
-    if let Parsed::Match { coll, filter, summary, .. } = &mut write.op {
+    if let Parsed::Match {
+        coll,
+        filter,
+        summary,
+        ..
+    } = &mut write.op
+    {
         let (n, shown) = docs::match_preview(&conn, &write.db, coll, filter).await?;
-        summary.push_str(&format!(" It matches {} document{} now.", n as u64, if n as u64 == 1 { "" } else { "s" }));
+        summary.push_str(&format!(
+            " It matches {} document{} now.",
+            n as u64,
+            if n as u64 == 1 { "" } else { "s" }
+        ));
         if !shown.is_empty() {
             sample = Some(shown.join("\n"));
         }
     }
     let summary = docs::describe(&write);
     let id = state.sql.mongo_pending.put(conn_id, class, write)?;
-    Ok(MgPending { id, db_name: target.name, environment: target.environment, summary, sample, level: if decision == Decision::Typed { "typed".into() } else { "confirm".into() } })
+    Ok(MgPending {
+        id,
+        db_name: target.name,
+        environment: target.environment,
+        summary,
+        sample,
+        level: if decision == Decision::Typed {
+            "typed".into()
+        } else {
+            "confirm".into()
+        },
+    })
 }
 
 /// Parses and holds one document write. A Read-only database refuses here, before anything is held.
 #[tauri::command]
 #[specta::specta]
-pub async fn mg_doc_prepare(state: State<'_, AppState>, conn_id: String, db: String, coll: String, op: MgDocOp) -> AppResult<MgPending> {
+pub async fn mg_doc_prepare(
+    state: State<'_, AppState>,
+    conn_id: String,
+    db: String,
+    coll: String,
+    op: MgDocOp,
+) -> AppResult<MgPending> {
     state.require_unlocked()?;
-    hold(&state, &conn_id, MgWrite { db, coll, op: Parsed::parse(&op)? }).await
+    hold(
+        &state,
+        &conn_id,
+        MgWrite {
+            db,
+            coll,
+            op: Parsed::parse(&op)?,
+        },
+    )
+    .await
 }
 
 /// Runs what `mg_doc_prepare` held, once, after the mode is asked again.
 #[tauri::command]
 #[specta::specta]
-pub async fn mg_doc_commit(state: State<'_, AppState>, conn_id: String, pending_id: String, typed_name: Option<String>) -> AppResult<u32> {
+pub async fn mg_doc_commit(
+    state: State<'_, AppState>,
+    conn_id: String,
+    pending_id: String,
+    typed_name: Option<String>,
+) -> AppResult<u32> {
     state.require_unlocked()?;
     let db_id = state.sql.db_id(&conn_id)?;
     let target = sql::gate_target(&state.store(), &db_id).await?;
@@ -111,7 +174,11 @@ pub async fn mg_doc_commit(state: State<'_, AppState>, conn_id: String, pending_
 
 #[tauri::command]
 #[specta::specta]
-pub fn mg_doc_discard(state: State<'_, AppState>, conn_id: String, pending_id: String) -> AppResult<()> {
+pub fn mg_doc_discard(
+    state: State<'_, AppState>,
+    conn_id: String,
+    pending_id: String,
+) -> AppResult<()> {
     let _ = state.sql.mongo_pending.take(&conn_id, &pending_id);
     Ok(())
 }
@@ -121,7 +188,11 @@ pub fn mg_doc_discard(state: State<'_, AppState>, conn_id: String, pending_id: S
 /// The output of the pipeline up to a stage. Reads only: a `$out` or `$merge` ends the run before it.
 #[tauri::command]
 #[specta::specta]
-pub async fn mg_aggregate(state: State<'_, AppState>, conn_id: String, request: MgAggRequest) -> AppResult<MgAggResult> {
+pub async fn mg_aggregate(
+    state: State<'_, AppState>,
+    conn_id: String,
+    request: MgAggRequest,
+) -> AppResult<MgAggResult> {
     state.require_unlocked()?;
     aggregate::run(&*state.sql.mongo(&conn_id).await?, &request).await
 }
@@ -129,16 +200,36 @@ pub async fn mg_aggregate(state: State<'_, AppState>, conn_id: String, request: 
 /// Holds a pipeline that ends in `$out` or `$merge` (a write) for its confirmation.
 #[tauri::command]
 #[specta::specta]
-pub async fn mg_agg_prepare(state: State<'_, AppState>, conn_id: String, request: MgAggRequest) -> AppResult<MgPending> {
+pub async fn mg_agg_prepare(
+    state: State<'_, AppState>,
+    conn_id: String,
+    request: MgAggRequest,
+) -> AppResult<MgPending> {
     state.require_unlocked()?;
     let op = aggregate::write_command(&request)?;
-    hold(&state, &conn_id, MgWrite { db: request.db, coll: request.coll, op }).await
+    hold(
+        &state,
+        &conn_id,
+        MgWrite {
+            db: request.db,
+            coll: request.coll,
+            op,
+        },
+    )
+    .await
 }
 
 /// Holds `createView` for the pipeline.
 #[tauri::command]
 #[specta::specta]
-pub async fn mg_view_prepare(state: State<'_, AppState>, conn_id: String, db: String, coll: String, name: String, stages: Vec<MgStage>) -> AppResult<MgPending> {
+pub async fn mg_view_prepare(
+    state: State<'_, AppState>,
+    conn_id: String,
+    db: String,
+    coll: String,
+    name: String,
+    stages: Vec<MgStage>,
+) -> AppResult<MgPending> {
     state.require_unlocked()?;
     let op = aggregate::view_command(&db, &coll, &name, &stages)?;
     hold(&state, &conn_id, MgWrite { db, coll, op }).await
@@ -147,7 +238,11 @@ pub async fn mg_view_prepare(state: State<'_, AppState>, conn_id: String, db: St
 /// The pipeline as code to paste (mongosh, Node.js, Python) or as JSON.
 #[tauri::command]
 #[specta::specta]
-pub fn mg_pipeline_code(coll: String, stages: Vec<MgStage>, language: CodeLanguage) -> AppResult<String> {
+pub fn mg_pipeline_code(
+    coll: String,
+    stages: Vec<MgStage>,
+    language: CodeLanguage,
+) -> AppResult<String> {
     aggregate::code(&coll, &stages, language)
 }
 
@@ -155,14 +250,25 @@ pub fn mg_pipeline_code(coll: String, stages: Vec<MgStage>, language: CodeLangua
 
 #[tauri::command]
 #[specta::specta]
-pub async fn mg_schema(state: State<'_, AppState>, conn_id: String, db: String, coll: String, sample: u32) -> AppResult<MgSchema> {
+pub async fn mg_schema(
+    state: State<'_, AppState>,
+    conn_id: String,
+    db: String,
+    coll: String,
+    sample: u32,
+) -> AppResult<MgSchema> {
     state.require_unlocked()?;
     schema::sample(&*state.sql.mongo(&conn_id).await?, &db, &coll, sample).await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn mg_indexes(state: State<'_, AppState>, conn_id: String, db: String, coll: String) -> AppResult<Vec<MgIndex>> {
+pub async fn mg_indexes(
+    state: State<'_, AppState>,
+    conn_id: String,
+    db: String,
+    coll: String,
+) -> AppResult<Vec<MgIndex>> {
     state.require_unlocked()?;
     schema::indexes(&*state.sql.mongo(&conn_id).await?, &db, &coll).await
 }
@@ -170,7 +276,13 @@ pub async fn mg_indexes(state: State<'_, AppState>, conn_id: String, db: String,
 /// Holds an index change: creating asks, dropping asks for the database's name.
 #[tauri::command]
 #[specta::specta]
-pub async fn mg_index_prepare(state: State<'_, AppState>, conn_id: String, db: String, coll: String, op: MgIndexOp) -> AppResult<MgPending> {
+pub async fn mg_index_prepare(
+    state: State<'_, AppState>,
+    conn_id: String,
+    db: String,
+    coll: String,
+    op: MgIndexOp,
+) -> AppResult<MgPending> {
     state.require_unlocked()?;
     let held = schema::index_command(&coll, &op)?;
     hold(&state, &conn_id, MgWrite { db, coll, op: held }).await
@@ -178,7 +290,12 @@ pub async fn mg_index_prepare(state: State<'_, AppState>, conn_id: String, db: S
 
 #[tauri::command]
 #[specta::specta]
-pub async fn mg_validation(state: State<'_, AppState>, conn_id: String, db: String, coll: String) -> AppResult<MgValidation> {
+pub async fn mg_validation(
+    state: State<'_, AppState>,
+    conn_id: String,
+    db: String,
+    coll: String,
+) -> AppResult<MgValidation> {
     state.require_unlocked()?;
     schema::validation(&*state.sql.mongo(&conn_id).await?, &db, &coll).await
 }
@@ -186,14 +303,28 @@ pub async fn mg_validation(state: State<'_, AppState>, conn_id: String, db: Stri
 /// How many existing documents break these rules.
 #[tauri::command]
 #[specta::specta]
-pub async fn mg_validation_check(state: State<'_, AppState>, conn_id: String, db: String, coll: String, validator: String) -> AppResult<MgValidationCheck> {
+pub async fn mg_validation_check(
+    state: State<'_, AppState>,
+    conn_id: String,
+    db: String,
+    coll: String,
+    validator: String,
+) -> AppResult<MgValidationCheck> {
     state.require_unlocked()?;
     schema::check(&*state.sql.mongo(&conn_id).await?, &db, &coll, &validator).await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn mg_validation_prepare(state: State<'_, AppState>, conn_id: String, db: String, coll: String, validator: String, level: String, action: String) -> AppResult<MgPending> {
+pub async fn mg_validation_prepare(
+    state: State<'_, AppState>,
+    conn_id: String,
+    db: String,
+    coll: String,
+    validator: String,
+    level: String,
+    action: String,
+) -> AppResult<MgPending> {
     state.require_unlocked()?;
     let op = schema::validation_command(&coll, &validator, &level, &action)?;
     hold(&state, &conn_id, MgWrite { db, coll, op }).await
@@ -213,11 +344,23 @@ pub struct MgShellResult {
 /// One shell line. Reads run at once; a change is parsed, classified and held like every other change.
 #[tauri::command]
 #[specta::specta]
-pub async fn mg_shell(state: State<'_, AppState>, conn_id: String, db: String, line: String) -> AppResult<MgShellResult> {
+pub async fn mg_shell(
+    state: State<'_, AppState>,
+    conn_id: String,
+    db: String,
+    line: String,
+) -> AppResult<MgShellResult> {
     state.require_unlocked()?;
     let stmt = shell::parse(&line)?;
     if let shell::Stmt::Use(name) = &stmt {
-        return Ok(MgShellResult { db: name.clone(), reply: Some(ShellReply { blocks: vec![format!("switched to db {name}")], note: None }), pending: None });
+        return Ok(MgShellResult {
+            db: name.clone(),
+            reply: Some(ShellReply {
+                blocks: vec![format!("switched to db {name}")],
+                note: None,
+            }),
+            pending: None,
+        });
     }
     let plan = shell::plan(&stmt, &db)?;
     let db_id = state.sql.db_id(&conn_id)?;
@@ -226,16 +369,47 @@ pub async fn mg_shell(state: State<'_, AppState>, conn_id: String, db: String, l
         Decision::Refuse => Err(gate::read_only_error(&target.name)),
         Decision::Run => {
             let reply = shell::execute(&*state.sql.mongo(&conn_id).await?, &plan).await?;
-            Ok(MgShellResult { db, reply: Some(reply), pending: None })
+            Ok(MgShellResult {
+                db,
+                reply: Some(reply),
+                pending: None,
+            })
         }
         Decision::Confirm | Decision::Typed => {
             let op = match plan.matches.clone() {
-                Some((coll, filter)) => Parsed::Match { class: plan.class, summary: plan.summary.clone(), cmd: plan.cmd.clone(), coll, filter },
-                None => Parsed::Raw { class: plan.class, summary: plan.summary.clone(), cmd: plan.cmd.clone() },
+                Some((coll, filter)) => Parsed::Match {
+                    class: plan.class,
+                    summary: plan.summary.clone(),
+                    cmd: plan.cmd.clone(),
+                    coll,
+                    filter,
+                },
+                None => Parsed::Raw {
+                    class: plan.class,
+                    summary: plan.summary.clone(),
+                    cmd: plan.cmd.clone(),
+                },
             };
-            let coll = plan.cmd.get_str(plan.cmd.keys().next().map_or("", String::as_str)).unwrap_or("").to_string();
-            let pending = hold(&state, &conn_id, MgWrite { db: plan.db.clone(), coll, op }).await?;
-            Ok(MgShellResult { db, reply: None, pending: Some(pending) })
+            let coll = plan
+                .cmd
+                .get_str(plan.cmd.keys().next().map_or("", String::as_str))
+                .unwrap_or("")
+                .to_string();
+            let pending = hold(
+                &state,
+                &conn_id,
+                MgWrite {
+                    db: plan.db.clone(),
+                    coll,
+                    op,
+                },
+            )
+            .await?;
+            Ok(MgShellResult {
+                db,
+                reply: None,
+                pending: Some(pending),
+            })
         }
     }
 }
@@ -243,7 +417,12 @@ pub async fn mg_shell(state: State<'_, AppState>, conn_id: String, db: String, l
 /// Runs what `mg_shell` held, after the mode is asked again (and the database's name, for a dangerous command).
 #[tauri::command]
 #[specta::specta]
-pub async fn mg_shell_commit(state: State<'_, AppState>, conn_id: String, pending_id: String, typed_name: Option<String>) -> AppResult<ShellReply> {
+pub async fn mg_shell_commit(
+    state: State<'_, AppState>,
+    conn_id: String,
+    pending_id: String,
+    typed_name: Option<String>,
+) -> AppResult<ShellReply> {
     state.require_unlocked()?;
     let db_id = state.sql.db_id(&conn_id)?;
     let target = sql::gate_target(&state.store(), &db_id).await?;
@@ -276,24 +455,41 @@ pub async fn mg_export(
     state.require_unlocked()?;
     docs::parse_doc(&filter, "The filter")?;
     let conn = state.sql.mongo(&conn_id).await?;
-    let Some(path) = crate::commands::sql::pick_save(&app, format!("{db}.{coll}.jsonl")).await? else {
+    let Some(path) = crate::commands::sql::pick_save(&app, format!("{db}.{coll}.jsonl")).await?
+    else {
         return Ok(None);
     };
     // The file first: a failure here must not leave a stop flag behind.
-    let file = std::fs::File::create(&path).map_err(|e| crate::error::AppError::validation(format!("Couldn't create that file: {e}")))?;
+    let file = std::fs::File::create(&path).map_err(|e| {
+        crate::error::AppError::validation(format!("Couldn't create that file: {e}"))
+    })?;
     let stop = state.sql.begin_transfer(&transfer_id);
     let mut out = std::io::BufWriter::new(file);
-    let result = docs::export(&conn, &db, &coll, &filter, &mut out, &stop, &|rows, bytes| {
-        let _ = progress.send(crate::sql::transfer::TransferProgress { rows, bytes });
-    })
+    let result = docs::export(
+        &conn,
+        &db,
+        &coll,
+        &filter,
+        &mut out,
+        &stop,
+        &|rows, bytes| {
+            let _ = progress.send(crate::sql::transfer::TransferProgress { rows, bytes });
+        },
+    )
     .await;
     state.sql.end_transfer(&transfer_id);
     let flushed = std::io::Write::flush(&mut out);
     drop(out);
     match (result, flushed) {
         (Ok(rows), Ok(())) => {
-            let bytes = std::fs::metadata(&path).map(|m| m.len() as f64).unwrap_or(0.0);
-            Ok(Some(crate::commands::sql::TransferDone { path: path.display().to_string(), rows, bytes }))
+            let bytes = std::fs::metadata(&path)
+                .map(|m| m.len() as f64)
+                .unwrap_or(0.0);
+            Ok(Some(crate::commands::sql::TransferDone {
+                path: path.display().to_string(),
+                rows,
+                bytes,
+            }))
         }
         (Err(e), _) => {
             // An export that did not finish is not a file to keep.

@@ -160,7 +160,9 @@ impl PgConn {
         let started = Instant::now();
         // The whole script is looked at before any of it runs. Statements that aren't reads need the gate's yes,
         // which the caller passes as `allow_write`; without it, a refused statement means nothing runs.
-        let all_reads = pieces.iter().all(|p| classify::classify(&p.text) == Class::Read);
+        let all_reads = pieces
+            .iter()
+            .all(|p| classify::classify(&p.text) == Class::Read);
         if !all_reads && !allow_write {
             let (i, class) = pieces
                 .iter()
@@ -171,9 +173,13 @@ impl PgConn {
             emit(SqlRunEvent::Refused {
                 index: i as u32,
                 class,
-                message: "This changes data or structure and hasn't been confirmed. Nothing was sent.".into(),
+                message:
+                    "This changes data or structure and hasn't been confirmed. Nothing was sent."
+                        .into(),
             });
-            emit(SqlRunEvent::Finished { elapsed_ms: ms(started) });
+            emit(SqlRunEvent::Finished {
+                elapsed_ms: ms(started),
+            });
             return Ok(());
         }
         let _scope = self.scope().await;
@@ -182,11 +188,16 @@ impl PgConn {
         // Three footings: a manual transaction (nothing is wrapped; it is the person's), reads only (one read-only
         // transaction, always rolled back), and writes in auto-commit (each statement stands alone).
         if manual {
-            let _ = self.client.batch_execute(&format!("SET LOCAL statement_timeout = {timeout}")).await;
+            let _ = self
+                .client
+                .batch_execute(&format!("SET LOCAL statement_timeout = {timeout}"))
+                .await;
         } else if all_reads {
             self.dirty.store(true, Ordering::SeqCst);
             self.client
-                .batch_execute(&format!("BEGIN READ ONLY; SET LOCAL statement_timeout = {timeout}"))
+                .batch_execute(&format!(
+                    "BEGIN READ ONLY; SET LOCAL statement_timeout = {timeout}"
+                ))
                 .await
                 .map_err(|e| map_error(&e))?;
         } else {
@@ -213,11 +224,20 @@ impl PgConn {
             // A query in auto-commit needs a transaction for its cursor; it commits (or rolls back) with it.
             let wrap = !manual && !all_reads && classify::is_query(&p.text);
             if wrap {
-                self.client.batch_execute("BEGIN").await.map_err(|e| map_error(&e))?;
+                self.client
+                    .batch_execute("BEGIN")
+                    .await
+                    .map_err(|e| map_error(&e))?;
                 self.dirty.store(true, Ordering::SeqCst);
             }
             let out = self.run_one(i as u32, p, opts, cancel, emit).await;
-            if wrap && self.client.batch_execute(if out.is_ok() { "COMMIT" } else { "ROLLBACK" }).await.is_ok() {
+            if wrap
+                && self
+                    .client
+                    .batch_execute(if out.is_ok() { "COMMIT" } else { "ROLLBACK" })
+                    .await
+                    .is_ok()
+            {
                 self.dirty.store(false, Ordering::SeqCst);
             }
             if manual {
@@ -229,7 +249,11 @@ impl PgConn {
                 }
             }
             if let Err((kind, message)) = out {
-                emit(SqlRunEvent::Failed { index: i as u32, kind, message });
+                emit(SqlRunEvent::Failed {
+                    index: i as u32,
+                    kind,
+                    message,
+                });
                 break;
             }
         }
@@ -237,7 +261,9 @@ impl PgConn {
         if !manual && all_reads && self.client.batch_execute("ROLLBACK").await.is_ok() {
             self.dirty.store(false, Ordering::SeqCst);
         }
-        emit(SqlRunEvent::Finished { elapsed_ms: ms(started) });
+        emit(SqlRunEvent::Finished {
+            elapsed_ms: ms(started),
+        });
         Ok(())
     }
 
@@ -250,14 +276,22 @@ impl PgConn {
         let manual = self.txn.lock().map(|t| t.is_some()).unwrap_or(false);
         let mut out = Vec::new();
         for p in pieces {
-            let first = p.text.split_whitespace().next().unwrap_or("").to_ascii_uppercase();
+            let first = p
+                .text
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .to_ascii_uppercase();
             if !matches!(first.as_str(), "INSERT" | "UPDATE" | "DELETE" | "MERGE") {
                 out.push(None);
                 continue;
             }
             // Trying it out would do for real what a rollback can't undo (a session killed, a remote call made).
             if classify::calls_effectful(&p.text) {
-                out.push(Some("Not tried out: it calls a function that acts outside the transaction.".to_string()));
+                out.push(Some(
+                    "Not tried out: it calls a function that acts outside the transaction."
+                        .to_string(),
+                ));
                 continue;
             }
             let (open, close) = if manual {
@@ -266,22 +300,38 @@ impl PgConn {
                 ("BEGIN", "ROLLBACK")
             };
             self.dirty.store(!manual, Ordering::SeqCst);
-            self.client.batch_execute(open).await.map_err(|e| map_error(&e))?;
-            let _ = self.client.batch_execute("SET LOCAL statement_timeout = 10000").await;
+            self.client
+                .batch_execute(open)
+                .await
+                .map_err(|e| map_error(&e))?;
+            let _ = self
+                .client
+                .batch_execute("SET LOCAL statement_timeout = 10000")
+                .await;
             let r = self.client.execute(&p.text, &[]).await;
             let _ = self.client.batch_execute(close).await;
             if manual {
-                let _ = self.client.batch_execute("RELEASE SAVEPOINT dalan_dry").await;
+                let _ = self
+                    .client
+                    .batch_execute("RELEASE SAVEPOINT dalan_dry")
+                    .await;
             } else {
                 self.dirty.store(false, Ordering::SeqCst);
             }
             out.push(Some(match r {
                 Ok(1) => "This will change 1 row.".to_string(),
                 Ok(n) => format!("This will change {n} rows."),
-                Err(e) if e.as_db_error().is_some_and(|d| d.message().contains("statement timeout")) => {
+                Err(e)
+                    if e.as_db_error()
+                        .is_some_and(|d| d.message().contains("statement timeout")) =>
+                {
                     "Too big to count here: it ran for more than ten seconds.".to_string()
                 }
-                Err(e) => format!("The server says it would fail: {}", e.as_db_error().map_or_else(|| e.to_string(), |d| d.message().to_string())),
+                Err(e) => format!(
+                    "The server says it would fail: {}",
+                    e.as_db_error()
+                        .map_or_else(|| e.to_string(), |d| d.message().to_string())
+                ),
             }));
         }
         Ok(out)
@@ -300,9 +350,16 @@ impl PgConn {
                 "A transaction is already open in this editor.",
             ));
         }
-        self.client.batch_execute("BEGIN").await.map_err(|e| map_error(&e))?;
+        self.client
+            .batch_execute("BEGIN")
+            .await
+            .map_err(|e| map_error(&e))?;
         if let Ok(mut t) = self.txn.lock() {
-            *t = Some(TxnInfo { since: Instant::now(), statements: 0, failed: false });
+            *t = Some(TxnInfo {
+                since: Instant::now(),
+                statements: 0,
+                failed: false,
+            });
         }
         Ok(())
     }
@@ -330,7 +387,13 @@ impl PgConn {
     pub async fn txn_state(&self) -> AppResult<TxnState> {
         let info = self.txn.lock().ok().and_then(|t| t.clone());
         let Some(info) = info else {
-            return Ok(TxnState { active: false, statements: 0, age_s: 0, failed: false, locks: 0 });
+            return Ok(TxnState {
+                active: false,
+                statements: 0,
+                age_s: 0,
+                failed: false,
+                locks: 0,
+            });
         };
         let mut locks = 0u32;
         if !info.failed {
@@ -389,7 +452,10 @@ impl PgConn {
             .collect();
         let kinds: Vec<CellKind> = cols.iter().map(|c| c.kind).collect();
         if !cols.is_empty() {
-            emit(SqlRunEvent::Columns { index, columns: cols });
+            emit(SqlRunEvent::Columns {
+                index,
+                columns: cols,
+            });
         }
         let limit = opts.limit;
         let mut sent = 0u32;
@@ -404,14 +470,23 @@ impl PgConn {
         if kinds.is_empty() && !classify::is_query(&p.text) {
             // Changes something and returns no rows: the server's own count says how many it touched.
             let n = self.client.execute(&p.text, &[]).await.map_err(fail)?;
-            emit(SqlRunEvent::Done { index, rows: 0, more: false, elapsed_ms: ms(t), affected: Some(n as f64) });
+            emit(SqlRunEvent::Done {
+                index,
+                rows: 0,
+                more: false,
+                elapsed_ms: ms(t),
+                affected: Some(n as f64),
+            });
             return Ok(());
         }
         if !kinds.is_empty() && classify::is_query(&p.text) {
             // The text goes in on its own line: a trailing `-- comment` can't swallow what follows.
             // The extended protocol takes exactly one statement, whatever the two lexers think a `;` is.
             self.client
-                .execute(&format!("DECLARE dalan_cur NO SCROLL CURSOR FOR\n{}", p.text), &[])
+                .execute(
+                    &format!("DECLARE dalan_cur NO SCROLL CURSOR FOR\n{}", p.text),
+                    &[],
+                )
                 .await
                 .map_err(fail)?;
             loop {
@@ -419,7 +494,11 @@ impl PgConn {
                     return Err((FailKind::Cancelled, "Stopped.".into()));
                 }
                 // One more than the limit tells whether the limit cut the result off.
-                let want = if limit == 0 { BATCH } else { BATCH.min(limit.saturating_add(1) - sent) };
+                let want = if limit == 0 {
+                    BATCH
+                } else {
+                    BATCH.min(limit.saturating_add(1) - sent)
+                };
                 let msgs = self
                     .client
                     .simple_query(&format!("FETCH FORWARD {want} FROM dalan_cur"))
@@ -445,7 +524,10 @@ impl PgConn {
                     break;
                 }
             }
-            self.client.batch_execute("CLOSE dalan_cur").await.map_err(fail)?;
+            self.client
+                .batch_execute("CLOSE dalan_cur")
+                .await
+                .map_err(fail)?;
         } else {
             let msgs = self.client.simple_query(&p.text).await.map_err(fail)?;
             let all: Vec<Vec<SqlCell>> = msgs
@@ -455,14 +537,27 @@ impl PgConn {
                     _ => None,
                 })
                 .collect();
-            let keep = if limit == 0 { all.len() } else { all.len().min(limit as usize) };
+            let keep = if limit == 0 {
+                all.len()
+            } else {
+                all.len().min(limit as usize)
+            };
             more = keep < all.len();
             for chunk in all[..keep].chunks(BATCH as usize) {
-                emit(SqlRunEvent::Rows { index, rows: chunk.to_vec() });
+                emit(SqlRunEvent::Rows {
+                    index,
+                    rows: chunk.to_vec(),
+                });
             }
             sent = keep as u32;
         }
-        emit(SqlRunEvent::Done { index, rows: sent, more, elapsed_ms: ms(t), affected: None });
+        emit(SqlRunEvent::Done {
+            index,
+            rows: sent,
+            more,
+            elapsed_ms: ms(t),
+            affected: None,
+        });
         Ok(())
     }
 
@@ -523,7 +618,12 @@ pub fn pieces_for(text: &str, mode: RunMode, cursor: Option<u32>) -> AppResult<V
     pieces_for_d(text, mode, cursor, classify::Dialect::Pg)
 }
 
-pub fn pieces_for_d(text: &str, mode: RunMode, cursor: Option<u32>, d: classify::Dialect) -> AppResult<Vec<Piece>> {
+pub fn pieces_for_d(
+    text: &str,
+    mode: RunMode,
+    cursor: Option<u32>,
+    d: classify::Dialect,
+) -> AppResult<Vec<Piece>> {
     let all = classify::split_for(text, d);
     if all.is_empty() {
         return Err(AppError::validation("There is nothing to run."));
@@ -531,10 +631,12 @@ pub fn pieces_for_d(text: &str, mode: RunMode, cursor: Option<u32>, d: classify:
     Ok(match mode {
         RunMode::All | RunMode::Selection => all,
         // The editor counts UTF-16 units, the splitter counts characters: an emoji before the caret is two of one.
-        RunMode::Current => classify::at_cursor(&all, utf16_to_char(text, cursor.unwrap_or(0) as usize))
-            .cloned()
-            .into_iter()
-            .collect(),
+        RunMode::Current => {
+            classify::at_cursor(&all, utf16_to_char(text, cursor.unwrap_or(0) as usize))
+                .cloned()
+                .into_iter()
+                .collect()
+        }
     })
 }
 

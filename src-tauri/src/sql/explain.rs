@@ -60,7 +60,10 @@ pub struct ExplainPlan {
 /// The raw text of a `json` column.
 struct RawJson(String);
 impl<'a> FromSql<'a> for RawJson {
-    fn from_sql(_: &PgType, raw: &'a [u8]) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+    fn from_sql(
+        _: &PgType,
+        raw: &'a [u8],
+    ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
         Ok(RawJson(String::from_utf8(raw.to_vec())?))
     }
     fn accepts(ty: &PgType) -> bool {
@@ -84,34 +87,61 @@ fn node(v: &Value, analyzed: bool) -> PlanNode {
         (Some(r), None) => format!("{kind} on {r}"),
         _ => kind,
     };
-    let list = |k: &str| v.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "));
+    let list = |k: &str| {
+        v.get(k).and_then(Value::as_array).map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+    };
     let detail = s(v, "Filter")
         .map(|x| format!("filter: {x}"))
         .or_else(|| s(v, "Index Cond").map(|x| format!("index: {x}")))
-        .or_else(|| s(v, "Hash Cond").or_else(|| s(v, "Merge Cond")).or_else(|| s(v, "Join Filter")))
+        .or_else(|| {
+            s(v, "Hash Cond")
+                .or_else(|| s(v, "Merge Cond"))
+                .or_else(|| s(v, "Join Filter"))
+        })
         .or_else(|| list("Sort Key").map(|x| format!("sort by {x}")))
         .or_else(|| list("Group Key").map(|x| format!("group by {x}")));
     let loops = f(v, "Actual Loops").unwrap_or(1.0);
-    let total = analyzed.then(|| f(v, "Actual Total Time").map(|t| t * loops)).flatten();
-    let children: Vec<PlanNode> = v.get("Plans").and_then(Value::as_array).map(|a| a.iter().map(|c| node(c, analyzed)).collect()).unwrap_or_default();
+    let total = analyzed
+        .then(|| f(v, "Actual Total Time").map(|t| t * loops))
+        .flatten();
+    let children: Vec<PlanNode> = v
+        .get("Plans")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().map(|c| node(c, analyzed)).collect())
+        .unwrap_or_default();
     let kids: f64 = children.iter().filter_map(|c| c.total_ms).sum();
     PlanNode {
         name,
         detail,
         est_rows: f(v, "Plan Rows").unwrap_or(0.0),
-        actual_rows: analyzed.then(|| f(v, "Actual Rows").map(|r| r * loops)).flatten(),
+        actual_rows: analyzed
+            .then(|| f(v, "Actual Rows").map(|r| r * loops))
+            .flatten(),
         self_ms: total.map(|t| (t - kids).max(0.0)),
         pct: None,
         total_ms: total,
         loops,
-        scan: rel.map(|r| (s(v, "Schema").unwrap_or_default(), r, s(v, "Filter").unwrap_or_default())),
+        scan: rel.map(|r| {
+            (
+                s(v, "Schema").unwrap_or_default(),
+                r,
+                s(v, "Filter").unwrap_or_default(),
+            )
+        }),
         children,
     }
 }
 
 /// Fills each node's share of the whole time.
 fn shares(n: &mut PlanNode, whole: f64) {
-    n.pct = n.self_ms.map(|t| if whole > 0.0 { t / whole * 100.0 } else { 0.0 });
+    n.pct = n
+        .self_ms
+        .map(|t| if whole > 0.0 { t / whole * 100.0 } else { 0.0 });
     for c in &mut n.children {
         shares(c, whole);
     }
@@ -135,10 +165,20 @@ fn filter_columns(filter: &str) -> Vec<String> {
         let p = part.trim_start_matches(['(', ' ']);
         let quoted = p.starts_with('"');
         let body = if quoted { &p[1..] } else { p };
-        let id: String = body.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
-        let rest = body[id.len()..].trim_start_matches('"').trim_start_matches(')').trim_start();
-        let is_col = id.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_');
-        let compared = rest.starts_with(['=', '<', '>']) || rest.starts_with("::") && rest.contains(['=', '<', '>']);
+        let id: String = body
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        let rest = body[id.len()..]
+            .trim_start_matches('"')
+            .trim_start_matches(')')
+            .trim_start();
+        let is_col = id
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphabetic() || c == '_');
+        let compared = rest.starts_with(['=', '<', '>'])
+            || rest.starts_with("::") && rest.contains(['=', '<', '>']);
         if is_col && compared && !cols.contains(&id) {
             cols.push(id);
         }
@@ -151,10 +191,21 @@ fn hint(root: &PlanNode, analyzed: bool) -> Option<PlanHint> {
     walk(root, &mut all);
     let worst = all
         .iter()
-        .filter(|n| n.name.starts_with("Seq Scan") && n.detail.as_deref().is_some_and(|d| d.starts_with("filter")))
-        .max_by(|a, b| a.self_ms.unwrap_or(a.est_rows).total_cmp(&b.self_ms.unwrap_or(b.est_rows)))?;
+        .filter(|n| {
+            n.name.starts_with("Seq Scan")
+                && n.detail.as_deref().is_some_and(|d| d.starts_with("filter"))
+        })
+        .max_by(|a, b| {
+            a.self_ms
+                .unwrap_or(a.est_rows)
+                .total_cmp(&b.self_ms.unwrap_or(b.est_rows))
+        })?;
     let (schema, rel, filter) = worst.scan.clone()?;
-    let big = if analyzed { worst.pct.unwrap_or(0.0) >= 20.0 } else { worst.est_rows >= 10_000.0 };
+    let big = if analyzed {
+        worst.pct.unwrap_or(0.0) >= 20.0
+    } else {
+        worst.est_rows >= 10_000.0
+    };
     // Estimates are per loop; the actual count was multiplied by the loops, so compare per loop.
     let off = worst.actual_rows.is_some_and(|a| {
         let a = a / worst.loops.max(1.0);
@@ -169,24 +220,41 @@ fn hint(root: &PlanNode, analyzed: bool) -> Option<PlanHint> {
     }
     text.push('.');
     if let (true, Some(a)) = (off, worst.actual_rows) {
-        text.push_str(&format!(" The planner expected {} rows and got {}: statistics look stale.", worst.est_rows as i64, a as i64));
+        text.push_str(&format!(
+            " The planner expected {} rows and got {}: statistics look stale.",
+            worst.est_rows as i64, a as i64
+        ));
     }
     let table = format!("{}.{}", quote(&schema), quote(&rel));
-    let mut actions = vec![HintAction { label: format!("Open ANALYZE {rel}"), sql: format!("analyze {table}") }];
+    let mut actions = vec![HintAction {
+        label: format!("Open ANALYZE {rel}"),
+        sql: format!("analyze {table}"),
+    }];
     let cols = filter_columns(&filter);
     if !cols.is_empty() {
         let list = cols.iter().map(|c| quote(c)).collect::<Vec<_>>().join(", ");
-        text.push_str(&format!(" An index on {rel} ({}) would let it skip the rest.", cols.join(", ")));
-        actions.push(HintAction { label: "Open an index draft".into(), sql: format!("create index on {table} ({list})") });
+        text.push_str(&format!(
+            " An index on {rel} ({}) would let it skip the rest.",
+            cols.join(", ")
+        ));
+        actions.push(HintAction {
+            label: "Open an index draft".into(),
+            sql: format!("create index on {table} ({list})"),
+        });
     }
     Some(PlanHint { text, actions })
 }
 
 /// From the server's `EXPLAIN (FORMAT JSON)` text.
 pub fn parse(json: &str, analyzed: bool) -> AppResult<ExplainPlan> {
-    let v: Value = serde_json::from_str(json).map_err(|_| AppError::internal("The server's plan wasn't readable."))?;
-    let top = v.get(0).ok_or_else(|| AppError::internal("The server sent no plan."))?;
-    let plan = top.get("Plan").ok_or_else(|| AppError::internal("The server sent no plan."))?;
+    let v: Value = serde_json::from_str(json)
+        .map_err(|_| AppError::internal("The server's plan wasn't readable."))?;
+    let top = v
+        .get(0)
+        .ok_or_else(|| AppError::internal("The server sent no plan."))?;
+    let plan = top
+        .get("Plan")
+        .ok_or_else(|| AppError::internal("The server sent no plan."))?;
     let mut root = node(plan, analyzed);
     let whole = root.total_ms.unwrap_or(0.0);
     if analyzed {
@@ -196,15 +264,30 @@ pub fn parse(json: &str, analyzed: bool) -> AppResult<ExplainPlan> {
     walk(&root, &mut all);
     let _ = all;
     fn blocks(v: &Value) -> f64 {
-        f(v, "Shared Read Blocks").unwrap_or(0.0) + v.get("Plans").and_then(Value::as_array).map_or(0.0, |a| a.iter().map(blocks).sum())
+        f(v, "Shared Read Blocks").unwrap_or(0.0)
+            + v.get("Plans")
+                .and_then(Value::as_array)
+                .map_or(0.0, |a| a.iter().map(blocks).sum())
     }
     let h = hint(&root, analyzed);
-    Ok(ExplainPlan { root, analyzed, planning_ms: f(top, "Planning Time"), execution_ms: f(top, "Execution Time"), buffers_read: analyzed.then(|| blocks(plan)), hint: h })
+    Ok(ExplainPlan {
+        root,
+        analyzed,
+        planning_ms: f(top, "Planning Time"),
+        execution_ms: f(top, "Execution Time"),
+        buffers_read: analyzed.then(|| blocks(plan)),
+        hint: h,
+    })
 }
 
 impl PgConn {
     /// Plans (or, with `analyze`, runs and times) one statement. The caller checked that `analyze` is for a read.
-    pub async fn explain(&self, text: &str, analyze: bool, timeout_ms: u32) -> AppResult<ExplainPlan> {
+    pub async fn explain(
+        &self,
+        text: &str,
+        analyze: bool,
+        timeout_ms: u32,
+    ) -> AppResult<ExplainPlan> {
         let _scope = self.scope().await;
         let manual = self.has_txn();
         if manual {
@@ -217,15 +300,29 @@ impl PgConn {
         } else {
             self.dirty.store(true, Ordering::SeqCst);
             self.client
-                .batch_execute(&format!("BEGIN READ ONLY; SET LOCAL statement_timeout = {timeout_ms}"))
+                .batch_execute(&format!(
+                    "BEGIN READ ONLY; SET LOCAL statement_timeout = {timeout_ms}"
+                ))
                 .await
                 .map_err(|e| map_error(&e))?;
         }
-        let options = if analyze { "FORMAT JSON, ANALYZE, BUFFERS" } else { "FORMAT JSON" };
+        let options = if analyze {
+            "FORMAT JSON, ANALYZE, BUFFERS"
+        } else {
+            "FORMAT JSON"
+        };
         // The extended protocol: exactly one statement, whatever the splitter thought.
-        let out = self.client.query_one(&format!("EXPLAIN ({options}) {text}"), &[]).await;
+        let out = self
+            .client
+            .query_one(&format!("EXPLAIN ({options}) {text}"), &[])
+            .await;
         if manual {
-            let _ = self.client.batch_execute("ROLLBACK TO SAVEPOINT dalan_explain; RELEASE SAVEPOINT dalan_explain").await;
+            let _ = self
+                .client
+                .batch_execute(
+                    "ROLLBACK TO SAVEPOINT dalan_explain; RELEASE SAVEPOINT dalan_explain",
+                )
+                .await;
         } else if self.client.batch_execute("ROLLBACK").await.is_ok() {
             self.dirty.store(false, Ordering::SeqCst);
         }
@@ -251,7 +348,10 @@ mod tests {
         assert_eq!(p.root.name, "Hash Join");
         assert_eq!(p.root.detail.as_deref(), Some("(c.id = o.customer_id)"));
         // 80 total, children 60 + 4: the join's own time is 16 ms, 20%.
-        assert!((p.root.self_ms.unwrap() - 16.0).abs() < 1e-9 && (p.root.pct.unwrap() - 20.0).abs() < 1e-9);
+        assert!(
+            (p.root.self_ms.unwrap() - 16.0).abs() < 1e-9
+                && (p.root.pct.unwrap() - 20.0).abs() < 1e-9
+        );
         assert_eq!(p.root.children[0].name, "Seq Scan on orders o");
         assert_eq!(p.root.children[0].actual_rows, Some(30877.0));
         assert_eq!(p.execution_ms, Some(80.5));
@@ -261,16 +361,30 @@ mod tests {
     #[test]
     fn the_hint_names_the_scan_the_stale_statistics_and_an_index() {
         let h = parse(PLAN, true).unwrap().hint.unwrap();
-        assert!(h.text.contains("The scan on orders reads every row and takes 75% of the time."), "{}", h.text);
+        assert!(
+            h.text
+                .contains("The scan on orders reads every row and takes 75% of the time."),
+            "{}",
+            h.text
+        );
         assert!(h.text.contains("expected 1200 rows and got 30877"));
         assert!(h.text.contains("An index on orders (status, placed_at)"));
         assert_eq!(h.actions[0].sql, "analyze \"public\".\"orders\"");
-        assert_eq!(h.actions[1].sql, "create index on \"public\".\"orders\" (\"status\", \"placed_at\")");
+        assert_eq!(
+            h.actions[1].sql,
+            "create index on \"public\".\"orders\" (\"status\", \"placed_at\")"
+        );
         // A call or an OR is not a column an index could serve; a loop's actual rows are per loop.
         assert_eq!(filter_columns("(lower(name) = 'x'::text) AND (a = 1) AND ((b = 1) OR (c = 2)) AND ((\"d\")::text = 'y'::text)"), ["a", "d"]);
         assert_eq!(filter_columns("(status = 'paid'::text)"), ["status"]);
-        let looped = PLAN.replace("\"Actual Rows\": 30877, \"Actual Loops\": 1", "\"Actual Rows\": 1200, \"Actual Loops\": 25");
-        assert!(!parse(&looped, true).unwrap().hint.is_some_and(|h| h.text.contains("statistics look stale")));
+        let looped = PLAN.replace(
+            "\"Actual Rows\": 30877, \"Actual Loops\": 1",
+            "\"Actual Rows\": 1200, \"Actual Loops\": 25",
+        );
+        assert!(!parse(&looped, true)
+            .unwrap()
+            .hint
+            .is_some_and(|h| h.text.contains("statistics look stale")));
         // A plan without a costly filtered scan has no hint.
         let none = r#"[{"Plan": {"Node Type": "Result", "Plan Rows": 1}}]"#;
         assert!(parse(none, false).unwrap().hint.is_none());

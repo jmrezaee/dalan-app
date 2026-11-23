@@ -5,19 +5,19 @@
 pub mod activity;
 pub mod backup;
 pub mod classify;
-pub mod explain;
 pub mod diagram;
+pub mod explain;
 pub mod grid;
 pub mod mydb;
 pub mod myextra;
-pub mod mytransfer;
 pub mod mysql;
+pub mod mytransfer;
 pub mod pg;
-pub mod structure;
-pub mod transfer;
 pub mod run;
+pub mod structure;
 #[cfg(test)]
 mod tests;
+pub mod transfer;
 pub mod values;
 
 use std::collections::HashMap;
@@ -243,7 +243,12 @@ async fn route(
 
 /// Where to connect: the saved address, or for MongoDB every member of a seed list (`h1:27017,h2:27017`).
 fn seed_targets(cfg: &SqlConfig) -> Vec<Target> {
-    let one = |address: String, port: u16| Target { address, port, tls: false, tls_server_name: None };
+    let one = |address: String, port: u16| Target {
+        address,
+        port,
+        tls: false,
+        tls_server_name: None,
+    };
     if cfg.engine != Engine::Mongodb || !cfg.address.contains(',') && !cfg.address.contains(':') {
         return vec![one(cfg.address.clone(), cfg.port)];
     }
@@ -251,9 +256,14 @@ fn seed_targets(cfg: &SqlConfig) -> Vec<Target> {
         .split(',')
         .map(str::trim)
         .filter(|m| !m.is_empty())
-        .map(|m| match m.rsplit_once(':').and_then(|(h, p)| p.parse::<u16>().ok().map(|p| (h, p))) {
-            Some((h, p)) => one(h.to_string(), p),
-            None => one(m.to_string(), cfg.port),
+        .map(|m| {
+            match m
+                .rsplit_once(':')
+                .and_then(|(h, p)| p.parse::<u16>().ok().map(|p| (h, p)))
+            {
+                Some((h, p)) => one(h.to_string(), p),
+                None => one(m.to_string(), cfg.port),
+            }
         })
         .collect()
 }
@@ -287,18 +297,19 @@ pub async fn connect(
         tls: cfg.tls,
         server_name,
     };
-    let (conn, info) = match PgConn::connect(stream, login.clone(), Arc::clone(&reopen), on_close).await {
-        Ok(v) => v,
-        Err(e) => {
-            step(
-                &emit,
-                reach + 1,
-                RedisStepState::Failed,
-                Some(e.message.clone()),
-            );
-            return Err(e);
-        }
-    };
+    let (conn, info) =
+        match PgConn::connect(stream, login.clone(), Arc::clone(&reopen), on_close).await {
+            Ok(v) => v,
+            Err(e) => {
+                step(
+                    &emit,
+                    reach + 1,
+                    RedisStepState::Failed,
+                    Some(e.message.clone()),
+                );
+                return Err(e);
+            }
+        };
     step(&emit, reach + 1, RedisStepState::Done, None);
     let opener: Opener = Arc::new(move || {
         let (reopen, login) = (Arc::clone(&reopen), login.clone());
@@ -308,7 +319,12 @@ pub async fn connect(
             Ok(EditorConn::Pg(Box::new(conn)))
         })
     });
-    Ok(Opened { db: Db::Pg(Arc::new(conn)), info, ssh, opener })
+    Ok(Opened {
+        db: Db::Pg(Arc::new(conn)),
+        info,
+        ssh,
+        opener,
+    })
 }
 
 /// The MySQL and MariaDB sign-in on the stream the route gave, and the way to open an editor tab's own connection.
@@ -320,15 +336,31 @@ async fn connect_my(
     emit: &Emit,
     reach: u32,
 ) -> AppResult<Opened> {
-    let server_name = cfg.server_name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| cfg.address.clone());
-    let login = mysql::MyLogin { user: cfg.user.clone(), password: cfg.password.clone(), database: cfg.database.clone(), tls: cfg.tls, server_name };
-    let (conn, info) = match mysql::MyConn::connect(stream, login.clone(), Arc::clone(&reopen)).await {
-        Ok(v) => v,
-        Err(e) => {
-            step(emit, reach + 1, RedisStepState::Failed, Some(e.message.clone()));
-            return Err(e);
-        }
+    let server_name = cfg
+        .server_name
+        .clone()
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| cfg.address.clone());
+    let login = mysql::MyLogin {
+        user: cfg.user.clone(),
+        password: cfg.password.clone(),
+        database: cfg.database.clone(),
+        tls: cfg.tls,
+        server_name,
     };
+    let (conn, info) =
+        match mysql::MyConn::connect(stream, login.clone(), Arc::clone(&reopen)).await {
+            Ok(v) => v,
+            Err(e) => {
+                step(
+                    emit,
+                    reach + 1,
+                    RedisStepState::Failed,
+                    Some(e.message.clone()),
+                );
+                return Err(e);
+            }
+        };
     step(emit, reach + 1, RedisStepState::Done, None);
     let opener: Opener = Arc::new(move || {
         let (reopen, login) = (Arc::clone(&reopen), login.clone());
@@ -338,7 +370,12 @@ async fn connect_my(
             Ok(EditorConn::My(Box::new(mydb::MyEditor::new(conn))))
         })
     });
-    Ok(Opened { db: Db::My(Arc::new(mydb::MyDb::new(conn))), info, ssh, opener })
+    Ok(Opened {
+        db: Db::My(Arc::new(mydb::MyDb::new(conn))),
+        info,
+        ssh,
+        opener,
+    })
 }
 
 /// The MongoDB sign-in on the stream the route gave. Documents need no editor connections, so the opener refuses.
@@ -350,18 +387,44 @@ async fn connect_mongo(
     emit: &Emit,
     reach: u32,
 ) -> AppResult<Opened> {
-    let server_name = cfg.server_name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| cfg.address.clone());
-    let login = crate::mongo::conn::MongoLogin { user: cfg.user.clone(), password: cfg.password.clone(), auth_db: cfg.auth_source.clone().filter(|a| !a.is_empty()).unwrap_or_else(|| "admin".into()), tls: cfg.tls, server_name };
-    let (mut conn, mut info) = match crate::mongo::conn::MongoConn::connect(stream, login.clone(), Arc::clone(&reopen)).await {
-        Ok(v) => v,
-        Err(e) => {
-            step(emit, reach + 1, RedisStepState::Failed, Some(e.message.clone()));
-            return Err(e);
-        }
+    let server_name = cfg
+        .server_name
+        .clone()
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| cfg.address.clone());
+    let login = crate::mongo::conn::MongoLogin {
+        user: cfg.user.clone(),
+        password: cfg.password.clone(),
+        auth_db: cfg
+            .auth_source
+            .clone()
+            .filter(|a| !a.is_empty())
+            .unwrap_or_else(|| "admin".into()),
+        tls: cfg.tls,
+        server_name,
     };
+    let (mut conn, mut info) =
+        match crate::mongo::conn::MongoConn::connect(stream, login.clone(), Arc::clone(&reopen))
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                step(
+                    emit,
+                    reach + 1,
+                    RedisStepState::Failed,
+                    Some(e.message.clone()),
+                );
+                return Err(e);
+            }
+        };
     // A secondary names the primary: go there, so writes work (one hop only; the name must be one of the seeds).
     if !info.is_primary && info.replica_set.is_some() {
-        if let Some(primary) = info.primary.clone().and_then(|p| seed_targets(cfg).into_iter().find(|t| format!("{}:{}", t.address, t.port).eq_ignore_ascii_case(&p))) {
+        if let Some(primary) = info.primary.clone().and_then(|p| {
+            seed_targets(cfg)
+                .into_iter()
+                .find(|t| format!("{}:{}", t.address, t.port).eq_ignore_ascii_case(&p))
+        }) {
             let (ssh2, engine) = (ssh.clone(), cfg.engine);
             let to_primary: Reopen = Arc::new(move || {
                 let (ssh, target) = (ssh2.clone(), primary.clone());
@@ -373,20 +436,47 @@ async fn connect_mongo(
                 })
             });
             if let Ok(stream) = (to_primary)().await {
-                if let Ok((c, i)) = crate::mongo::conn::MongoConn::connect(stream, login.clone(), Arc::clone(&to_primary)).await {
+                if let Ok((c, i)) = crate::mongo::conn::MongoConn::connect(
+                    stream,
+                    login.clone(),
+                    Arc::clone(&to_primary),
+                )
+                .await
+                {
                     (conn, info) = (c, i);
                 }
             }
         }
     }
     step(emit, reach + 1, RedisStepState::Done, None);
-    let opener: Opener = Arc::new(|| Box::pin(async { Err(AppError::validation("MongoDB tabs don't open editor connections.")) }));
+    let opener: Opener = Arc::new(|| {
+        Box::pin(async {
+            Err(AppError::validation(
+                "MongoDB tabs don't open editor connections.",
+            ))
+        })
+    });
     let version = match &info.replica_set {
-        Some(set) => format!("{} (replica set {set}{})", info.version, if info.is_primary { ", primary" } else { "" }),
+        Some(set) => format!(
+            "{} (replica set {set}{})",
+            info.version,
+            if info.is_primary { ", primary" } else { "" }
+        ),
         None => info.version.clone(),
     };
-    let info = SqlServerInfo { engine: "mongodb".into(), version, database: cfg.database.clone().unwrap_or_else(|| "admin".into()), user: info.user, latency_ms: info.latency_ms };
-    Ok(Opened { db: Db::Mongo(Arc::new(conn)), info, ssh, opener })
+    let info = SqlServerInfo {
+        engine: "mongodb".into(),
+        version,
+        database: cfg.database.clone().unwrap_or_else(|| "admin".into()),
+        user: info.user,
+        latency_ms: info.latency_ms,
+    };
+    Ok(Opened {
+        db: Db::Mongo(Arc::new(conn)),
+        info,
+        ssh,
+        opener,
+    })
 }
 
 /// "Test connection" for a SQL database: the whole sign-in, then closed. A host that needs an answer from the user
@@ -428,7 +518,12 @@ async fn run(
         _ = cancel.changed() => return,
     };
     match result {
-        Ok(Opened { db, info, ssh, opener }) => {
+        Ok(Opened {
+            db,
+            info,
+            ssh,
+            opener,
+        }) => {
             *live.opener.lock().await = Some(opener);
             match db {
                 Db::Pg(c) => *live.conn.lock().await = Some(c),
@@ -451,9 +546,8 @@ async fn run(
 
 /// Opens one more connection to the same server by the same route (an editor tab's own).
 type Opener = Arc<
-    dyn Fn() -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = AppResult<EditorConn>> + Send>,
-        > + Send
+    dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = AppResult<EditorConn>> + Send>>
+        + Send
         + Sync,
 >;
 
@@ -518,10 +612,18 @@ pub enum EditorConn {
     My(Box<mydb::MyEditor>),
 }
 
-const MY_LATER: &str = "This isn't available for MySQL and MariaDB yet; it arrives in a later update.";
+const MY_LATER: &str =
+    "This isn't available for MySQL and MariaDB yet; it arrives in a later update.";
 
 impl EditorConn {
-    pub async fn run_script(&self, pieces: &[classify::Piece], opts: &run::RunOpts, cancel: &AtomicBool, allow_write: bool, emit: &(dyn Fn(run::SqlRunEvent) + Sync)) -> AppResult<()> {
+    pub async fn run_script(
+        &self,
+        pieces: &[classify::Piece],
+        opts: &run::RunOpts,
+        cancel: &AtomicBool,
+        allow_write: bool,
+        emit: &(dyn Fn(run::SqlRunEvent) + Sync),
+    ) -> AppResult<()> {
         match self {
             EditorConn::Pg(c) => c.run_script(pieces, opts, cancel, allow_write, emit).await,
             EditorConn::My(c) => c.run_script(pieces, opts, cancel, allow_write, emit).await,
@@ -563,7 +665,12 @@ impl EditorConn {
             EditorConn::My(c) => c.txn_state().await,
         }
     }
-    pub async fn explain(&self, text: &str, analyze: bool, timeout_ms: u32) -> AppResult<explain::ExplainPlan> {
+    pub async fn explain(
+        &self,
+        text: &str,
+        analyze: bool,
+        timeout_ms: u32,
+    ) -> AppResult<explain::ExplainPlan> {
         match self {
             EditorConn::Pg(c) => c.explain(text, analyze, timeout_ms).await,
             EditorConn::My(c) => c.explain(text, analyze, timeout_ms).await,
@@ -656,7 +763,17 @@ impl SqlManager {
 
     /// The MongoDB connection of a tab. Errors for another engine's tab or while still connecting.
     pub async fn mongo(&self, conn_id: &str) -> AppResult<Arc<crate::mongo::conn::MongoConn>> {
-        self.get(conn_id)?.mongo.lock().await.clone().ok_or_else(|| AppError::new(ErrorCode::DbUnreachable, "This database isn't connected right now."))
+        self.get(conn_id)?
+            .mongo
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| {
+                AppError::new(
+                    ErrorCode::DbUnreachable,
+                    "This database isn't connected right now.",
+                )
+            })
     }
 
     /// The MySQL or MariaDB connection of a tab, `None` for a PostgreSQL tab.
@@ -666,12 +783,18 @@ impl SqlManager {
 
     /// The SQL the tab speaks (for splitting and classifying what is typed).
     pub async fn dialect(&self, conn_id: &str) -> AppResult<classify::Dialect> {
-        Ok(if self.get(conn_id)?.my.lock().await.is_some() { classify::Dialect::My } else { classify::Dialect::Pg })
+        Ok(if self.get(conn_id)?.my.lock().await.is_some() {
+            classify::Dialect::My
+        } else {
+            classify::Dialect::Pg
+        })
     }
 
     /// Manual transactions open right now, for the quit question (quitting rolls them back).
     pub fn open_transactions(&self) -> usize {
-        let Ok(conns) = self.conns.lock() else { return 0 };
+        let Ok(conns) = self.conns.lock() else {
+            return 0;
+        };
         conns
             .values()
             .map(|l| {
@@ -700,7 +823,11 @@ impl SqlManager {
         self.import_files
             .lock()
             .ok()
-            .and_then(|f| f.get(id).filter(|(c, _)| c == conn_id).map(|(_, p)| p.clone()))
+            .and_then(|f| {
+                f.get(id)
+                    .filter(|(c, _)| c == conn_id)
+                    .map(|(_, p)| p.clone())
+            })
             .ok_or_else(|| AppError::validation("Choose the file again."))
     }
 
@@ -846,8 +973,18 @@ async fn test_my(store: &Store, cfg: SqlConfig) -> AppResult<SqlServerInfo> {
             e
         }
     })?;
-    let server_name = cfg.server_name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| cfg.address.clone());
-    let login = mysql::MyLogin { user: cfg.user.clone(), password: cfg.password.clone(), database: cfg.database.clone(), tls: cfg.tls, server_name };
+    let server_name = cfg
+        .server_name
+        .clone()
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| cfg.address.clone());
+    let login = mysql::MyLogin {
+        user: cfg.user.clone(),
+        password: cfg.password.clone(),
+        database: cfg.database.clone(),
+        tls: cfg.tls,
+        server_name,
+    };
     let (conn, info) = mysql::MyConn::connect(stream, login, reopen).await?;
     conn.close().await;
     Ok(info)
@@ -867,14 +1004,32 @@ async fn test_mongo(store: &Store, cfg: SqlConfig) -> AppResult<SqlServerInfo> {
             e
         }
     })?;
-    let server_name = cfg.server_name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| cfg.address.clone());
-    let login = crate::mongo::conn::MongoLogin { user: cfg.user.clone(), password: cfg.password.clone(), auth_db: cfg.auth_source.clone().filter(|a| !a.is_empty()).unwrap_or_else(|| "admin".into()), tls: cfg.tls, server_name };
+    let server_name = cfg
+        .server_name
+        .clone()
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| cfg.address.clone());
+    let login = crate::mongo::conn::MongoLogin {
+        user: cfg.user.clone(),
+        password: cfg.password.clone(),
+        auth_db: cfg
+            .auth_source
+            .clone()
+            .filter(|a| !a.is_empty())
+            .unwrap_or_else(|| "admin".into()),
+        tls: cfg.tls,
+        server_name,
+    };
     let (conn, info) = crate::mongo::conn::MongoConn::connect(stream, login, reopen).await?;
     conn.close().await;
     Ok(SqlServerInfo {
         engine: "mongodb".into(),
         version: match &info.replica_set {
-            Some(set) => format!("{} (replica set {set}{})", info.version, if info.is_primary { ", primary" } else { "" }),
+            Some(set) => format!(
+                "{} (replica set {set}{})",
+                info.version,
+                if info.is_primary { ", primary" } else { "" }
+            ),
             None => info.version,
         },
         database: cfg.database.clone().unwrap_or_else(|| "admin".into()),
@@ -889,9 +1044,32 @@ mod seed_tests {
 
     #[test]
     fn a_mongo_seed_list_becomes_one_target_per_member() {
-        let mut c = SqlConfig { name: "t".into(), engine: Engine::Mongodb, route: RedisRoute::Direct, host_id: None, address: "h1:27017, h2:27018 ,h3".into(), port: 27017, database: None, user: String::new(), password: None, tls: TlsMode::Off, server_name: None, auth_source: None };
-        let t: Vec<(String, u16)> = seed_targets(&c).into_iter().map(|t| (t.address, t.port)).collect();
-        assert_eq!(t, [("h1".into(), 27017), ("h2".into(), 27018), ("h3".into(), 27017)]);
+        let mut c = SqlConfig {
+            name: "t".into(),
+            engine: Engine::Mongodb,
+            route: RedisRoute::Direct,
+            host_id: None,
+            address: "h1:27017, h2:27018 ,h3".into(),
+            port: 27017,
+            database: None,
+            user: String::new(),
+            password: None,
+            tls: TlsMode::Off,
+            server_name: None,
+            auth_source: None,
+        };
+        let t: Vec<(String, u16)> = seed_targets(&c)
+            .into_iter()
+            .map(|t| (t.address, t.port))
+            .collect();
+        assert_eq!(
+            t,
+            [
+                ("h1".into(), 27017),
+                ("h2".into(), 27018),
+                ("h3".into(), 27017)
+            ]
+        );
         c.address = "db.internal".into();
         assert_eq!(seed_targets(&c).len(), 1);
         c.engine = Engine::Postgres;

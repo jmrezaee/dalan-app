@@ -63,7 +63,11 @@ impl PgConn {
             return Err(AppError::validation("There are no changes to commit."));
         }
         let info = self.table_info(&edits.schema, &edits.table).await?;
-        let mut pk: Vec<_> = info.columns.iter().filter(|c| c.pk_position.is_some()).collect();
+        let mut pk: Vec<_> = info
+            .columns
+            .iter()
+            .filter(|c| c.pk_position.is_some())
+            .collect();
         pk.sort_by_key(|c| c.pk_position);
         if pk.is_empty() {
             return Err(AppError::new(
@@ -72,10 +76,9 @@ impl PgConn {
             ));
         }
         let col = |name: &str| {
-            info.columns
-                .iter()
-                .find(|c| c.name == name)
-                .ok_or_else(|| AppError::validation(format!("There is no column {name} in this table.")))
+            info.columns.iter().find(|c| c.name == name).ok_or_else(|| {
+                AppError::validation(format!("There is no column {name} in this table."))
+            })
         };
         let table = format!("{}.{}", quote(&edits.schema), quote(&edits.table));
         let mut out = Vec::new();
@@ -84,22 +87,36 @@ impl PgConn {
             let mut names: Vec<&str> = row.key.iter().map(|k| k.column.as_str()).collect();
             names.sort_unstable();
             names.dedup();
-            if names.len() != row.key.len() || names.len() != pk.len() || !pk.iter().all(|c| names.contains(&c.name.as_str())) {
-                return Err(AppError::validation("A row was sent without its whole primary key."));
+            if names.len() != row.key.len()
+                || names.len() != pk.len()
+                || !pk.iter().all(|c| names.contains(&c.name.as_str()))
+            {
+                return Err(AppError::validation(
+                    "A row was sent without its whole primary key.",
+                ));
             }
             let mut params: Vec<Option<String>> = Vec::new();
             let mut shown_where: Vec<String> = Vec::new();
             let mut where_sql: Vec<String> = Vec::new();
-            let add = |c: &super::pg::SqlColumn, v: Option<String>, params: &mut Vec<Option<String>>| {
-                params.push(v);
-                // The type name comes from the catalog (`format_type`), never from the window.
-                format!("(${})::text::{}", params.len(), c.type_name)
-            };
+            let add =
+                |c: &super::pg::SqlColumn, v: Option<String>, params: &mut Vec<Option<String>>| {
+                    params.push(v);
+                    // The type name comes from the catalog (`format_type`), never from the window.
+                    format!("(${})::text::{}", params.len(), c.type_name)
+                };
             if row.delete {
                 for k in &row.key {
                     let c = col(&k.column)?;
-                    where_sql.push(format!("{} = {}", quote(&c.name), add(c, Some(k.value.clone()), &mut params)));
-                    shown_where.push(format!("{} = {}", quote(&c.name), lit(&Some(k.value.clone()))));
+                    where_sql.push(format!(
+                        "{} = {}",
+                        quote(&c.name),
+                        add(c, Some(k.value.clone()), &mut params)
+                    ));
+                    shown_where.push(format!(
+                        "{} = {}",
+                        quote(&c.name),
+                        lit(&Some(k.value.clone()))
+                    ));
                 }
                 out.push(GridStatement {
                     sql: format!("delete from {table} where {}", where_sql.join(" and ")),
@@ -117,32 +134,78 @@ impl PgConn {
                 let c = col(&ch.column)?;
                 if c.pk_position.is_some() && ch.old != ch.new {
                     // Changing a key moves the row's identity: not from a grid.
-                    return Err(AppError::validation(format!("{} is part of the key. Change it with a query.", c.name)));
+                    return Err(AppError::validation(format!(
+                        "{} is part of the key. Change it with a query.",
+                        c.name
+                    )));
                 }
-                set_sql.push(format!("{} = {}", quote(&c.name), add(c, ch.new.clone(), &mut params)));
+                set_sql.push(format!(
+                    "{} = {}",
+                    quote(&c.name),
+                    add(c, ch.new.clone(), &mut params)
+                ));
                 set_shown.push(format!("{} = {}", quote(&c.name), lit(&ch.new)));
             }
             for k in &row.key {
                 let c = col(&k.column)?;
-                where_sql.push(format!("{} = {}", quote(&c.name), add(c, Some(k.value.clone()), &mut params)));
-                shown_where.push(format!("{} = {}", quote(&c.name), lit(&Some(k.value.clone()))));
+                where_sql.push(format!(
+                    "{} = {}",
+                    quote(&c.name),
+                    add(c, Some(k.value.clone()), &mut params)
+                ));
+                shown_where.push(format!(
+                    "{} = {}",
+                    quote(&c.name),
+                    lit(&Some(k.value.clone()))
+                ));
             }
             // The optimistic check: the cell must still be what the person saw. Types with no equality operator
             // (json, xml, geometric ones) are compared by their text form.
             for ch in &row.changes {
                 let c = col(&ch.column)?;
-                let no_eq = matches!(c.type_name.as_str(), "json" | "xml" | "point" | "line" | "lseg" | "box" | "path" | "polygon" | "circle");
+                let no_eq = matches!(
+                    c.type_name.as_str(),
+                    "json"
+                        | "xml"
+                        | "point"
+                        | "line"
+                        | "lseg"
+                        | "box"
+                        | "path"
+                        | "polygon"
+                        | "circle"
+                );
                 if no_eq {
                     params.push(ch.old.clone());
-                    where_sql.push(format!("{}::text is not distinct from (${})::text", quote(&c.name), params.len()));
+                    where_sql.push(format!(
+                        "{}::text is not distinct from (${})::text",
+                        quote(&c.name),
+                        params.len()
+                    ));
                 } else {
-                    where_sql.push(format!("{} is not distinct from {}", quote(&c.name), add(c, ch.old.clone(), &mut params)));
+                    where_sql.push(format!(
+                        "{} is not distinct from {}",
+                        quote(&c.name),
+                        add(c, ch.old.clone(), &mut params)
+                    ));
                 }
-                shown_where.push(format!("{} is not distinct from {}", quote(&c.name), lit(&ch.old)));
+                shown_where.push(format!(
+                    "{} is not distinct from {}",
+                    quote(&c.name),
+                    lit(&ch.old)
+                ));
             }
             out.push(GridStatement {
-                sql: format!("update {table} set {} where {}", set_sql.join(", "), where_sql.join(" and ")),
-                shown: format!("update {table} set {} where {}", set_shown.join(", "), shown_where.join(" and ")),
+                sql: format!(
+                    "update {table} set {} where {}",
+                    set_sql.join(", "),
+                    where_sql.join(" and ")
+                ),
+                shown: format!(
+                    "update {table} set {} where {}",
+                    set_shown.join(", "),
+                    shown_where.join(" and ")
+                ),
                 params,
             });
         }
@@ -159,8 +222,11 @@ impl PgConn {
             .map_err(|e| map_error(&e))?;
         let mut failure: Option<AppError> = None;
         for (i, st) in stmts.iter().enumerate() {
-            let refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
-                st.params.iter().map(|p| p as &(dyn tokio_postgres::types::ToSql + Sync)).collect();
+            let refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = st
+                .params
+                .iter()
+                .map(|p| p as &(dyn tokio_postgres::types::ToSql + Sync))
+                .collect();
             match self.client.execute(&st.sql, &refs).await {
                 Ok(1) => {}
                 Ok(_) => {
@@ -176,7 +242,11 @@ impl PgConn {
                 }
             }
         }
-        let end = if failure.is_none() { "COMMIT" } else { "ROLLBACK" };
+        let end = if failure.is_none() {
+            "COMMIT"
+        } else {
+            "ROLLBACK"
+        };
         let ended = self.client.batch_execute(end).await;
         if ended.is_ok() {
             self.dirty.store(false, Ordering::SeqCst);

@@ -9,27 +9,27 @@ use specta::Type;
 use tauri::ipc::Channel;
 use tauri::State;
 
-use crate::error::AppResult;
-use crate::dbs::history;
-use crate::redis::console::history_enabled;
-use crate::sql::pg::{PageRequest, SqlObject, SqlPage, SqlTableInfo};
 use crate::dbs::gate::{self, decide, strongest, Decision};
+use crate::dbs::history;
+use crate::error::AppResult;
+use crate::redis::console::history_enabled;
 use crate::redis::store::RedisWriteMode;
-use crate::sql::activity::{Activity, ActivityView};
-use crate::sql::classify::{Class, Piece};
-use crate::sql::run::{pieces_for_d, HeldRun, RunMode, RunOpts, SqlCatalog, SqlRunEvent, TxnState};
 use crate::sql;
+use crate::sql::activity::{Activity, ActivityView};
+use crate::sql::backup::{self, Tool};
+use crate::sql::classify::{Class, Piece};
 use crate::sql::diagram::Diagram;
 use crate::sql::explain::ExplainPlan;
 use crate::sql::grid::GridEdits;
+use crate::sql::pg::{PageRequest, SqlObject, SqlPage, SqlTableInfo};
+use crate::sql::run::{pieces_for_d, HeldRun, RunMode, RunOpts, SqlCatalog, SqlRunEvent, TxnState};
 use crate::sql::structure::{StructureOp, TableStructure};
-use tauri_plugin_dialog::DialogExt;
-use crate::sql::backup::{self, Tool};
-use crate::sql::transfer::{ExportFormat, CsvPreview, TransferProgress};
+use crate::sql::transfer::{CsvPreview, ExportFormat, TransferProgress};
 use crate::sql::values::SqlCell;
 use crate::sql::{DbEvent, Emit};
 use crate::ssh::PromptAnswer;
 use crate::state::AppState;
+use tauri_plugin_dialog::DialogExt;
 
 #[derive(Serialize, Type)]
 pub struct DbOpened {
@@ -136,7 +136,12 @@ pub async fn sql_count(
     let n = if let Some(my) = state.sql.my(&conn_id).await? {
         my.count(&schema, &table, &filter).await?
     } else {
-        state.sql.pg(&conn_id).await?.count(&schema, &table, &filter).await?
+        state
+            .sql
+            .pg(&conn_id)
+            .await?
+            .count(&schema, &table, &filter)
+            .await?
     };
     // A count far below 2^53, so a JS number holds it exactly.
     Ok(n as f64)
@@ -218,9 +223,15 @@ async fn execute(
     events: &Channel<SqlRunEvent>,
 ) -> AppResult<()> {
     let editor = state.sql.editor(conn_id, editor_id).await?;
-    editor.stop.store(false, std::sync::atomic::Ordering::SeqCst);
+    editor
+        .stop
+        .store(false, std::sync::atomic::Ordering::SeqCst);
     let db_id = state.sql.db_id(conn_id)?;
-    let ran = pieces.iter().map(|p| p.text.as_str()).collect::<Vec<_>>().join(";\n");
+    let ran = pieces
+        .iter()
+        .map(|p| p.text.as_str())
+        .collect::<Vec<_>>()
+        .join(";\n");
     let _ = state
         .store()
         .with_db_session(move |c, s| {
@@ -230,15 +241,22 @@ async fn execute(
             Ok(())
         })
         .await;
-    let opts = RunOpts { limit: limit.min(1_000_000), timeout_ms: timeout_ms.clamp(1000, 3_600_000) };
-    editor.running.store(true, std::sync::atomic::Ordering::SeqCst);
+    let opts = RunOpts {
+        limit: limit.min(1_000_000),
+        timeout_ms: timeout_ms.clamp(1000, 3_600_000),
+    };
+    editor
+        .running
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     let out = editor
         .conn
         .run_script(&pieces, &opts, &editor.stop, allow_write, &|e| {
             let _ = events.send(e);
         })
         .await;
-    editor.running.store(false, std::sync::atomic::Ordering::SeqCst);
+    editor
+        .running
+        .store(false, std::sync::atomic::Ordering::SeqCst);
     out
 }
 
@@ -264,7 +282,10 @@ pub async fn sql_run(
     let pieces = pieces_for_d(&text, mode, cursor, dialect)?;
     let db_id = state.sql.db_id(&conn_id)?;
     let target = sql::gate_target(&state.store(), &db_id).await?;
-    if let Some(i) = pieces.iter().position(|p| sql::classify::is_txn_control(&p.text)) {
+    if let Some(i) = pieces
+        .iter()
+        .position(|p| sql::classify::is_txn_control(&p.text))
+    {
         let _ = events.send(SqlRunEvent::Refused {
             index: i as u32,
             class: Class::Write,
@@ -273,7 +294,10 @@ pub async fn sql_run(
         let _ = events.send(SqlRunEvent::Finished { elapsed_ms: 0 });
         return Ok(SqlRunReply { pending: None });
     }
-    let classes: Vec<Class> = pieces.iter().map(|p| sql::classify::classify_for(&p.text, dialect)).collect();
+    let classes: Vec<Class> = pieces
+        .iter()
+        .map(|p| sql::classify::classify_for(&p.text, dialect))
+        .collect();
     let decision = classes
         .iter()
         .fold(Decision::Run, |d, c| strongest(d, decide(target.mode, *c)));
@@ -290,7 +314,17 @@ pub async fn sql_run(
             Ok(SqlRunReply { pending: None })
         }
         Decision::Run => {
-            execute(&state, &conn_id, &editor_id, pieces, limit, timeout_ms, class != Class::Read, &events).await?;
+            execute(
+                &state,
+                &conn_id,
+                &editor_id,
+                pieces,
+                limit,
+                timeout_ms,
+                class != Class::Read,
+                &events,
+            )
+            .await?;
             Ok(SqlRunReply { pending: None })
         }
         Decision::Confirm | Decision::Typed => {
@@ -299,13 +333,25 @@ pub async fn sql_run(
             let statements = pieces
                 .iter()
                 .enumerate()
-                .map(|(i, p)| PendingStatement { index: i as u32, text: p.text.clone(), class: classes[i], note: notes[i].clone() })
+                .map(|(i, p)| PendingStatement {
+                    index: i as u32,
+                    text: p.text.clone(),
+                    class: classes[i],
+                    note: notes[i].clone(),
+                })
                 .collect();
-            let id = state.sql.pending.put(&conn_id, class, HeldRun { pieces, editor_id })?;
+            let id = state
+                .sql
+                .pending
+                .put(&conn_id, class, HeldRun { pieces, editor_id })?;
             Ok(SqlRunReply {
                 pending: Some(PendingRun {
                     id,
-                    level: if decision == Decision::Typed { PendingLevel::Typed } else { PendingLevel::Confirm },
+                    level: if decision == Decision::Typed {
+                        PendingLevel::Typed
+                    } else {
+                        PendingLevel::Confirm
+                    },
                     db_name: target.name,
                     environment: target.environment,
                     statements,
@@ -336,13 +382,27 @@ pub async fn sql_run_commit(
     let target = sql::gate_target(&state.store(), &db_id).await?;
     gate::approve(target.mode, class, &target.name, typed_name.as_deref())?;
     let (held, _) = state.sql.pending.take(&conn_id, &pending_id)?;
-    execute(&state, &conn_id, &held.editor_id, held.pieces, limit, timeout_ms, true, &events).await
+    execute(
+        &state,
+        &conn_id,
+        &held.editor_id,
+        held.pieces,
+        limit,
+        timeout_ms,
+        true,
+        &events,
+    )
+    .await
 }
 
 /// "Cancel" on the dialog: the held script is dropped.
 #[tauri::command]
 #[specta::specta]
-pub fn sql_run_discard(state: State<'_, AppState>, conn_id: String, pending_id: String) -> AppResult<()> {
+pub fn sql_run_discard(
+    state: State<'_, AppState>,
+    conn_id: String,
+    pending_id: String,
+) -> AppResult<()> {
     let _ = state.sql.pending.take(&conn_id, &pending_id);
     Ok(())
 }
@@ -484,11 +544,21 @@ pub async fn sql_grid_prepare(
     let stmts = if let Some(my) = state.sql.my(&conn_id).await? {
         my.grid_statements(&edits).await?
     } else {
-        state.sql.pg(&conn_id).await?.grid_statements(&edits).await?
+        state
+            .sql
+            .pg(&conn_id)
+            .await?
+            .grid_statements(&edits)
+            .await?
     };
     let statements = stmts.iter().map(|s| s.shown.clone()).collect();
     let id = state.sql.grid_pending.put(&conn_id, Class::Write, stmts)?;
-    Ok(GridPending { id, db_name: target.name, environment: target.environment, statements })
+    Ok(GridPending {
+        id,
+        db_name: target.name,
+        environment: target.environment,
+        statements,
+    })
 }
 
 /// "Commit": runs what `sql_grid_prepare` held, in one transaction, after the mode is asked again.
@@ -512,7 +582,11 @@ pub async fn sql_grid_commit(
 
 #[tauri::command]
 #[specta::specta]
-pub fn sql_grid_discard(state: State<'_, AppState>, conn_id: String, pending_id: String) -> AppResult<()> {
+pub fn sql_grid_discard(
+    state: State<'_, AppState>,
+    conn_id: String,
+    pending_id: String,
+) -> AppResult<()> {
     let _ = state.sql.grid_pending.take(&conn_id, &pending_id);
     Ok(())
 }
@@ -530,7 +604,12 @@ pub async fn sql_structure(
     if let Some(my) = state.sql.my(&conn_id).await? {
         return my.structure(&schema, &table).await;
     }
-    state.sql.pg(&conn_id).await?.structure(&schema, &table).await
+    state
+        .sql
+        .pg(&conn_id)
+        .await?
+        .structure(&schema, &table)
+        .await
 }
 
 #[derive(Serialize, Type)]
@@ -571,12 +650,23 @@ pub async fn sql_structure_prepare(
         let rows = pg.structure(&schema, &table).await?.stats.rows_estimate;
         sql::structure::statements(&schema, &table, &ops, rows)?
     };
-    let class = statements.iter().map(|s| sql::classify::classify_for(s, dialect)).max().unwrap_or(Class::Schema);
+    let class = statements
+        .iter()
+        .map(|s| sql::classify::classify_for(s, dialect))
+        .max()
+        .unwrap_or(Class::Schema);
     let decision = decide(target.mode, class);
-    let id = state.sql.structure_pending.put(&conn_id, class, statements.clone())?;
+    let id = state
+        .sql
+        .structure_pending
+        .put(&conn_id, class, statements.clone())?;
     Ok(StructurePending {
         id,
-        level: if decision == Decision::Typed { PendingLevel::Typed } else { PendingLevel::Confirm },
+        level: if decision == Decision::Typed {
+            PendingLevel::Typed
+        } else {
+            PendingLevel::Confirm
+        },
         db_name: target.name,
         environment: target.environment,
         statements,
@@ -594,7 +684,10 @@ pub async fn sql_structure_commit(
     typed_name: Option<String>,
 ) -> AppResult<()> {
     state.require_unlocked()?;
-    let class = state.sql.structure_pending.peek_class(&conn_id, &pending_id)?;
+    let class = state
+        .sql
+        .structure_pending
+        .peek_class(&conn_id, &pending_id)?;
     let db_id = state.sql.db_id(&conn_id)?;
     let target = sql::gate_target(&state.store(), &db_id).await?;
     gate::approve(target.mode, class, &target.name, typed_name.as_deref())?;
@@ -607,7 +700,11 @@ pub async fn sql_structure_commit(
 
 #[tauri::command]
 #[specta::specta]
-pub fn sql_structure_discard(state: State<'_, AppState>, conn_id: String, pending_id: String) -> AppResult<()> {
+pub fn sql_structure_discard(
+    state: State<'_, AppState>,
+    conn_id: String,
+    pending_id: String,
+) -> AppResult<()> {
     let _ = state.sql.structure_pending.take(&conn_id, &pending_id);
     Ok(())
 }
@@ -629,14 +726,19 @@ pub async fn sql_explain(
     state.require_unlocked()?;
     let dialect = state.sql.dialect(&conn_id).await?;
     let pieces = pieces_for_d(&text, mode, cursor, dialect)?;
-    let piece = pieces.first().ok_or_else(|| crate::error::AppError::validation("There is nothing to explain."))?;
+    let piece = pieces
+        .first()
+        .ok_or_else(|| crate::error::AppError::validation("There is nothing to explain."))?;
     if analyze && sql::classify::classify_for(&piece.text, dialect) != Class::Read {
         return Err(crate::error::AppError::validation(
             "Explain analyze runs the statement, so it only works for reads. Use plain Explain for a change.",
         ));
     }
     let editor = state.sql.editor(&conn_id, &editor_id).await?;
-    editor.conn.explain(&piece.text, analyze, timeout_ms.clamp(1000, 3_600_000)).await
+    editor
+        .conn
+        .explain(&piece.text, analyze, timeout_ms.clamp(1000, 3_600_000))
+        .await
 }
 
 #[derive(serde::Deserialize, Type)]
@@ -673,27 +775,40 @@ pub async fn sql_save_export(
 ) -> AppResult<Option<String>> {
     // A diagram is kilobytes; this is a ceiling against a runaway caller.
     if data.len() > 64 * 1024 * 1024 {
-        return Err(crate::error::AppError::validation("That file is too big to export from here."));
+        return Err(crate::error::AppError::validation(
+            "That file is too big to export from here.",
+        ));
     }
     let dialog_app = app.clone();
     let name = suggested_name.replace(['/', '\\'], "-");
-    let picked = tokio::task::spawn_blocking(move || dialog_app.dialog().file().set_file_name(&name).blocking_save_file())
-        .await
-        .map_err(|e| crate::error::AppError::internal(e.to_string()))?;
+    let picked = tokio::task::spawn_blocking(move || {
+        dialog_app
+            .dialog()
+            .file()
+            .set_file_name(&name)
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|e| crate::error::AppError::internal(e.to_string()))?;
     let Some(picked) = picked else {
         return Ok(None);
     };
     let path = picked
         .into_path()
         .map_err(|_| crate::error::AppError::validation("That location can't be used."))?;
-    std::fs::write(&path, data).map_err(|e| crate::error::AppError::internal(format!("Couldn't write the file: {e}")))?;
+    std::fs::write(&path, data)
+        .map_err(|e| crate::error::AppError::internal(format!("Couldn't write the file: {e}")))?;
     Ok(Some(path.display().to_string()))
 }
 
 /// The activity views (S41): tiles always, plus sessions with blocking chains, or one of the server-wide tables.
 #[tauri::command]
 #[specta::specta]
-pub async fn sql_activity(state: State<'_, AppState>, conn_id: String, view: ActivityView) -> AppResult<Activity> {
+pub async fn sql_activity(
+    state: State<'_, AppState>,
+    conn_id: String,
+    view: ActivityView,
+) -> AppResult<Activity> {
     state.require_unlocked()?;
     if let Some(my) = state.sql.my(&conn_id).await? {
         return my.activity(view).await;
@@ -735,22 +850,38 @@ pub async fn sql_session_prepare(
     let db_id = state.sql.db_id(&conn_id)?;
     let target = sql::gate_target(&state.store(), &db_id).await?;
     let production = target.environment == "production";
-    let class = if production { Class::Dangerous } else { Class::Write };
+    let class = if production {
+        Class::Dangerous
+    } else {
+        Class::Write
+    };
     if decide(target.mode, class) == Decision::Refuse {
         return Err(gate::read_only_error(&target.name));
     }
     let end = matches!(action, SessionAction::End);
     let info = if let Some(my) = state.sql.my(&conn_id).await? {
-        my.session_info(u32::try_from(pid).map_err(|_| crate::error::AppError::validation("That isn't a session id."))?).await?
+        my.session_info(
+            u32::try_from(pid)
+                .map_err(|_| crate::error::AppError::validation("That isn't a session id."))?,
+        )
+        .await?
     } else {
         state.sql.pg(&conn_id).await?.session_info(pid).await?
     };
-    let (user, st, query, started) = info
-        .ok_or_else(|| crate::error::AppError::not_found("That session is gone, or it is one of Dalan's own."))?;
-    let id = state.sql.session_pending.put(&conn_id, class, (pid, end, started))?;
+    let (user, st, query, started) = info.ok_or_else(|| {
+        crate::error::AppError::not_found("That session is gone, or it is one of Dalan's own.")
+    })?;
+    let id = state
+        .sql
+        .session_pending
+        .put(&conn_id, class, (pid, end, started))?;
     Ok(SessionPending {
         id,
-        level: if production { PendingLevel::Typed } else { PendingLevel::Confirm },
+        level: if production {
+            PendingLevel::Typed
+        } else {
+            PendingLevel::Confirm
+        },
         db_name: target.name,
         environment: target.environment,
         pid,
@@ -772,43 +903,88 @@ pub async fn sql_session_commit(
     typed_name: Option<String>,
 ) -> AppResult<bool> {
     state.require_unlocked()?;
-    let class = state.sql.session_pending.peek_class(&conn_id, &pending_id)?;
+    let class = state
+        .sql
+        .session_pending
+        .peek_class(&conn_id, &pending_id)?;
     let db_id = state.sql.db_id(&conn_id)?;
     let target = sql::gate_target(&state.store(), &db_id).await?;
     gate::approve(target.mode, class, &target.name, typed_name.as_deref())?;
     let ((pid, end, started), _) = state.sql.session_pending.take(&conn_id, &pending_id)?;
     if let Some(my) = state.sql.my(&conn_id).await? {
-        return Ok(my.signal_session(u32::try_from(pid).map_err(|_| crate::error::AppError::validation("That isn't a session id."))?, end, &started).await?.unwrap_or(false));
+        return Ok(my
+            .signal_session(
+                u32::try_from(pid)
+                    .map_err(|_| crate::error::AppError::validation("That isn't a session id."))?,
+                end,
+                &started,
+            )
+            .await?
+            .unwrap_or(false));
     }
-    Ok(state.sql.pg(&conn_id).await?.signal_session(pid, end, &started).await?.unwrap_or(false))
+    Ok(state
+        .sql
+        .pg(&conn_id)
+        .await?
+        .signal_session(pid, end, &started)
+        .await?
+        .unwrap_or(false))
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn sql_session_discard(state: State<'_, AppState>, conn_id: String, pending_id: String) -> AppResult<()> {
+pub fn sql_session_discard(
+    state: State<'_, AppState>,
+    conn_id: String,
+    pending_id: String,
+) -> AppResult<()> {
     let _ = state.sql.session_pending.take(&conn_id, &pending_id);
     Ok(())
 }
 
 // ---- Transfer (S43, F26)
 
-pub(crate) async fn pick_save(app: &tauri::AppHandle, name: String) -> AppResult<Option<std::path::PathBuf>> {
+pub(crate) async fn pick_save(
+    app: &tauri::AppHandle,
+    name: String,
+) -> AppResult<Option<std::path::PathBuf>> {
     let dialog_app = app.clone();
-    let picked = tokio::task::spawn_blocking(move || dialog_app.dialog().file().set_file_name(&name).blocking_save_file())
-        .await
-        .map_err(|e| crate::error::AppError::internal(e.to_string()))?;
+    let picked = tokio::task::spawn_blocking(move || {
+        dialog_app
+            .dialog()
+            .file()
+            .set_file_name(&name)
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|e| crate::error::AppError::internal(e.to_string()))?;
     picked
-        .map(|p| p.into_path().map_err(|_| crate::error::AppError::validation("That location can't be used.")))
+        .map(|p| {
+            p.into_path()
+                .map_err(|_| crate::error::AppError::validation("That location can't be used."))
+        })
         .transpose()
 }
 
-async fn pick_open(app: &tauri::AppHandle, title: &'static str) -> AppResult<Option<std::path::PathBuf>> {
+async fn pick_open(
+    app: &tauri::AppHandle,
+    title: &'static str,
+) -> AppResult<Option<std::path::PathBuf>> {
     let dialog_app = app.clone();
-    let picked = tokio::task::spawn_blocking(move || dialog_app.dialog().file().set_title(title).blocking_pick_file())
-        .await
-        .map_err(|e| crate::error::AppError::internal(e.to_string()))?;
+    let picked = tokio::task::spawn_blocking(move || {
+        dialog_app
+            .dialog()
+            .file()
+            .set_title(title)
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|e| crate::error::AppError::internal(e.to_string()))?;
     picked
-        .map(|p| p.into_path().map_err(|_| crate::error::AppError::validation("That location can't be used.")))
+        .map(|p| {
+            p.into_path()
+                .map_err(|_| crate::error::AppError::validation("That location can't be used."))
+        })
         .transpose()
 }
 
@@ -838,24 +1014,44 @@ pub async fn sql_export_table(
 ) -> AppResult<Option<TransferDone>> {
     state.require_unlocked()?;
     let my = state.sql.my(&conn_id).await?;
-    let pg = if my.is_some() { None } else { Some(state.sql.pg(&conn_id).await?) };
+    let pg = if my.is_some() {
+        None
+    } else {
+        Some(state.sql.pg(&conn_id).await?)
+    };
     let Some(path) = pick_save(&app, format!("{table}.{}", format.extension())).await? else {
         return Ok(None);
     };
     let stop = state.sql.begin_transfer(&transfer_id);
-    let file = std::fs::File::create(&path).map_err(|e| crate::error::AppError::validation(format!("Couldn't create that file: {e}")))?;
+    let file = std::fs::File::create(&path).map_err(|e| {
+        crate::error::AppError::validation(format!("Couldn't create that file: {e}"))
+    })?;
     let mut out = std::io::BufWriter::new(file);
     let report = |rows, bytes| {
         let _ = progress.send(TransferProgress { rows, bytes });
     };
     let result = match (&my, &pg) {
-        (Some(my), _) => my.export_table(&schema, &table, &filter, format, header, &mut out, &report, &stop).await,
-        (None, Some(pg)) => pg.export_table(&schema, &table, &filter, format, header, &mut out, &report, &stop).await,
+        (Some(my), _) => {
+            my.export_table(
+                &schema, &table, &filter, format, header, &mut out, &report, &stop,
+            )
+            .await
+        }
+        (None, Some(pg)) => {
+            pg.export_table(
+                &schema, &table, &filter, format, header, &mut out, &report, &stop,
+            )
+            .await
+        }
         _ => Err(crate::error::AppError::internal("no connection")),
     };
     state.sql.end_transfer(&transfer_id);
     match result {
-        Ok((rows, bytes)) => Ok(Some(TransferDone { path: path.display().to_string(), rows, bytes })),
+        Ok((rows, bytes)) => Ok(Some(TransferDone {
+            path: path.display().to_string(),
+            rows,
+            bytes,
+        })),
         Err(e) => {
             drop(out);
             let _ = std::fs::remove_file(&path);
@@ -882,11 +1078,21 @@ pub struct CsvFile {
 /// The open-file dialog for an import. Rust keeps the path; the window only shows the name.
 #[tauri::command]
 #[specta::specta]
-pub async fn sql_import_pick(app: tauri::AppHandle, state: State<'_, AppState>, conn_id: String) -> AppResult<Option<CsvFile>> {
+pub async fn sql_import_pick(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    conn_id: String,
+) -> AppResult<Option<CsvFile>> {
     state.require_unlocked()?;
     Ok(pick_open(&app, "Import a CSV").await?.map(|p| {
-        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        CsvFile { id: state.sql.put_file(&conn_id, p), name }
+        let name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        CsvFile {
+            id: state.sql.put_file(&conn_id, p),
+            name,
+        }
     }))
 }
 
@@ -913,11 +1119,20 @@ pub async fn sql_import_preview(
 ) -> AppResult<CsvPreview> {
     state.require_unlocked()?;
     let path = state.sql.file(&conn_id, &file_id)?;
-    let text = tokio::task::spawn_blocking(move || crate::sql::transfer::read_limited(&path)).await.map_err(|e| crate::error::AppError::internal(e.to_string()))??;
+    let text = tokio::task::spawn_blocking(move || crate::sql::transfer::read_limited(&path))
+        .await
+        .map_err(|e| crate::error::AppError::internal(e.to_string()))??;
     if let Some(my) = state.sql.my(&conn_id).await? {
-        return my.import_preview(&schema, &table, &text, delimiter(&delimiter_name), header).await;
+        return my
+            .import_preview(&schema, &table, &text, delimiter(&delimiter_name), header)
+            .await;
     }
-    state.sql.pg(&conn_id).await?.import_preview(&schema, &table, &text, delimiter(&delimiter_name), header).await
+    state
+        .sql
+        .pg(&conn_id)
+        .await?
+        .import_preview(&schema, &table, &text, delimiter(&delimiter_name), header)
+        .await
 }
 
 #[derive(Serialize, Type)]
@@ -950,21 +1165,53 @@ pub async fn sql_import_prepare(
         return Err(gate::read_only_error(&target.name));
     }
     let path = state.sql.file(&conn_id, &file_id)?;
-    let text = tokio::task::spawn_blocking(move || crate::sql::transfer::read_limited(&path)).await.map_err(|e| crate::error::AppError::internal(e.to_string()))??;
+    let text = tokio::task::spawn_blocking(move || crate::sql::transfer::read_limited(&path))
+        .await
+        .map_err(|e| crate::error::AppError::internal(e.to_string()))??;
     let plan = if let Some(my) = state.sql.my(&conn_id).await? {
-        my.import_plan(&schema, &table, &text, delimiter(&delimiter_name), header, &mapping).await?
+        my.import_plan(
+            &schema,
+            &table,
+            &text,
+            delimiter(&delimiter_name),
+            header,
+            &mapping,
+        )
+        .await?
     } else {
-        state.sql.pg(&conn_id).await?.import_plan(&schema, &table, &text, delimiter(&delimiter_name), header, &mapping).await?
+        state
+            .sql
+            .pg(&conn_id)
+            .await?
+            .import_plan(
+                &schema,
+                &table,
+                &text,
+                delimiter(&delimiter_name),
+                header,
+                &mapping,
+            )
+            .await?
     };
     let (rows, statement) = (plan.rows as f64, plan.statement.clone());
     let id = state.sql.import_pending.put(&conn_id, Class::Write, plan)?;
-    Ok(CsvImportPending { id, db_name: target.name, environment: target.environment, rows, statement })
+    Ok(CsvImportPending {
+        id,
+        db_name: target.name,
+        environment: target.environment,
+        rows,
+        statement,
+    })
 }
 
 /// Loads what `sql_import_prepare` held, in one transaction, after the mode is asked again. Returns the rows loaded.
 #[tauri::command]
 #[specta::specta]
-pub async fn sql_import_commit(state: State<'_, AppState>, conn_id: String, pending_id: String) -> AppResult<f64> {
+pub async fn sql_import_commit(
+    state: State<'_, AppState>,
+    conn_id: String,
+    pending_id: String,
+) -> AppResult<f64> {
     state.require_unlocked()?;
     let class = state.sql.import_pending.peek_class(&conn_id, &pending_id)?;
     let db_id = state.sql.db_id(&conn_id)?;
@@ -979,7 +1226,11 @@ pub async fn sql_import_commit(state: State<'_, AppState>, conn_id: String, pend
 
 #[tauri::command]
 #[specta::specta]
-pub fn sql_import_discard(state: State<'_, AppState>, conn_id: String, pending_id: String) -> AppResult<()> {
+pub fn sql_import_discard(
+    state: State<'_, AppState>,
+    conn_id: String,
+    pending_id: String,
+) -> AppResult<()> {
     let _ = state.sql.import_pending.take(&conn_id, &pending_id);
     Ok(())
 }
@@ -996,7 +1247,10 @@ pub struct BackupInfo {
 /// Which dump tool would run, where, and its version (S43's "Tool on db-primary").
 #[tauri::command]
 #[specta::specta]
-pub async fn sql_backup_check(state: State<'_, AppState>, conn_id: String) -> AppResult<BackupInfo> {
+pub async fn sql_backup_check(
+    state: State<'_, AppState>,
+    conn_id: String,
+) -> AppResult<BackupInfo> {
     state.require_unlocked()?;
     let db_id = state.sql.db_id(&conn_id)?;
     let cfg = sql::load(&state.store(), &db_id).await?;
@@ -1004,13 +1258,32 @@ pub async fn sql_backup_check(state: State<'_, AppState>, conn_id: String) -> Ap
     let runs_on = backup::runs_on(ssh.as_deref());
     let tool = match backup::tool_name(cfg.engine, Tool::Dump) {
         Ok(t) => t,
-        Err(e) => return Ok(BackupInfo { tool: String::new(), runs_on, version: None, problem: Some(e.message) }),
+        Err(e) => {
+            return Ok(BackupInfo {
+                tool: String::new(),
+                runs_on,
+                version: None,
+                problem: Some(e.message),
+            })
+        }
     };
     // MariaDB's own tool names are tried before the MySQL ones.
-    Ok(match backup::resolve_tool(ssh.as_deref(), cfg.engine, Tool::Dump).await {
-        Ok((name, v)) => BackupInfo { tool: name, runs_on, version: Some(v), problem: None },
-        Err(e) => BackupInfo { tool: tool.into(), runs_on, version: None, problem: Some(e.message) },
-    })
+    Ok(
+        match backup::resolve_tool(ssh.as_deref(), cfg.engine, Tool::Dump).await {
+            Ok((name, v)) => BackupInfo {
+                tool: name,
+                runs_on,
+                version: Some(v),
+                problem: None,
+            },
+            Err(e) => BackupInfo {
+                tool: tool.into(),
+                runs_on,
+                version: None,
+                problem: Some(e.message),
+            },
+        },
+    )
 }
 
 /// Runs the dump tool and streams its output to a file the person picks. `None` when the dialog was cancelled.
@@ -1028,13 +1301,25 @@ pub async fn sql_backup_start(
     let cfg = sql::load(&state.store(), &db_id).await?;
     backup::tool_name(cfg.engine, Tool::Dump)?;
     let ssh = state.sql.ssh(&conn_id).await?;
-    let ext = if backup::is_my(cfg.engine) { "sql" } else if backup::is_mongo(cfg.engine) { "archive.gz" } else { "dump" };
-    let name = format!("{}-{}.{ext}", cfg.database.clone().unwrap_or_else(|| cfg.name.clone()), chrono_free_date());
+    let ext = if backup::is_my(cfg.engine) {
+        "sql"
+    } else if backup::is_mongo(cfg.engine) {
+        "archive.gz"
+    } else {
+        "dump"
+    };
+    let name = format!(
+        "{}-{}.{ext}",
+        cfg.database.clone().unwrap_or_else(|| cfg.name.clone()),
+        chrono_free_date()
+    );
     let Some(path) = pick_save(&app, name).await? else {
         return Ok(None);
     };
     let stop = state.sql.begin_transfer(&transfer_id);
-    let file = std::fs::File::create(&path).map_err(|e| crate::error::AppError::validation(format!("Couldn't create that file: {e}")))?;
+    let file = std::fs::File::create(&path).map_err(|e| {
+        crate::error::AppError::validation(format!("Couldn't create that file: {e}"))
+    })?;
     let mut out = std::io::BufWriter::new(file);
     let result = backup::run(backup::Run {
         cfg: &cfg,
@@ -1053,8 +1338,14 @@ pub async fn sql_backup_start(
     drop(out);
     match result {
         Ok(()) => {
-            let bytes = std::fs::metadata(&path).map(|m| m.len() as f64).unwrap_or(0.0);
-            Ok(Some(TransferDone { path: path.display().to_string(), rows: 0.0, bytes }))
+            let bytes = std::fs::metadata(&path)
+                .map(|m| m.len() as f64)
+                .unwrap_or(0.0);
+            Ok(Some(TransferDone {
+                path: path.display().to_string(),
+                rows: 0.0,
+                bytes,
+            }))
         }
         Err(e) => {
             // A dump that did not finish is not a backup: it goes.
@@ -1066,7 +1357,10 @@ pub async fn sql_backup_start(
 
 /// Today as YYYY-MM-DD in UTC, without a date crate.
 fn chrono_free_date() -> String {
-    let days = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) / 86_400) as i64;
+    let days = (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+        / 86_400) as i64;
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);
@@ -1093,7 +1387,11 @@ pub struct RestorePending {
 /// has been switched to Open (which needs the master password).
 #[tauri::command]
 #[specta::specta]
-pub async fn sql_restore_prepare(app: tauri::AppHandle, state: State<'_, AppState>, conn_id: String) -> AppResult<Option<RestorePending>> {
+pub async fn sql_restore_prepare(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    conn_id: String,
+) -> AppResult<Option<RestorePending>> {
     state.require_unlocked()?;
     let db_id = state.sql.db_id(&conn_id)?;
     let target = sql::gate_target(&state.store(), &db_id).await?;
@@ -1118,10 +1416,25 @@ pub async fn sql_restore_prepare(app: tauri::AppHandle, state: State<'_, AppStat
         return Ok(None);
     };
     let ssh = state.sql.ssh(&conn_id).await?;
-    let file_bytes = std::fs::metadata(&path).map(|m| m.len() as f64).map_err(|e| crate::error::AppError::validation(format!("Couldn't read that file: {e}")))?;
-    let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let id = state.sql.restore_pending.put(&conn_id, Class::Dangerous, path)?;
-    Ok(Some(RestorePending { id, db_name: target.name, environment: target.environment, file_name, file_bytes, runs_on: backup::runs_on(ssh.as_deref()) }))
+    let file_bytes = std::fs::metadata(&path)
+        .map(|m| m.len() as f64)
+        .map_err(|e| crate::error::AppError::validation(format!("Couldn't read that file: {e}")))?;
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let id = state
+        .sql
+        .restore_pending
+        .put(&conn_id, Class::Dangerous, path)?;
+    Ok(Some(RestorePending {
+        id,
+        db_name: target.name,
+        environment: target.environment,
+        file_name,
+        file_bytes,
+        runs_on: backup::runs_on(ssh.as_deref()),
+    }))
 }
 
 /// Runs the restore tool on the held file after the database's exact name is typed and the mode asked again.
@@ -1136,7 +1449,10 @@ pub async fn sql_restore_commit(
     progress: Channel<TransferProgress>,
 ) -> AppResult<()> {
     state.require_unlocked()?;
-    let class = state.sql.restore_pending.peek_class(&conn_id, &pending_id)?;
+    let class = state
+        .sql
+        .restore_pending
+        .peek_class(&conn_id, &pending_id)?;
     let db_id = state.sql.db_id(&conn_id)?;
     let target = sql::gate_target(&state.store(), &db_id).await?;
     if target.environment == "production" && target.mode != RedisWriteMode::Open {
@@ -1166,7 +1482,11 @@ pub async fn sql_restore_commit(
 
 #[tauri::command]
 #[specta::specta]
-pub fn sql_restore_discard(state: State<'_, AppState>, conn_id: String, pending_id: String) -> AppResult<()> {
+pub fn sql_restore_discard(
+    state: State<'_, AppState>,
+    conn_id: String,
+    pending_id: String,
+) -> AppResult<()> {
     let _ = state.sql.restore_pending.take(&conn_id, &pending_id);
     Ok(())
 }

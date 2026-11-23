@@ -15,11 +15,18 @@ pub const KEEP: i64 = 500;
 /// `true` for text that may be written to history: nothing that sets a password.
 pub fn keep_sql(text: &str) -> bool {
     let t = text.to_ascii_lowercase();
-    let words: Vec<&str> = t.split(|c: char| !(c.is_alphanumeric() || c == '_')).collect();
+    let words: Vec<&str> = t
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .collect();
     let has = |w: &str| words.contains(&w);
     // Whole words: `password_hash` and `users` are not a password being set.
     let sets_password = (has("password") || has("passwd") || has("identified"))
-        && (has("role") || has("user") || has("alter") || has("set") || has("create") || has("identified"));
+        && (has("role")
+            || has("user")
+            || has("alter")
+            || has("set")
+            || has("create")
+            || has("identified"));
     !sets_password && !has("crypt") && !has("gen_salt")
 }
 

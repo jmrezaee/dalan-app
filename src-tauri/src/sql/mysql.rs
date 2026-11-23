@@ -87,7 +87,9 @@ async fn read_packet(s: &mut BoxStream) -> AppResult<(u8, Vec<u8>)> {
             return Err(AppError::new(ErrorCode::DbRefused, "The server sent a packet larger than Dalan will read (64 MB). Select fewer or smaller columns."));
         }
         out.resize(start + len, 0);
-        s.read_exact(&mut out[start..]).await.map_err(|_| closed())?;
+        s.read_exact(&mut out[start..])
+            .await
+            .map_err(|_| closed())?;
         // A payload of exactly 16 MB − 1 continues in the next packet.
         if len < MAX_PACKET {
             return Ok((seq, out));
@@ -160,11 +162,18 @@ pub fn server_error(payload: &[u8]) -> AppError {
     let mut c = Cur(payload, 1);
     let code = c.u16().unwrap_or(0);
     let rest = c.rest();
-    let msg = if rest.first() == Some(&b'#') { rest.get(6..).unwrap_or_default() } else { rest };
+    let msg = if rest.first() == Some(&b'#') {
+        rest.get(6..).unwrap_or_default()
+    } else {
+        rest
+    };
     let text = String::from_utf8_lossy(msg).into_owned();
     match code {
         // ER_ACCESS_DENIED_ERROR, ER_DBACCESS_DENIED_ERROR, ER_ACCESS_DENIED_NO_PASSWORD_ERROR
-        1045 | 1698 => AppError::new(ErrorCode::DbAuthFailed, format!("Wrong username or password. The server says: {text}")),
+        1045 | 1698 => AppError::new(
+            ErrorCode::DbAuthFailed,
+            format!("Wrong username or password. The server says: {text}"),
+        ),
         _ => AppError::new(ErrorCode::DbRefused, text),
     }
 }
@@ -189,7 +198,13 @@ pub fn kind_of(code: u8, flags: u16, charset: u16) -> (CellKind, &'static str) {
         245 => (CellKind::Json, "json"),
         247 => (CellKind::Enum, "enum"),
         248 => (CellKind::Enum, "set"),
-        249..=252 => if charset == 63 { (CellKind::Bytes, "blob") } else { (CellKind::Text, "text") },
+        249..=252 => {
+            if charset == 63 {
+                (CellKind::Bytes, "blob")
+            } else {
+                (CellKind::Text, "text")
+            }
+        }
         253 | 254 | 15 => {
             if flags & 256 != 0 {
                 (CellKind::Enum, "enum")
@@ -239,7 +254,8 @@ async fn read_columns(s: &mut BoxStream, n: usize) -> AppResult<Vec<MyColumn>> {
         for _ in 0..4 {
             c.lenenc_bytes().ok_or_else(closed)?;
         }
-        let name = String::from_utf8_lossy(c.lenenc_bytes().flatten().ok_or_else(closed)?).into_owned();
+        let name =
+            String::from_utf8_lossy(c.lenenc_bytes().flatten().ok_or_else(closed)?).into_owned();
         c.lenenc_bytes().ok_or_else(closed)?;
         c.u8().ok_or_else(closed)?; // 0x0c
         let charset = c.u16().ok_or_else(closed)?;
@@ -247,7 +263,11 @@ async fn read_columns(s: &mut BoxStream, n: usize) -> AppResult<Vec<MyColumn>> {
         let code = c.u8().ok_or_else(closed)?;
         let flags = c.u16().ok_or_else(closed)?;
         let (kind, type_name) = kind_of(code, flags, charset);
-        columns.push(MyColumn { name, type_name: type_name.into(), kind });
+        columns.push(MyColumn {
+            name,
+            type_name: type_name.into(),
+            kind,
+        });
     }
     Ok(columns)
 }
@@ -256,7 +276,11 @@ impl MyConn {
     /// A query whose rows are handed to `f` one at a time and never kept (a big export). `f` returns `false` to stop;
     /// the rest is still read (the server sends it all) and dropped, so the connection stays in step. Returns the
     /// columns and how many rows `f` saw.
-    pub async fn stream(&self, sql: &str, mut f: impl FnMut(&[MyColumn], Vec<Option<String>>) -> bool) -> AppResult<(Vec<MyColumn>, u64)> {
+    pub async fn stream(
+        &self,
+        sql: &str,
+        mut f: impl FnMut(&[MyColumn], Vec<Option<String>>) -> bool,
+    ) -> AppResult<(Vec<MyColumn>, u64)> {
         if self.closed.load(Ordering::SeqCst) {
             return Err(closed());
         }
@@ -294,12 +318,20 @@ impl MyConn {
                     continue;
                 }
                 let mut c = Cur(&row, 0);
-                let vals = columns.iter().map(|col| c.lenenc_bytes().map(|v| v.map(|b| text(col.kind, b)))).collect::<Option<Vec<_>>>().ok_or_else(closed)?;
+                let vals = columns
+                    .iter()
+                    .map(|col| c.lenenc_bytes().map(|v| v.map(|b| text(col.kind, b))))
+                    .collect::<Option<Vec<_>>>()
+                    .ok_or_else(closed)?;
                 seen += 1;
                 go = f(&columns, vals);
                 if !go {
                     // Stopped: ask the server to stop sending (from a second connection), then drain what is in flight.
-                    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), self.cancel_running()).await;
+                    let _ = tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        self.cancel_running(),
+                    )
+                    .await;
                 }
             }
             Ok((columns, seen))
@@ -312,20 +344,32 @@ impl MyConn {
     }
 
     /// Greeting, optional TLS, sign-in. `reopen` is the way back to the server (for a cancel).
-    pub async fn connect(stream: BoxStream, login: MyLogin, reopen: Reopen) -> AppResult<(MyConn, SqlServerInfo)> {
+    pub async fn connect(
+        stream: BoxStream,
+        login: MyLogin,
+        reopen: Reopen,
+    ) -> AppResult<(MyConn, SqlServerInfo)> {
         let started = Instant::now();
         let mut s = stream;
-        let (_, greeting) = tokio::time::timeout(CONNECT_TIMEOUT, read_packet(&mut s)).await.map_err(|_| closed())??;
+        let (_, greeting) = tokio::time::timeout(CONNECT_TIMEOUT, read_packet(&mut s))
+            .await
+            .map_err(|_| closed())??;
         if greeting.first() == Some(&0xff) {
             return Err(server_error(&greeting));
         }
-        let hs = HandshakePacket::deserialize((), &mut ParseBuf(&greeting)).map_err(|_| closed())?;
+        let hs =
+            HandshakePacket::deserialize((), &mut ParseBuf(&greeting)).map_err(|_| closed())?;
         let version = hs.server_version_str().to_string();
-        let flavour = if version.to_ascii_lowercase().contains("mariadb") { Flavour::MariaDb } else { Flavour::MySql };
+        let flavour = if version.to_ascii_lowercase().contains("mariadb") {
+            Flavour::MariaDb
+        } else {
+            Flavour::MySql
+        };
         let offered = hs.capabilities();
         let connection_id = hs.connection_id();
         let nonce = hs.nonce();
-        let mut plugin = String::from_utf8_lossy(hs.auth_plugin_name_ref().unwrap_or_default()).into_owned();
+        let mut plugin =
+            String::from_utf8_lossy(hs.auth_plugin_name_ref().unwrap_or_default()).into_owned();
         let mut caps = CapabilityFlags::CLIENT_PROTOCOL_41
             | CapabilityFlags::CLIENT_SECURE_CONNECTION
             | CapabilityFlags::CLIENT_LONG_PASSWORD
@@ -351,27 +395,56 @@ impl MyConn {
             req.extend_from_slice(&[0u8; 23]);
             write_packet(&mut s, seq, &req).await?;
             seq += 1;
-            let name = rustls::pki_types::ServerName::try_from(login.server_name.clone()).map_err(|_| AppError::validation(format!("{} can't be used as a TLS server name.", login.server_name)))?;
+            let name = rustls::pki_types::ServerName::try_from(login.server_name.clone()).map_err(
+                |_| {
+                    AppError::validation(format!(
+                        "{} can't be used as a TLS server name.",
+                        login.server_name
+                    ))
+                },
+            )?;
             let connector = tokio_rustls::TlsConnector::from(tls_client_config(login.tls)?);
             let tls = tokio::time::timeout(CONNECT_TIMEOUT, connector.connect(name, s))
                 .await
-                .map_err(|_| AppError::new(ErrorCode::DbUnreachable, "The TLS handshake took too long. Is this port really TLS?"))?
+                .map_err(|_| {
+                    AppError::new(
+                        ErrorCode::DbUnreachable,
+                        "The TLS handshake took too long. Is this port really TLS?",
+                    )
+                })?
                 .map_err(|e| tls_error(Engine::Mysql, &e, &login.server_name))?;
             s = Box::new(tls);
             encrypted = true;
         }
-        let pass = Zeroizing::new(login.password.as_ref().map_or("", |p| p.as_str()).to_string());
+        let pass = Zeroizing::new(
+            login
+                .password
+                .as_ref()
+                .map_or("", |p| p.as_str())
+                .to_string(),
+        );
         let auth = match plugin.as_str() {
             "mysql_native_password" => AuthPlugin::MysqlNativePassword,
             "caching_sha2_password" => AuthPlugin::CachingSha2Password,
             _ => AuthPlugin::MysqlNativePassword,
         };
-        let first = if matches!(plugin.as_str(), "mysql_native_password" | "caching_sha2_password") { scramble(&plugin, &nonce, &pass)? } else { Vec::new() };
+        let first = if matches!(
+            plugin.as_str(),
+            "mysql_native_password" | "caching_sha2_password"
+        ) {
+            scramble(&plugin, &nonce, &pass)?
+        } else {
+            Vec::new()
+        };
         let response = HandshakeResponse::new(
             Some(first),
             (8, 0, 0),
             Some(login.user.as_bytes().to_vec()),
-            login.database.clone().filter(|d| !d.is_empty()).map(String::into_bytes),
+            login
+                .database
+                .clone()
+                .filter(|d| !d.is_empty())
+                .map(String::into_bytes),
             Some(auth),
             caps,
             None,
@@ -382,7 +455,9 @@ impl MyConn {
         write_packet(&mut s, seq, &out).await?;
         // The answer: OK, error, an auth switch (0xfe), or caching_sha2's status (0x01 + byte).
         loop {
-            let (rseq, reply) = tokio::time::timeout(CONNECT_TIMEOUT, read_packet(&mut s)).await.map_err(|_| closed())??;
+            let (rseq, reply) = tokio::time::timeout(CONNECT_TIMEOUT, read_packet(&mut s))
+                .await
+                .map_err(|_| closed())??;
             seq = rseq.wrapping_add(1);
             match reply.first() {
                 Some(0x00) => break,
@@ -410,19 +485,50 @@ impl MyConn {
                 _ => return Err(closed()),
             }
         }
-        let conn = MyConn { stream: tokio::sync::Mutex::new(s), connection_id, flavour, version: version.clone(), reopen, login: login.clone(), closed: AtomicBool::new(false) };
+        let conn = MyConn {
+            stream: tokio::sync::Mutex::new(s),
+            connection_id,
+            flavour,
+            version: version.clone(),
+            reopen,
+            login: login.clone(),
+            closed: AtomicBool::new(false),
+        };
         let row = tokio::time::timeout(CONNECT_TIMEOUT, async {
             conn.query("SET NAMES utf8mb4", 0).await?;
             // Strings are escaped with backslashes and doubled quotes everywhere in Dalan: the session must agree.
-            conn.query("SET SESSION sql_mode = REPLACE(@@sql_mode, 'NO_BACKSLASH_ESCAPES', '')", 0).await?;
+            conn.query(
+                "SET SESSION sql_mode = REPLACE(@@sql_mode, 'NO_BACKSLASH_ESCAPES', '')",
+                0,
+            )
+            .await?;
             conn.query("select database(), current_user()", 1).await
         })
         .await
         .map_err(|_| closed())??;
-        let get = |i: usize| row.rows.first().and_then(|r| r.get(i)).cloned().flatten().unwrap_or_default();
+        let get = |i: usize| {
+            row.rows
+                .first()
+                .and_then(|r| r.get(i))
+                .cloned()
+                .flatten()
+                .unwrap_or_default()
+        };
         let info = SqlServerInfo {
-            engine: if flavour == Flavour::MariaDb { "mariadb" } else { "mysql" }.into(),
-            version: format!("{} {version}", if flavour == Flavour::MariaDb { "MariaDB" } else { "MySQL" }),
+            engine: if flavour == Flavour::MariaDb {
+                "mariadb"
+            } else {
+                "mysql"
+            }
+            .into(),
+            version: format!(
+                "{} {version}",
+                if flavour == Flavour::MariaDb {
+                    "MariaDB"
+                } else {
+                    "MySQL"
+                }
+            ),
             database: get(0),
             user: get(1),
             latency_ms: started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32,
@@ -456,7 +562,10 @@ impl MyConn {
             Some(0x00) => {
                 let mut c = Cur(&head, 1);
                 let affected = c.lenenc_int().flatten().unwrap_or(0);
-                return Ok(MyResult { affected, ..MyResult::default() });
+                return Ok(MyResult {
+                    affected,
+                    ..MyResult::default()
+                });
             }
             Some(0xfb) => {
                 // An empty packet says "no file"; the server then answers with its final OK or error.
@@ -491,16 +600,34 @@ impl MyConn {
                 continue;
             }
             let mut c = Cur(&row, 0);
-            rows.push(columns.iter().map(|col| c.lenenc_bytes().map(|v| v.map(|b| text(col.kind, b)))).collect::<Option<Vec<_>>>().ok_or_else(closed)?);
+            rows.push(
+                columns
+                    .iter()
+                    .map(|col| c.lenenc_bytes().map(|v| v.map(|b| text(col.kind, b))))
+                    .collect::<Option<Vec<_>>>()
+                    .ok_or_else(closed)?,
+            );
         }
-        Ok(MyResult { columns, rows, affected: 0, more })
+        Ok(MyResult {
+            columns,
+            rows,
+            affected: 0,
+            more,
+        })
     }
 
     /// Stops what this connection is running, from a second connection through the same route.
     pub async fn cancel_running(&self) -> AppResult<()> {
         let stream = (self.reopen)().await?;
-        let (other, _) = MyConn::connect(stream, self.login.clone(), std::sync::Arc::clone(&self.reopen)).await?;
-        other.query(&format!("KILL QUERY {}", self.connection_id), 0).await?;
+        let (other, _) = MyConn::connect(
+            stream,
+            self.login.clone(),
+            std::sync::Arc::clone(&self.reopen),
+        )
+        .await?;
+        other
+            .query(&format!("KILL QUERY {}", self.connection_id), 0)
+            .await?;
         other.close().await;
         Ok(())
     }
@@ -509,7 +636,10 @@ impl MyConn {
     pub async fn set_timeout(&self, ms: u32) -> AppResult<()> {
         let sql = match self.flavour {
             Flavour::MySql => format!("SET SESSION max_execution_time = {ms}"),
-            Flavour::MariaDb => format!("SET SESSION max_statement_time = {}", f64::from(ms) / 1000.0),
+            Flavour::MariaDb => format!(
+                "SET SESSION max_statement_time = {}",
+                f64::from(ms) / 1000.0
+            ),
         };
         self.query(&sql, 0).await.map(|_| ())
     }
@@ -519,8 +649,14 @@ impl MyConn {
             return;
         }
         // A connection stuck in a query can't be asked to quit politely: don't wait for it.
-        if let Ok(mut s) = tokio::time::timeout(std::time::Duration::from_secs(1), self.stream.lock()).await {
-            let _ = tokio::time::timeout(std::time::Duration::from_secs(1), write_packet(&mut s, 0, &[0x01])).await;
+        if let Ok(mut s) =
+            tokio::time::timeout(std::time::Duration::from_secs(1), self.stream.lock()).await
+        {
+            let _ = tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                write_packet(&mut s, 0, &[0x01]),
+            )
+            .await;
         }
     }
 }
@@ -551,7 +687,10 @@ mod tests {
         let mut q = vec![0xff, 0x7a, 0x04];
         q.extend_from_slice(b"#42S02Table 'shop.nope' doesn't exist");
         let e = server_error(&q);
-        assert_eq!((e.code, e.message.as_str()), (ErrorCode::DbRefused, "Table 'shop.nope' doesn't exist"));
+        assert_eq!(
+            (e.code, e.message.as_str()),
+            (ErrorCode::DbRefused, "Table 'shop.nope' doesn't exist")
+        );
         assert_eq!(server_error(&[0xff]).code, ErrorCode::DbRefused);
         // 1044 is a database permission, not a wrong password.
         let mut d = vec![0xff, 0x14, 0x04];
@@ -564,7 +703,10 @@ mod tests {
         assert_eq!(kind_of(8, 0, 63).0, CellKind::Int);
         assert_eq!(kind_of(246, 0, 63).0, CellKind::Decimal);
         assert_eq!(kind_of(252, 0, 63).0, CellKind::Bytes);
-        assert_eq!((kind_of(16, 0, 63).0, kind_of(255, 0, 63).0), (CellKind::Bytes, CellKind::Bytes));
+        assert_eq!(
+            (kind_of(16, 0, 63).0, kind_of(255, 0, 63).0),
+            (CellKind::Bytes, CellKind::Bytes)
+        );
         assert_eq!(kind_of(252, 0, 45).0, CellKind::Text);
         assert_eq!(kind_of(254, 256, 45).0, CellKind::Enum);
         assert_eq!(kind_of(245, 0, 45).0, CellKind::Json);
@@ -596,7 +738,11 @@ mod wire_tests {
             }
             // Whatever the client sends next (an empty packet answering LOCAL INFILE).
             let mut rest = vec![0u8; 4];
-            let _ = tokio::time::timeout(std::time::Duration::from_millis(300), server.read_exact(&mut rest)).await;
+            let _ = tokio::time::timeout(
+                std::time::Duration::from_millis(300),
+                server.read_exact(&mut rest),
+            )
+            .await;
             rest
         });
         (Box::new(client), h)
@@ -624,7 +770,15 @@ mod wire_tests {
         row.extend_from_slice(&(big.len() as u64).to_le_bytes());
         row.extend_from_slice(&big);
         assert!(row.len() >= 9);
-        let (mut s, h) = stub(vec![vec![1], coldef("a", 253), vec![0xfe, 0, 0, 2, 0], row, vec![3, b'a', b'b', b'c'], vec![0xfe, 0, 0, 2, 0]]).await;
+        let (mut s, h) = stub(vec![
+            vec![1],
+            coldef("a", 253),
+            vec![0xfe, 0, 0, 2, 0],
+            row,
+            vec![3, b'a', b'b', b'c'],
+            vec![0xfe, 0, 0, 2, 0],
+        ])
+        .await;
         let r = MyConn::exchange(&mut s, "select a", 100).await.unwrap();
         assert_eq!(r.rows.len(), 2);
         assert_eq!(r.rows[0][0].as_deref().map(str::len), Some(300));
@@ -637,15 +791,31 @@ mod wire_tests {
         let (mut s, h) = stub(vec![vec![1], vec![3, b'd', b'e', b'f']]).await;
         assert!(MyConn::exchange(&mut s, "x", 10).await.is_err());
         h.abort();
-        let (mut s, h) = stub(vec![vec![1], coldef("a", 253), vec![0xfe, 0, 0, 2, 0], vec![5, b'a']]).await;
+        let (mut s, h) = stub(vec![
+            vec![1],
+            coldef("a", 253),
+            vec![0xfe, 0, 0, 2, 0],
+            vec![5, b'a'],
+        ])
+        .await;
         assert!(MyConn::exchange(&mut s, "x", 10).await.is_err());
         h.abort();
     }
 
     #[tokio::test]
     async fn a_request_for_a_local_file_is_answered_with_an_empty_packet_and_refused() {
-        let (mut s, h) = stub(vec![vec![0xfb, b'/', b'e', b't', b'c'], vec![0xff, 0x14, 0x04, b'n', b'o']]).await;
-        let e = MyConn::exchange(&mut s, "load data local infile '/etc/passwd' into table t", 10).await.unwrap_err();
+        let (mut s, h) = stub(vec![
+            vec![0xfb, b'/', b'e', b't', b'c'],
+            vec![0xff, 0x14, 0x04, b'n', b'o'],
+        ])
+        .await;
+        let e = MyConn::exchange(
+            &mut s,
+            "load data local infile '/etc/passwd' into table t",
+            10,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(e.code, ErrorCode::DbRefused);
         assert!(e.message.contains("local file"));
         let sent = h.await.unwrap();
@@ -657,15 +827,43 @@ mod wire_tests {
     #[tokio::test]
     async fn a_dropped_query_marks_the_connection_dead_and_ok_packets_report_rows() {
         let (client, mut server) = duplex(1 << 16);
-        let conn = MyConn { stream: tokio::sync::Mutex::new(Box::new(client)), connection_id: 1, flavour: Flavour::MySql, version: String::new(), reopen: std::sync::Arc::new(|| Box::pin(async { Err(closed()) })), login: MyLogin { user: String::new(), password: None, database: None, tls: TlsMode::Off, server_name: String::new() }, closed: AtomicBool::new(false) };
+        let conn = MyConn {
+            stream: tokio::sync::Mutex::new(Box::new(client)),
+            connection_id: 1,
+            flavour: Flavour::MySql,
+            version: String::new(),
+            reopen: std::sync::Arc::new(|| Box::pin(async { Err(closed()) })),
+            login: MyLogin {
+                user: String::new(),
+                password: None,
+                database: None,
+                tls: TlsMode::Off,
+                server_name: String::new(),
+            },
+            closed: AtomicBool::new(false),
+        };
         // The server never answers: the caller gives up.
-        let r = tokio::time::timeout(std::time::Duration::from_millis(100), conn.query("select sleep(9)", 0)).await;
+        let r = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            conn.query("select sleep(9)", 0),
+        )
+        .await;
         assert!(r.is_err());
-        assert_eq!(conn.query("select 1", 0).await.unwrap_err().code, ErrorCode::DbUnreachable, "the stream is mid-query: unusable");
+        assert_eq!(
+            conn.query("select 1", 0).await.unwrap_err().code,
+            ErrorCode::DbUnreachable,
+            "the stream is mid-query: unusable"
+        );
         drop(server.write_all(&[]).await);
         // An OK packet carries the affected rows.
         let (mut s, h) = stub(vec![vec![0x00, 7, 0, 2, 0, 0, 0]]).await;
-        assert_eq!(MyConn::exchange(&mut s, "update t set a = 1", 10).await.unwrap().affected, 7);
+        assert_eq!(
+            MyConn::exchange(&mut s, "update t set a = 1", 10)
+                .await
+                .unwrap()
+                .affected,
+            7
+        );
         h.abort();
     }
 }
@@ -678,7 +876,12 @@ mod docker_tests {
     fn reopen_to(port: u16) -> Reopen {
         std::sync::Arc::new(move || {
             Box::pin(async move {
-                let t = Target { address: "127.0.0.1".into(), port, tls: false, tls_server_name: None };
+                let t = Target {
+                    address: "127.0.0.1".into(),
+                    port,
+                    tls: false,
+                    tls_server_name: None,
+                };
                 transport::direct_for(Engine::Mysql, &t).await
             })
         })
@@ -686,21 +889,35 @@ mod docker_tests {
 
     async fn connect(port: u16, pass: &str, tls: TlsMode) -> AppResult<(MyConn, SqlServerInfo)> {
         let stream = (reopen_to(port))().await?;
-        let login = MyLogin { user: "app".into(), password: Some(Zeroizing::new(pass.into())), database: Some("shop".into()), tls, server_name: "127.0.0.1".into() };
+        let login = MyLogin {
+            user: "app".into(),
+            password: Some(Zeroizing::new(pass.into())),
+            database: Some("shop".into()),
+            tls,
+            server_name: "127.0.0.1".into(),
+        };
         MyConn::connect(stream, login, reopen_to(port)).await
     }
 
-    const SERVERS: [(u16, &str, &str, Flavour); 2] = [(13306, "test-mysql", "MySQL", Flavour::MySql), (13307, "test-mariadb", "MariaDB", Flavour::MariaDb)];
+    const SERVERS: [(u16, &str, &str, Flavour); 2] = [
+        (13306, "test-mysql", "MySQL", Flavour::MySql),
+        (13307, "test-mariadb", "MariaDB", Flavour::MariaDb),
+    ];
 
     #[tokio::test]
     #[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
     async fn l3_my_both_servers_sign_in_plain_and_with_tls_and_report_what_they_are() {
         for (port, pw, label, flavour) in SERVERS {
             for tls in [TlsMode::Off, TlsMode::Require] {
-                let (c, info) = connect(port, pw, tls).await.unwrap_or_else(|e| panic!("{label} {tls:?}: {}", e.message));
+                let (c, info) = connect(port, pw, tls)
+                    .await
+                    .unwrap_or_else(|e| panic!("{label} {tls:?}: {}", e.message));
                 assert_eq!(c.flavour, flavour, "{label}");
                 assert!(info.version.starts_with(label), "{}", info.version);
-                assert_eq!((info.database.as_str(), info.engine.as_str()), ("shop", label.to_lowercase().as_str()));
+                assert_eq!(
+                    (info.database.as_str(), info.engine.as_str()),
+                    ("shop", label.to_lowercase().as_str())
+                );
                 assert!(info.user.starts_with("app@"), "{}", info.user);
                 c.close().await;
             }
@@ -727,7 +944,11 @@ mod docker_tests {
             };
             let row = &r.rows[0];
             assert_eq!(row[0].as_deref(), Some("9223372036854775807"), "{label}");
-            assert_eq!(row[1].as_deref(), Some("12345678901234567890.123456789"), "{label}");
+            assert_eq!(
+                row[1].as_deref(),
+                Some("12345678901234567890.123456789"),
+                "{label}"
+            );
             assert_eq!(row[3].as_deref(), Some("né 😀"));
             assert_eq!(row[4], None);
             assert_eq!(row[5].as_deref(), Some("\\xdeadbeef"));
@@ -736,7 +957,10 @@ mod docker_tests {
             assert_eq!(r.columns[1].kind, CellKind::Decimal);
             assert_eq!(r.columns[5].kind, CellKind::Bytes);
             // The server's own error text, and the connection still works.
-            let e = c.query("select * from shop.nope_not_here", 0).await.unwrap_err();
+            let e = c
+                .query("select * from shop.nope_not_here", 0)
+                .await
+                .unwrap_err();
             assert_eq!(e.code, ErrorCode::DbRefused);
             assert!(e.message.contains("nope_not_here"), "{}", e.message);
             let e = c.query("selec 1", 0).await.unwrap_err();
@@ -748,15 +972,24 @@ mod docker_tests {
             let r = c.query(big, 0).await.unwrap();
             assert_eq!((r.rows.len(), r.more), (3000, false));
             // A statement that changes something reports how many rows.
-            c.query("create temporary table t1 (a int)", 0).await.unwrap();
-            assert_eq!(c.query("insert into t1 values (1), (2), (3)", 0).await.unwrap().affected, 3);
+            c.query("create temporary table t1 (a int)", 0)
+                .await
+                .unwrap();
+            assert_eq!(
+                c.query("insert into t1 values (1), (2), (3)", 0)
+                    .await
+                    .unwrap()
+                    .affected,
+                3
+            );
             c.close().await;
         }
     }
 
     #[tokio::test]
     #[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
-    async fn l3_my_stop_kills_the_running_query_from_a_second_connection_and_a_time_limit_ends_a_select() {
+    async fn l3_my_stop_kills_the_running_query_from_a_second_connection_and_a_time_limit_ends_a_select(
+    ) {
         for (port, pw, label, flavour) in SERVERS {
             let (c, _) = connect(port, pw, TlsMode::Off).await.unwrap();
             let c = std::sync::Arc::new(c);
@@ -768,15 +1001,27 @@ mod docker_tests {
             let r = job.await.unwrap();
             // MySQL answers an interrupted sleep() with 1; MariaDB with an error: either way it ended early.
             let _ = r;
-            assert!(started.elapsed() < std::time::Duration::from_secs(10), "{label}: not cut short");
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(10),
+                "{label}: not cut short"
+            );
             // Still usable afterwards.
-            assert_eq!(c.query("select 1", 0).await.unwrap().rows[0][0].as_deref(), Some("1"));
+            assert_eq!(
+                c.query("select 1", 0).await.unwrap().rows[0][0].as_deref(),
+                Some("1")
+            );
             c.set_timeout(1000).await.unwrap();
             let t = Instant::now();
             let _ = c.query("select sleep(20)", 0).await;
             let _ = flavour;
-            assert!(t.elapsed() < std::time::Duration::from_secs(10), "{label}: the time limit did nothing");
-            assert_eq!(c.query("select 2", 0).await.unwrap().rows[0][0].as_deref(), Some("2"));
+            assert!(
+                t.elapsed() < std::time::Duration::from_secs(10),
+                "{label}: the time limit did nothing"
+            );
+            assert_eq!(
+                c.query("select 2", 0).await.unwrap().rows[0][0].as_deref(),
+                Some("2")
+            );
         }
     }
 
@@ -787,13 +1032,34 @@ mod docker_tests {
         use crate::ssh::tests::harness;
         let h = harness(None).await;
         let ssh = sign_in_to_a(&h).await;
-        for (name, pw, label) in [("mysql", "test-mysql", "MySQL"), ("mariadb", "test-mariadb", "MariaDB")] {
-            let target = Target { address: name.into(), port: 3306, tls: false, tls_server_name: None };
-            let stream = transport::through_host_for(Engine::Mysql, &ssh, &target).await.unwrap();
-            let login = MyLogin { user: "app".into(), password: Some(Zeroizing::new(pw.into())), database: Some("shop".into()), tls: TlsMode::Require, server_name: name.into() };
-            let (c, info) = MyConn::connect(stream, login, reopen_to(1)).await.unwrap_or_else(|e| panic!("{label}: {}", e.message));
+        for (name, pw, label) in [
+            ("mysql", "test-mysql", "MySQL"),
+            ("mariadb", "test-mariadb", "MariaDB"),
+        ] {
+            let target = Target {
+                address: name.into(),
+                port: 3306,
+                tls: false,
+                tls_server_name: None,
+            };
+            let stream = transport::through_host_for(Engine::Mysql, &ssh, &target)
+                .await
+                .unwrap();
+            let login = MyLogin {
+                user: "app".into(),
+                password: Some(Zeroizing::new(pw.into())),
+                database: Some("shop".into()),
+                tls: TlsMode::Require,
+                server_name: name.into(),
+            };
+            let (c, info) = MyConn::connect(stream, login, reopen_to(1))
+                .await
+                .unwrap_or_else(|e| panic!("{label}: {}", e.message));
             assert!(info.version.starts_with(label), "{}", info.version);
-            assert_eq!(c.query("select 41 + 1", 0).await.unwrap().rows[0][0].as_deref(), Some("42"));
+            assert_eq!(
+                c.query("select 41 + 1", 0).await.unwrap().rows[0][0].as_deref(),
+                Some("42")
+            );
         }
     }
 }

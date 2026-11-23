@@ -375,7 +375,10 @@ pub fn run() {
 /// `Some(n)` when quitting now would end `n` live sessions and the UI must be asked first.
 fn quit_question(app: &tauri::AppHandle) -> Option<u32> {
     let st = app.try_state::<AppState>()?;
-    match st.quit.decide(st.sessions.live_count() + st.sql.open_transactions()) {
+    match st
+        .quit
+        .decide(st.sessions.live_count() + st.sql.open_transactions())
+    {
         quit::Decision::Allow => None,
         quit::Decision::Ask(n) => Some(n),
     }

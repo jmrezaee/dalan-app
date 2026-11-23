@@ -2,8 +2,8 @@
 //! Dalan hands it (D0), so this is our own client: `OP_MSG` and BSON on the stream (direct, or an SSH `direct-tcpip`
 //! channel), TLS wrapped around it as MongoDB wants, SCRAM sign-in, and commands as BSON documents.
 
+pub mod aggregate;
 pub mod conn;
 pub mod docs;
-pub mod aggregate;
 pub mod schema;
 pub mod shell;

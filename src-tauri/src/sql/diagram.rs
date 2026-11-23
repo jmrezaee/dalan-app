@@ -56,14 +56,21 @@ fn action(c: &str) -> &'static str {
 }
 
 /// Tables reachable from `start` in at most `steps` foreign-key hops, either direction. A pure function so the walk is tested.
-pub fn reach(start: &[(String, String)], edges: &[DiagramEdge], steps: u32) -> Vec<(String, String)> {
+pub fn reach(
+    start: &[(String, String)],
+    edges: &[DiagramEdge],
+    steps: u32,
+) -> Vec<(String, String)> {
     let mut seen: HashSet<(String, String)> = start.iter().cloned().collect();
     let mut order: Vec<(String, String)> = start.to_vec();
     let mut frontier: Vec<(String, String)> = start.to_vec();
     for _ in 0..steps {
         let mut next = Vec::new();
         for e in edges {
-            let (a, b) = ((e.from_schema.clone(), e.from_table.clone()), (e.to_schema.clone(), e.to_table.clone()));
+            let (a, b) = (
+                (e.from_schema.clone(), e.from_table.clone()),
+                (e.to_schema.clone(), e.to_table.clone()),
+            );
             for (x, y) in [(&a, &b), (&b, &a)] {
                 if frontier.contains(x) && seen.insert(y.clone()) {
                     order.push(y.clone());
@@ -101,8 +108,16 @@ impl PgConn {
         let edges: Vec<DiagramEdge> = rows
             .iter()
             .map(|r| DiagramEdge {
-                from_schema: r.get(0), from_table: r.get(1), to_schema: r.get(2), to_table: r.get(3), name: r.get(4), from_columns: r.get(5), to_columns: r.get(6),
-                on_delete: action(&r.get::<_, String>(7)).into(), on_update: action(&r.get::<_, String>(8)).into(), indexed: r.get(9),
+                from_schema: r.get(0),
+                from_table: r.get(1),
+                to_schema: r.get(2),
+                to_table: r.get(3),
+                name: r.get(4),
+                from_columns: r.get(5),
+                to_columns: r.get(6),
+                on_delete: action(&r.get::<_, String>(7)).into(),
+                on_update: action(&r.get::<_, String>(8)).into(),
+                indexed: r.get(9),
             })
             .collect();
         let total: i64 = self
@@ -127,18 +142,46 @@ impl PgConn {
             .map_err(|e| map_error(&e))?;
         let mut by: HashMap<(String, String), Vec<DiagramColumn>> = HashMap::new();
         for r in &cols {
-            by.entry((r.get(0), r.get(1))).or_default().push(DiagramColumn { name: r.get(2), type_name: r.get(3), pk: r.get(4), fk: r.get(5) });
+            by.entry((r.get(0), r.get(1)))
+                .or_default()
+                .push(DiagramColumn {
+                    name: r.get(2),
+                    type_name: r.get(3),
+                    pk: r.get(4),
+                    fk: r.get(5),
+                });
         }
         if !start.is_empty() && !by.keys().any(|k| start.contains(k)) {
-            return Err(crate::error::AppError::not_found("That table wasn't found. Pick one from the list."));
+            return Err(crate::error::AppError::not_found(
+                "That table wasn't found. Pick one from the list.",
+            ));
         }
-        let tables: Vec<DiagramTable> = names.iter().filter_map(|k| by.remove(k).map(|columns| DiagramTable { schema: k.0.clone(), name: k.1.clone(), columns })).collect();
-        let shown: HashSet<(String, String)> = tables.iter().map(|t| (t.schema.clone(), t.name.clone())).collect();
+        let tables: Vec<DiagramTable> = names
+            .iter()
+            .filter_map(|k| {
+                by.remove(k).map(|columns| DiagramTable {
+                    schema: k.0.clone(),
+                    name: k.1.clone(),
+                    columns,
+                })
+            })
+            .collect();
+        let shown: HashSet<(String, String)> = tables
+            .iter()
+            .map(|t| (t.schema.clone(), t.name.clone()))
+            .collect();
         let edges = edges
             .into_iter()
-            .filter(|e| shown.contains(&(e.from_schema.clone(), e.from_table.clone())) && shown.contains(&(e.to_schema.clone(), e.to_table.clone())))
+            .filter(|e| {
+                shown.contains(&(e.from_schema.clone(), e.from_table.clone()))
+                    && shown.contains(&(e.to_schema.clone(), e.to_table.clone()))
+            })
             .collect();
-        Ok(Diagram { tables, edges, total_tables: total.max(0) as u32 })
+        Ok(Diagram {
+            tables,
+            edges,
+            total_tables: total.max(0) as u32,
+        })
     }
 }
 
@@ -147,12 +190,29 @@ mod tests {
     use super::*;
 
     fn edge(a: &str, b: &str) -> DiagramEdge {
-        DiagramEdge { name: format!("{a}_{b}"), from_schema: "public".into(), from_table: a.into(), from_columns: vec![], to_schema: "public".into(), to_table: b.into(), to_columns: vec![], on_delete: "no action".into(), on_update: "no action".into(), indexed: true }
+        DiagramEdge {
+            name: format!("{a}_{b}"),
+            from_schema: "public".into(),
+            from_table: a.into(),
+            from_columns: vec![],
+            to_schema: "public".into(),
+            to_table: b.into(),
+            to_columns: vec![],
+            on_delete: "no action".into(),
+            on_update: "no action".into(),
+            indexed: true,
+        }
     }
 
     #[test]
     fn cycles_and_self_references_end() {
-        let edges = [edge("a", "b"), edge("b", "a"), edge("a", "a"), edge("b", "c"), edge("c", "a")];
+        let edges = [
+            edge("a", "b"),
+            edge("b", "a"),
+            edge("a", "a"),
+            edge("b", "c"),
+            edge("c", "a"),
+        ];
         let start = [("public".to_string(), "a".to_string())];
         assert_eq!(reach(&start, &edges, 5).len(), 3);
         assert_eq!(reach(&[], &edges, 3).len(), 0);
@@ -161,13 +221,23 @@ mod tests {
     #[test]
     fn the_walk_goes_both_ways_and_stops_at_the_steps() {
         // items -> orders -> customers ; payments -> orders ; far -> customers
-        let edges = [edge("items", "orders"), edge("orders", "customers"), edge("payments", "orders"), edge("far", "customers")];
+        let edges = [
+            edge("items", "orders"),
+            edge("orders", "customers"),
+            edge("payments", "orders"),
+            edge("far", "customers"),
+        ];
         let start = [("public".to_string(), "orders".to_string())];
         let t = |v: Vec<(String, String)>| v.into_iter().map(|x| x.1).collect::<Vec<_>>();
         assert_eq!(t(reach(&start, &edges, 0)), ["orders"]);
         let one = t(reach(&start, &edges, 1));
         assert_eq!(one.len(), 4);
-        assert!(one.contains(&"items".into()) && one.contains(&"customers".into()) && one.contains(&"payments".into()) && !one.contains(&"far".into()));
+        assert!(
+            one.contains(&"items".into())
+                && one.contains(&"customers".into())
+                && one.contains(&"payments".into())
+                && !one.contains(&"far".into())
+        );
         assert!(t(reach(&start, &edges, 2)).contains(&"far".into()));
     }
 }

@@ -552,14 +552,24 @@ async fn l3_pg_a_script_streams_each_result_in_batches_and_stops_at_the_limit() 
     // A limit: exactly that many rows, and `more` says there were others.
     let ev = run(&c, "select id from d2.orders order by id", 100, 30_000).await;
     assert_eq!(row_count(&ev, 0), 100);
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, SqlRunEvent::Done { rows: 100, more: true, .. })));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        SqlRunEvent::Done {
+            rows: 100,
+            more: true,
+            ..
+        }
+    )));
     // At exactly the limit there is nothing more.
     let ev = run(&c, "select id from d2.customers order by id", 50, 30_000).await;
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, SqlRunEvent::Done { rows: 50, more: false, .. })));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        SqlRunEvent::Done {
+            rows: 50,
+            more: false,
+            ..
+        }
+    )));
     // Values keep every digit; NULL is NULL; show and explain answer without a cursor.
     let ev = run(&c, "select big, dec from d2.types", 0, 30_000).await;
     let cell = ev
@@ -599,7 +609,13 @@ async fn l3_pg_nothing_but_a_read_runs_and_a_refused_script_runs_nothing() {
         assert_eq!(row_count(&ev, 0), 0, "{sql}");
     }
     // One write in a script of reads: not even the reads run.
-    let ev = run(&c, "select 1; insert into d2.log values (9); select 2", 0, 30_000).await;
+    let ev = run(
+        &c,
+        "select 1; insert into d2.log values (9); select 2",
+        0,
+        30_000,
+    )
+    .await;
     assert!(ev
         .iter()
         .any(|e| matches!(e, SqlRunEvent::Refused { index: 1, .. })));
@@ -615,9 +631,17 @@ async fn l3_pg_nothing_but_a_read_runs_and_a_refused_script_runs_nothing() {
         .unwrap();
     assert_eq!(n, "0");
     // A bad statement fails with the server's own words and stops the script; the connection is still good.
-    let ev = run(&c, "select 1; select * from d2.missing; select 3", 0, 30_000).await;
+    let ev = run(
+        &c,
+        "select 1; select * from d2.missing; select 3",
+        0,
+        30_000,
+    )
+    .await;
     assert!(ev.iter().any(|e| matches!(e, SqlRunEvent::Failed { index: 1, kind: FailKind::Error, message } if message.contains("missing"))));
-    assert!(!ev.iter().any(|e| matches!(e, SqlRunEvent::Started { index: 2, .. })));
+    assert!(!ev
+        .iter()
+        .any(|e| matches!(e, SqlRunEvent::Started { index: 2, .. })));
     assert_eq!(row_count(&run(&c, "select 1", 0, 30_000).await, 0), 1);
 }
 
@@ -627,9 +651,16 @@ async fn l3_pg_a_long_statement_times_out_and_stop_cancels_it_from_a_second_conn
     seed();
     let c = std::sync::Arc::new(connect_direct(TlsMode::Off).await.unwrap());
     let ev = run(&c, "select pg_sleep(5)", 0, 1000).await;
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, SqlRunEvent::Failed { kind: FailKind::Timeout, .. })), "{ev:?}");
+    assert!(
+        ev.iter().any(|e| matches!(
+            e,
+            SqlRunEvent::Failed {
+                kind: FailKind::Timeout,
+                ..
+            }
+        )),
+        "{ev:?}"
+    );
     // Stop while it runs.
     let stop = std::sync::Arc::new(AtomicBool::new(false));
     let events = std::sync::Arc::new(Mutex::new(Vec::new()));
@@ -639,7 +670,10 @@ async fn l3_pg_a_long_statement_times_out_and_stop_cancels_it_from_a_second_conn
         let pieces = pieces_for("select pg_sleep(30)", RunMode::All, None).unwrap();
         c2.run_script(
             &pieces,
-            &RunOpts { limit: 0, timeout_ms: 60_000 },
+            &RunOpts {
+                limit: 0,
+                timeout_ms: 60_000,
+            },
             &stop2,
             false,
             &|e| events2.lock().unwrap().push(e),
@@ -651,12 +685,17 @@ async fn l3_pg_a_long_statement_times_out_and_stop_cancels_it_from_a_second_conn
     stop.store(true, std::sync::atomic::Ordering::SeqCst);
     c.cancel_running().await.unwrap();
     job.await.unwrap();
-    assert!(started.elapsed() < std::time::Duration::from_secs(10), "the sleep was not cut short");
-    assert!(events
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|e| matches!(e, SqlRunEvent::Failed { kind: FailKind::Cancelled, .. })));
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "the sleep was not cut short"
+    );
+    assert!(events.lock().unwrap().iter().any(|e| matches!(
+        e,
+        SqlRunEvent::Failed {
+            kind: FailKind::Cancelled,
+            ..
+        }
+    )));
     // The connection works afterwards.
     assert_eq!(row_count(&run(&c, "select 1", 0, 30_000).await, 0), 1);
 }
@@ -676,8 +715,14 @@ async fn l3_pg_the_catalog_lists_tables_and_columns_for_completion() {
     assert!(orders.columns.contains(&"customer_id".to_string()));
     assert!(!cat.tables.iter().any(|t| t.schema == "pg_catalog"));
     // Cached until asked again.
-    assert!(std::sync::Arc::ptr_eq(&cat, &c.catalog(false).await.unwrap()));
-    assert!(!std::sync::Arc::ptr_eq(&cat, &c.catalog(true).await.unwrap()));
+    assert!(std::sync::Arc::ptr_eq(
+        &cat,
+        &c.catalog(false).await.unwrap()
+    ));
+    assert!(!std::sync::Arc::ptr_eq(
+        &cat,
+        &c.catalog(true).await.unwrap()
+    ));
 }
 
 // ---- D4: writes, manual transactions and grid edits
@@ -688,9 +733,18 @@ use super::grid::{CellChange, GridEdits, KeyValue, RowEdit};
 async fn run_w(c: &PgConn, sql: &str) -> Vec<SqlRunEvent> {
     let pieces = pieces_for(sql, RunMode::All, None).unwrap();
     let out = Mutex::new(Vec::new());
-    c.run_script(&pieces, &RunOpts { limit: 0, timeout_ms: 30_000 }, &AtomicBool::new(false), true, &|e| out.lock().unwrap().push(e))
-        .await
-        .unwrap();
+    c.run_script(
+        &pieces,
+        &RunOpts {
+            limit: 0,
+            timeout_ms: 30_000,
+        },
+        &AtomicBool::new(false),
+        true,
+        &|e| out.lock().unwrap().push(e),
+    )
+    .await
+    .unwrap();
     out.into_inner().unwrap()
 }
 
@@ -710,7 +764,12 @@ async fn l3_pg_a_confirmed_write_runs_in_auto_commit_and_a_preview_changes_nothi
     seed();
     let c = connect_direct(TlsMode::Off).await.unwrap();
     // The preview asks the server and rolls back: the same count, and the rows are untouched.
-    let pieces = pieces_for("update d2.e1 set qty = 0 where id <= 3; delete from d2.e1", RunMode::All, None).unwrap();
+    let pieces = pieces_for(
+        "update d2.e1 set qty = 0 where id <= 3; delete from d2.e1",
+        RunMode::All,
+        None,
+    )
+    .unwrap();
     let notes = c.preview(&pieces).await.unwrap();
     assert_eq!(notes[0].as_deref(), Some("This will change 3 rows."));
     assert_eq!(notes[1].as_deref(), Some("This will change 5 rows."));
@@ -718,8 +777,12 @@ async fn l3_pg_a_confirmed_write_runs_in_auto_commit_and_a_preview_changes_nothi
     assert_eq!(scalar(&c, "select sum(qty) from d2.e1").await, "150");
     // Allowed to write: the statements commit one by one.
     let ev = run_w(&c, "update d2.e1 set qty = 0 where id <= 3; select count(*) from d2.e1; delete from d2.e1 where id = 5").await;
-    assert!(ev.iter().any(|e| matches!(e, SqlRunEvent::Done { index: 0, affected: Some(a), .. } if *a == 3.0)));
-    assert!(ev.iter().any(|e| matches!(e, SqlRunEvent::Done { index: 2, affected: Some(a), .. } if *a == 1.0)));
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, SqlRunEvent::Done { index: 0, affected: Some(a), .. } if *a == 3.0)));
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, SqlRunEvent::Done { index: 2, affected: Some(a), .. } if *a == 1.0)));
     assert_eq!(scalar(&c, "select count(*) from d2.e1").await, "4");
     assert_eq!(scalar(&c, "select sum(qty) from d2.e1").await, "40");
     // Without the gate's yes, a write is refused whatever the text says.
@@ -738,19 +801,31 @@ async fn l3_pg_a_manual_transaction_holds_its_changes_until_commit_or_rollback()
     assert!(c.txn_begin().await.is_err(), "one at a time");
     run_w(&c, "update d2.e2 set qty = 99 where id = 1").await;
     let st = c.txn_state().await.unwrap();
-    assert!(st.active && st.statements == 1 && !st.failed && st.locks >= 1, "{st:?}");
+    assert!(
+        st.active && st.statements == 1 && !st.failed && st.locks >= 1,
+        "{st:?}"
+    );
     // Another connection can't see it yet.
-    assert_eq!(scalar(&other, "select qty from d2.e2 where id = 1").await, "10");
+    assert_eq!(
+        scalar(&other, "select qty from d2.e2 where id = 1").await,
+        "10"
+    );
     // Reads in the transaction see it.
     assert_eq!(scalar(&c, "select qty from d2.e2 where id = 1").await, "99");
     c.txn_end(false).await.unwrap();
     assert!(!c.txn_state().await.unwrap().active);
-    assert_eq!(scalar(&other, "select qty from d2.e2 where id = 1").await, "10");
+    assert_eq!(
+        scalar(&other, "select qty from d2.e2 where id = 1").await,
+        "10"
+    );
     // Commit keeps it.
     c.txn_begin().await.unwrap();
     run_w(&c, "update d2.e2 set qty = 77 where id = 2").await;
     c.txn_end(true).await.unwrap();
-    assert_eq!(scalar(&other, "select qty from d2.e2 where id = 2").await, "77");
+    assert_eq!(
+        scalar(&other, "select qty from d2.e2 where id = 2").await,
+        "77"
+    );
     // A failing statement marks it: only rolling back is left.
     c.txn_begin().await.unwrap();
     run_w(&c, "select * from d2.missing").await;
@@ -761,13 +836,24 @@ async fn l3_pg_a_manual_transaction_holds_its_changes_until_commit_or_rollback()
 
 fn edit(id: &str, col: &str, old: Option<&str>, new: Option<&str>) -> RowEdit {
     RowEdit {
-        key: vec![KeyValue { column: "id".into(), value: id.into() }],
-        changes: vec![CellChange { column: col.into(), old: old.map(Into::into), new: new.map(Into::into) }],
+        key: vec![KeyValue {
+            column: "id".into(),
+            value: id.into(),
+        }],
+        changes: vec![CellChange {
+            column: col.into(),
+            old: old.map(Into::into),
+            new: new.map(Into::into),
+        }],
         delete: false,
     }
 }
 fn edits(rows: Vec<RowEdit>) -> GridEdits {
-    GridEdits { schema: "d2".into(), table: "e3".into(), rows }
+    GridEdits {
+        schema: "d2".into(),
+        table: "e3".into(),
+        rows,
+    }
 }
 
 #[tokio::test]
@@ -776,29 +862,56 @@ async fn l3_pg_grid_edits_commit_together_and_the_optimistic_check_stops_a_stale
     seed();
     let c = connect_direct(TlsMode::Off).await.unwrap();
     let stmts = c
-        .grid_statements(&edits(vec![edit("1", "name", Some("n1"), Some("it's")), edit("2", "qty", Some("20"), None)]))
+        .grid_statements(&edits(vec![
+            edit("1", "name", Some("n1"), Some("it's")),
+            edit("2", "qty", Some("20"), None),
+        ]))
         .await
         .unwrap();
-    assert!(stmts[0].shown.contains("'it''s'") && stmts[0].shown.contains("is not distinct from 'n1'"));
+    assert!(
+        stmts[0].shown.contains("'it''s'") && stmts[0].shown.contains("is not distinct from 'n1'")
+    );
     assert_eq!(c.grid_commit(&stmts).await.unwrap(), 2);
-    assert_eq!(scalar(&c, "select name from d2.e3 where id = 1").await, "it's");
+    assert_eq!(
+        scalar(&c, "select name from d2.e3 where id = 1").await,
+        "it's"
+    );
     let ev = run(&c, "select qty is null from d2.e3 where id = 2", 0, 30_000).await;
-    assert!(ev.iter().any(|e| matches!(e, SqlRunEvent::Rows { rows, .. } if rows[0][0].v.as_deref() == Some("t"))));
+    assert!(ev.iter().any(
+        |e| matches!(e, SqlRunEvent::Rows { rows, .. } if rows[0][0].v.as_deref() == Some("t"))
+    ));
     // Someone else changed row 3 after it was loaded (old says 30, it is now 31): the whole commit is undone.
     run_w(&c, "update d2.e3 set qty = 31 where id = 3").await;
     let stmts = c
-        .grid_statements(&edits(vec![edit("4", "qty", Some("40"), Some("41")), edit("3", "qty", Some("30"), Some("35"))]))
+        .grid_statements(&edits(vec![
+            edit("4", "qty", Some("40"), Some("41")),
+            edit("3", "qty", Some("30"), Some("35")),
+        ]))
         .await
         .unwrap();
     let err = c.grid_commit(&stmts).await.unwrap_err();
     assert_eq!(err.code, ErrorCode::SqlConflict);
-    assert_eq!(scalar(&c, "select qty from d2.e3 where id = 4").await, "40", "the first statement was rolled back too");
+    assert_eq!(
+        scalar(&c, "select qty from d2.e3 where id = 4").await,
+        "40",
+        "the first statement was rolled back too"
+    );
     assert_eq!(scalar(&c, "select qty from d2.e3 where id = 3").await, "31");
     // A delete removes exactly one row; a second try finds nothing and is a conflict.
-    let del = RowEdit { key: vec![KeyValue { column: "id".into(), value: "5".into() }], changes: vec![], delete: true };
+    let del = RowEdit {
+        key: vec![KeyValue {
+            column: "id".into(),
+            value: "5".into(),
+        }],
+        changes: vec![],
+        delete: true,
+    };
     let stmts = c.grid_statements(&edits(vec![del.clone()])).await.unwrap();
     assert_eq!(c.grid_commit(&stmts).await.unwrap(), 1);
-    assert_eq!(c.grid_commit(&stmts).await.unwrap_err().code, ErrorCode::SqlConflict);
+    assert_eq!(
+        c.grid_commit(&stmts).await.unwrap_err().code,
+        ErrorCode::SqlConflict
+    );
 }
 
 #[tokio::test]
@@ -806,24 +919,66 @@ async fn l3_pg_grid_edits_commit_together_and_the_optimistic_check_stops_a_stale
 async fn l3_pg_grid_edits_refuse_a_keyless_table_a_partial_key_and_a_changed_key() {
     seed();
     let c = connect_direct(TlsMode::Off).await.unwrap();
-    let keyless = GridEdits { schema: "d2".into(), table: "no_key".into(), rows: vec![edit("1", "a", Some("1"), Some("2"))] };
-    assert_eq!(c.grid_statements(&keyless).await.unwrap_err().code, ErrorCode::SqlNoKey);
+    let keyless = GridEdits {
+        schema: "d2".into(),
+        table: "no_key".into(),
+        rows: vec![edit("1", "a", Some("1"), Some("2"))],
+    };
+    assert_eq!(
+        c.grid_statements(&keyless).await.unwrap_err().code,
+        ErrorCode::SqlNoKey
+    );
     let partial = GridEdits {
         schema: "d2".into(),
         table: "order_items".into(),
-        rows: vec![RowEdit { key: vec![KeyValue { column: "order_id".into(), value: "1".into() }], changes: vec![CellChange { column: "sku".into(), old: None, new: Some("x".into()) }], delete: false }],
+        rows: vec![RowEdit {
+            key: vec![KeyValue {
+                column: "order_id".into(),
+                value: "1".into(),
+            }],
+            changes: vec![CellChange {
+                column: "sku".into(),
+                old: None,
+                new: Some("x".into()),
+            }],
+            delete: false,
+        }],
     };
-    assert_eq!(c.grid_statements(&partial).await.unwrap_err().code, ErrorCode::Validation);
-    assert_eq!(c.grid_statements(&edits(vec![edit("1", "id", Some("1"), Some("9"))])).await.unwrap_err().code, ErrorCode::Validation);
-    assert_eq!(c.grid_statements(&edits(vec![edit("1", "nope", None, Some("x"))])).await.unwrap_err().code, ErrorCode::Validation);
+    assert_eq!(
+        c.grid_statements(&partial).await.unwrap_err().code,
+        ErrorCode::Validation
+    );
+    assert_eq!(
+        c.grid_statements(&edits(vec![edit("1", "id", Some("1"), Some("9"))]))
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::Validation
+    );
+    assert_eq!(
+        c.grid_statements(&edits(vec![edit("1", "nope", None, Some("x"))]))
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::Validation
+    );
     // The type name is never taken from the window: the SQL only names catalog types.
-    let ok = c.grid_statements(&edits(vec![edit("1", "qty", Some("10"), Some("1); drop table d2.e3; --"))])).await.unwrap();
+    let ok = c
+        .grid_statements(&edits(vec![edit(
+            "1",
+            "qty",
+            Some("10"),
+            Some("1); drop table d2.e3; --"),
+        )]))
+        .await
+        .unwrap();
     assert!(!ok[0].sql.contains("drop"));
 }
 
 #[tokio::test]
 #[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
-async fn l3_pg_a_failed_transaction_is_rolled_back_not_committed_and_grid_handles_json_composite_keys_and_keyword_columns() {
+async fn l3_pg_a_failed_transaction_is_rolled_back_not_committed_and_grid_handles_json_composite_keys_and_keyword_columns(
+) {
     seed();
     let c = connect_direct(TlsMode::Off).await.unwrap();
     c.txn_begin().await.unwrap();
@@ -833,21 +988,73 @@ async fn l3_pg_a_failed_transaction_is_rolled_back_not_committed_and_grid_handle
     assert!(!c.has_txn());
     assert_eq!(scalar(&c, "select 1").await, "1");
     // json has no equality operator; the key has two columns; one column is named like a keyword.
-    let key = |b: &str| vec![KeyValue { column: "a".into(), value: "x".into() }, KeyValue { column: "b".into(), value: b.into() }];
-    let g = |rows| GridEdits { schema: "d2".into(), table: "e6".into(), rows };
+    let key = |b: &str| {
+        vec![
+            KeyValue {
+                column: "a".into(),
+                value: "x".into(),
+            },
+            KeyValue {
+                column: "b".into(),
+                value: b.into(),
+            },
+        ]
+    };
+    let g = |rows| GridEdits {
+        schema: "d2".into(),
+        table: "e6".into(),
+        rows,
+    };
     let stmts = c
         .grid_statements(&g(vec![
-            RowEdit { key: key("1"), changes: vec![CellChange { column: "j".into(), old: Some("{\"k\": 1}".into()), new: Some("{\"k\": 2}".into()) }, CellChange { column: "select".into(), old: Some("s".into()), new: Some("z".into()) }], delete: false },
-            RowEdit { key: key("2"), changes: vec![CellChange { column: "j".into(), old: None, new: Some("[1]".into()) }], delete: false },
+            RowEdit {
+                key: key("1"),
+                changes: vec![
+                    CellChange {
+                        column: "j".into(),
+                        old: Some("{\"k\": 1}".into()),
+                        new: Some("{\"k\": 2}".into()),
+                    },
+                    CellChange {
+                        column: "select".into(),
+                        old: Some("s".into()),
+                        new: Some("z".into()),
+                    },
+                ],
+                delete: false,
+            },
+            RowEdit {
+                key: key("2"),
+                changes: vec![CellChange {
+                    column: "j".into(),
+                    old: None,
+                    new: Some("[1]".into()),
+                }],
+                delete: false,
+            },
         ]))
         .await
         .unwrap();
     assert_eq!(c.grid_commit(&stmts).await.unwrap(), 2);
-    assert_eq!(scalar(&c, "select j::text from d2.e6 where b = 1").await, "{\"k\": 2}");
-    assert_eq!(scalar(&c, "select \"select\" from d2.e6 where b = 1").await, "z");
+    assert_eq!(
+        scalar(&c, "select j::text from d2.e6 where b = 1").await,
+        "{\"k\": 2}"
+    );
+    assert_eq!(
+        scalar(&c, "select \"select\" from d2.e6 where b = 1").await,
+        "z"
+    );
     // Not tried out: a statement that calls an effectful function is not previewed.
-    let p = pieces_for("update d2.e4 set qty = pg_terminate_backend(0) where id = 1", RunMode::All, None).unwrap();
-    assert!(c.preview(&p).await.unwrap()[0].as_deref().unwrap().starts_with("Not tried out"));
+    let p = pieces_for(
+        "update d2.e4 set qty = pg_terminate_backend(0) where id = 1",
+        RunMode::All,
+        None,
+    )
+    .unwrap();
+    assert!(c.preview(&p).await.unwrap()[0]
+        .as_deref()
+        .unwrap()
+        .starts_with("Not tried out"));
 }
 
 // ---- D5: structure, explain, diagram
@@ -861,13 +1068,30 @@ async fn l3_pg_structure_lists_columns_keys_indexes_and_a_ddl() {
     let c = connect_direct(TlsMode::Off).await.unwrap();
     let s = c.structure("d2", "orders").await.unwrap();
     assert_eq!(s.columns[0].name, "id");
-    assert!(s.columns.iter().any(|c| c.name == "total" && c.type_name == "numeric(12,2)" && c.nullable));
-    assert!(s.constraints.iter().any(|c| c.kind == "p" && c.columns == ["id"]));
-    let fk = s.constraints.iter().find(|c| c.kind == "f").expect("a foreign key");
+    assert!(s
+        .columns
+        .iter()
+        .any(|c| c.name == "total" && c.type_name == "numeric(12,2)" && c.nullable));
+    assert!(s
+        .constraints
+        .iter()
+        .any(|c| c.kind == "p" && c.columns == ["id"]));
+    let fk = s
+        .constraints
+        .iter()
+        .find(|c| c.kind == "f")
+        .expect("a foreign key");
     assert!(fk.definition.contains("REFERENCES d2.customers(id)") && fk.columns == ["customer_id"]);
     assert!(s.indexes.iter().any(|i| i.primary && i.unique) && s.stats.table_bytes > 0);
-    assert!(s.ddl.starts_with("create table \"d2\".\"orders\" (") && s.ddl.contains("constraint") && s.ddl.contains("not null"));
-    assert_eq!(c.structure("d2", "nope").await.unwrap_err().code, ErrorCode::NotFound);
+    assert!(
+        s.ddl.starts_with("create table \"d2\".\"orders\" (")
+            && s.ddl.contains("constraint")
+            && s.ddl.contains("not null")
+    );
+    assert_eq!(
+        c.structure("d2", "nope").await.unwrap_err().code,
+        ErrorCode::NotFound
+    );
 }
 
 #[tokio::test]
@@ -875,29 +1099,79 @@ async fn l3_pg_structure_lists_columns_keys_indexes_and_a_ddl() {
 async fn l3_pg_a_structure_change_applies_in_one_transaction_and_a_failure_undoes_all_of_it() {
     seed();
     let c = connect_direct(TlsMode::Off).await.unwrap();
-    let add = |n: &str| StructureOp::AddColumn { name: n.into(), type_name: "integer".into(), nullable: true, default: Some("0".into()) };
-    let (stmts, _) = super::structure::statements("d2", "e5", &[add("extra"), StructureOp::CreateIndex { name: "e5_extra_idx".into(), columns: vec!["extra".into()], unique: false }], None).unwrap();
+    let add = |n: &str| StructureOp::AddColumn {
+        name: n.into(),
+        type_name: "integer".into(),
+        nullable: true,
+        default: Some("0".into()),
+    };
+    let (stmts, _) = super::structure::statements(
+        "d2",
+        "e5",
+        &[
+            add("extra"),
+            StructureOp::CreateIndex {
+                name: "e5_extra_idx".into(),
+                columns: vec!["extra".into()],
+                unique: false,
+            },
+        ],
+        None,
+    )
+    .unwrap();
     c.structure_commit(&stmts).await.unwrap();
     let s = c.structure("d2", "e5").await.unwrap();
-    assert!(s.columns.iter().any(|c| c.name == "extra" && c.default.as_deref() == Some("0")));
+    assert!(s
+        .columns
+        .iter()
+        .any(|c| c.name == "extra" && c.default.as_deref() == Some("0")));
     assert!(s.indexes.iter().any(|i| i.name == "e5_extra_idx"));
     // The second statement fails (the column exists): the first one is undone too.
-    let (stmts, _) = super::structure::statements("d2", "e5", &[add("second"), add("extra")], None).unwrap();
+    let (stmts, _) =
+        super::structure::statements("d2", "e5", &[add("second"), add("extra")], None).unwrap();
     let err = c.structure_commit(&stmts).await.unwrap_err();
     assert!(err.message.contains("already exists"), "{}", err.message);
-    assert!(!c.structure("d2", "e5").await.unwrap().columns.iter().any(|c| c.name == "second"));
+    assert!(!c
+        .structure("d2", "e5")
+        .await
+        .unwrap()
+        .columns
+        .iter()
+        .any(|c| c.name == "second"));
     // Rename, change type, drop.
     let ops = [
-        StructureOp::RenameColumn { from: "extra".into(), to: "bonus".into() },
-        StructureOp::ChangeType { column: "bonus".into(), type_name: "bigint".into() },
-        StructureOp::DropIndex { name: "e5_extra_idx".into() },
-        StructureOp::DropColumn { name: "bonus".into() },
+        StructureOp::RenameColumn {
+            from: "extra".into(),
+            to: "bonus".into(),
+        },
+        StructureOp::ChangeType {
+            column: "bonus".into(),
+            type_name: "bigint".into(),
+        },
+        StructureOp::DropIndex {
+            name: "e5_extra_idx".into(),
+        },
+        StructureOp::DropColumn {
+            name: "bonus".into(),
+        },
     ];
     let (stmts, _) = super::structure::statements("d2", "e5", &ops, None).unwrap();
     c.structure_commit(&stmts).await.unwrap();
-    assert!(!c.structure("d2", "e5").await.unwrap().columns.iter().any(|c| c.name == "bonus"));
+    assert!(!c
+        .structure("d2", "e5")
+        .await
+        .unwrap()
+        .columns
+        .iter()
+        .any(|c| c.name == "bonus"));
     // A caught-up catalog: completion sees the change.
-    assert!(!c.catalog(false).await.unwrap().tables.iter().any(|t| t.name == "e5" && t.columns.contains(&"bonus".to_string())));
+    assert!(!c
+        .catalog(false)
+        .await
+        .unwrap()
+        .tables
+        .iter()
+        .any(|t| t.name == "e5" && t.columns.contains(&"bonus".to_string())));
 }
 
 #[tokio::test]
@@ -905,17 +1179,32 @@ async fn l3_pg_a_structure_change_applies_in_one_transaction_and_a_failure_undoe
 async fn l3_pg_explain_plans_and_analyze_times_a_read_without_changing_anything() {
     seed();
     let c = connect_direct(TlsMode::Off).await.unwrap();
-    let plain = c.explain("select * from d2.orders where status = 'open'", false, 30_000).await.unwrap();
+    let plain = c
+        .explain(
+            "select * from d2.orders where status = 'open'",
+            false,
+            30_000,
+        )
+        .await
+        .unwrap();
     assert!(!plain.analyzed && plain.root.est_rows > 0.0 && plain.root.actual_rows.is_none());
     let timed = c.explain("select o.id, c.name from d2.orders o join d2.customers c on c.id = o.customer_id where o.total > 100", true, 30_000).await.unwrap();
-    assert!(timed.analyzed && timed.execution_ms.is_some() && timed.root.actual_rows.is_some() && timed.root.pct.is_some());
+    assert!(
+        timed.analyzed
+            && timed.execution_ms.is_some()
+            && timed.root.actual_rows.is_some()
+            && timed.root.pct.is_some()
+    );
     let mut stack = vec![&timed.root];
     let mut names = Vec::new();
     while let Some(n) = stack.pop() {
         names.push(n.name.clone());
         stack.extend(n.children.iter());
     }
-    assert!(names.iter().any(|n| n.contains("orders")) && names.iter().any(|n| n.contains("customers")), "{names:?}");
+    assert!(
+        names.iter().any(|n| n.contains("orders")) && names.iter().any(|n| n.contains("customers")),
+        "{names:?}"
+    );
     // Even a function that writes can't, inside the read-only transaction.
     assert!(c.explain("select d2.bump()", true, 30_000).await.is_err());
     assert_eq!(scalar(&c, "select count(*) from d2.log").await, "0");
@@ -927,14 +1216,36 @@ async fn l3_pg_explain_plans_and_analyze_times_a_read_without_changing_anything(
 async fn l3_pg_the_diagram_walks_foreign_keys_out_from_a_table() {
     seed();
     let c = connect_direct(TlsMode::Off).await.unwrap();
-    let d = c.diagram(&[("d2".into(), "orders".into())], 1).await.unwrap();
+    let d = c
+        .diagram(&[("d2".into(), "orders".into())], 1)
+        .await
+        .unwrap();
     let names: Vec<&str> = d.tables.iter().map(|t| t.name.as_str()).collect();
-    assert!(names.contains(&"orders") && names.contains(&"customers") && names.contains(&"order_items"), "{names:?}");
-    assert!(d.edges.iter().any(|e| e.from_table == "orders" && e.to_table == "customers" && e.from_columns == ["customer_id"] && e.to_columns == ["id"]));
+    assert!(
+        names.contains(&"orders") && names.contains(&"customers") && names.contains(&"order_items"),
+        "{names:?}"
+    );
+    assert!(d.edges.iter().any(|e| e.from_table == "orders"
+        && e.to_table == "customers"
+        && e.from_columns == ["customer_id"]
+        && e.to_columns == ["id"]));
     let orders = d.tables.iter().find(|t| t.name == "orders").unwrap();
-    assert!(orders.columns.iter().any(|c| c.name == "id" && c.pk) && orders.columns.iter().any(|c| c.name == "customer_id" && c.fk));
+    assert!(
+        orders.columns.iter().any(|c| c.name == "id" && c.pk)
+            && orders
+                .columns
+                .iter()
+                .any(|c| c.name == "customer_id" && c.fk)
+    );
     assert!(d.total_tables >= 3);
-    assert_eq!(c.diagram(&[("d2".into(), "customers".into())], 0).await.unwrap().tables.len(), 1);
+    assert_eq!(
+        c.diagram(&[("d2".into(), "customers".into())], 0)
+            .await
+            .unwrap()
+            .tables
+            .len(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -944,7 +1255,10 @@ async fn l3_pg_explain_inside_a_manual_transaction_leaves_it_open_and_unchanged(
     let c = connect_direct(TlsMode::Off).await.unwrap();
     c.txn_begin().await.unwrap();
     run_w(&c, "update d2.e4 set qty = 11 where id = 1").await;
-    let plan = c.explain("select * from d2.e4", true, 30_000).await.unwrap();
+    let plan = c
+        .explain("select * from d2.e4", true, 30_000)
+        .await
+        .unwrap();
     assert!(plan.analyzed);
     // A function that writes can't, even here.
     assert!(c.explain("select d2.bump()", true, 30_000).await.is_err());
@@ -969,38 +1283,85 @@ async fn l3_pg_activity_shows_sessions_and_a_blocking_chain_and_signals_only_oth
     let holder = connect_direct(TlsMode::Off).await.unwrap();
     holder.txn_begin().await.unwrap();
     run_w(&holder, "update d2.e1 set qty = qty where id = 2").await;
-    let holder_pid: i32 = scalar(&holder, "select pg_backend_pid()").await.parse().unwrap();
+    let holder_pid: i32 = scalar(&holder, "select pg_backend_pid()")
+        .await
+        .parse()
+        .unwrap();
     let waiter = std::sync::Arc::new(connect_direct(TlsMode::Off).await.unwrap());
     let w2 = waiter.clone();
     let job = tokio::spawn(async move {
-        let pieces = pieces_for("update d2.e1 set qty = qty + 1 where id = 2", RunMode::All, None).unwrap();
-        w2.run_script(&pieces, &RunOpts { limit: 0, timeout_ms: 20_000 }, &AtomicBool::new(false), true, &|_| {}).await.unwrap();
+        let pieces = pieces_for(
+            "update d2.e1 set qty = qty + 1 where id = 2",
+            RunMode::All,
+            None,
+        )
+        .unwrap();
+        w2.run_script(
+            &pieces,
+            &RunOpts {
+                limit: 0,
+                timeout_ms: 20_000,
+            },
+            &AtomicBool::new(false),
+            true,
+            &|_| {},
+        )
+        .await
+        .unwrap();
     });
     tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
     let a = c.activity(ActivityView::Sessions).await.unwrap();
-    assert!(a.tiles.connections >= 3 && a.tiles.max_connections > 0 && a.tiles.waiting >= 1, "{:?}", a.tiles);
-    let chain = a.chains.iter().find(|ch| ch.root.pid == holder_pid).expect("the holder heads a chain");
+    assert!(
+        a.tiles.connections >= 3 && a.tiles.max_connections > 0 && a.tiles.waiting >= 1,
+        "{:?}",
+        a.tiles
+    );
+    let chain = a
+        .chains
+        .iter()
+        .find(|ch| ch.root.pid == holder_pid)
+        .expect("the holder heads a chain");
     assert!(chain.waiting.iter().any(|w| w.query.contains("qty + 1")));
-    assert!(a.sessions.iter().all(|s| s.application == "Dalan" && s.mine), "our own sessions are marked");
+    assert!(
+        a.sessions
+            .iter()
+            .all(|s| s.application == "Dalan" && s.mine),
+        "our own sessions are marked"
+    );
     // Ending a session of ours is refused (Dalan's own connections are never touched).
     assert_eq!(c.signal_session(holder_pid, true, "").await.unwrap(), None);
     assert!(c.session_info(holder_pid).await.unwrap().is_none());
     waiter.txn_state().await.unwrap();
     holder.txn_end(false).await.unwrap();
     job.await.unwrap();
-    for v in [ActivityView::Locks, ActivityView::Slow, ActivityView::Tables, ActivityView::Roles, ActivityView::Replication] {
+    for v in [
+        ActivityView::Locks,
+        ActivityView::Slow,
+        ActivityView::Tables,
+        ActivityView::Roles,
+        ActivityView::Replication,
+    ] {
         let t = c.activity(v).await.unwrap().table.unwrap();
         assert!(!t.columns.is_empty(), "{v:?}");
         assert!(t.rows.iter().all(|r| r.len() == t.columns.len()));
     }
-    let tables = c.activity(ActivityView::Tables).await.unwrap().table.unwrap();
+    let tables = c
+        .activity(ActivityView::Tables)
+        .await
+        .unwrap()
+        .table
+        .unwrap();
     assert!(tables.rows.iter().any(|r| r[0] == "d2.orders"));
 }
 
 async fn find_psql(c: &PgConn) -> i32 {
     for _ in 0..30 {
         let a = c.activity(ActivityView::Sessions).await.unwrap();
-        if let Some(s) = a.sessions.iter().find(|s| s.application == "psql-d6" && s.query.contains("pg_sleep")) {
+        if let Some(s) = a
+            .sessions
+            .iter()
+            .find(|s| s.application == "psql-d6" && s.query.contains("pg_sleep"))
+        {
             return s.pid;
         }
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
@@ -1016,7 +1377,19 @@ async fn l3_pg_another_clients_query_is_cancelled_and_its_session_ended_from_act
     // A client that is not Dalan: psql inside the container, running a long query.
     let spawn = |sql: &str| {
         std::process::Command::new("docker")
-            .args(["exec", "-e", "PGAPPNAME=psql-d6", "dalan-test-pg", "psql", "-U", "app", "-d", "shop", "-c", sql])
+            .args([
+                "exec",
+                "-e",
+                "PGAPPNAME=psql-d6",
+                "dalan-test-pg",
+                "psql",
+                "-U",
+                "app",
+                "-d",
+                "shop",
+                "-c",
+                sql,
+            ])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
@@ -1028,25 +1401,58 @@ async fn l3_pg_another_clients_query_is_cancelled_and_its_session_ended_from_act
     assert_eq!(user, "app");
     assert!(query.contains("pg_sleep"));
     // A session that started at another time (a reused pid) is left alone.
-    assert_eq!(c.signal_session(pid, false, "1999-01-01 00:00:00+00").await.unwrap(), None);
-    assert_eq!(c.signal_session(pid, false, &started).await.unwrap(), Some(true));
+    assert_eq!(
+        c.signal_session(pid, false, "1999-01-01 00:00:00+00")
+            .await
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        c.signal_session(pid, false, &started).await.unwrap(),
+        Some(true)
+    );
     assert!(!first.wait().unwrap().success(), "the query was cancelled");
     // Ending a session: the client is disconnected.
     let mut second = spawn("select pg_sleep(60)");
     let pid2 = find_psql(&c).await;
     let started2 = c.session_info(pid2).await.unwrap().unwrap().3;
-    assert_eq!(c.signal_session(pid2, true, &started2).await.unwrap(), Some(true));
+    assert_eq!(
+        c.signal_session(pid2, true, &started2).await.unwrap(),
+        Some(true)
+    );
     assert!(!second.wait().unwrap().success());
-    assert_eq!(c.signal_session(pid2, true, &started2).await.unwrap(), None, "gone now");
+    assert_eq!(
+        c.signal_session(pid2, true, &started2).await.unwrap(),
+        None,
+        "gone now"
+    );
 }
 
 // ---- D6: export and import
 
 use super::transfer::ExportFormat;
 
-async fn export(c: &PgConn, table: &str, filter: &str, f: ExportFormat, header: bool) -> (String, f64) {
+async fn export(
+    c: &PgConn,
+    table: &str,
+    filter: &str,
+    f: ExportFormat,
+    header: bool,
+) -> (String, f64) {
     let mut buf: Vec<u8> = Vec::new();
-    let (rows, _) = c.export_table("d2", table, filter, f, header, &mut buf, &|_, _| {}, &AtomicBool::new(false)).await.unwrap();
+    let (rows, _) = c
+        .export_table(
+            "d2",
+            table,
+            filter,
+            f,
+            header,
+            &mut buf,
+            &|_, _| {},
+            &AtomicBool::new(false),
+        )
+        .await
+        .unwrap();
     (String::from_utf8(buf).unwrap(), rows)
 }
 
@@ -1057,7 +1463,11 @@ async fn l3_pg_export_streams_every_format_and_honours_a_filter() {
     let c = connect_direct(TlsMode::Off).await.unwrap();
     let (csv, rows) = export(&c, "customers", "", ExportFormat::Csv, true).await;
     assert_eq!(rows, 50.0);
-    assert!(csv.starts_with("id,name,meta\n1,customer 1,\"{\"\"vip\"\": false}\"\n"), "{}", &csv[..80]);
+    assert!(
+        csv.starts_with("id,name,meta\n1,customer 1,\"{\"\"vip\"\": false}\"\n"),
+        "{}",
+        &csv[..80]
+    );
     assert_eq!(csv.lines().count(), 51);
     let (tsv, _) = export(&c, "customers", "id <= 2", ExportFormat::Tsv, false).await;
     assert_eq!(tsv.lines().count(), 2);
@@ -1073,18 +1483,61 @@ async fn l3_pg_export_streams_every_format_and_honours_a_filter() {
     // A table with more rows than one batch, and a filter that is refused before anything is written.
     let (big, rows) = export(&c, "orders", "", ExportFormat::Json, true).await;
     assert_eq!(rows, 1200.0);
-    assert_eq!(serde_json::from_str::<serde_json::Value>(&big).unwrap().as_array().unwrap().len(), 1200);
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&big)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len(),
+        1200
+    );
     let mut buf = Vec::new();
-    let err = c.export_table("d2", "orders", "1 = 1; drop table d2.orders", ExportFormat::Csv, true, &mut buf, &|_, _| {}, &AtomicBool::new(false)).await.unwrap_err();
+    let err = c
+        .export_table(
+            "d2",
+            "orders",
+            "1 = 1; drop table d2.orders",
+            ExportFormat::Csv,
+            true,
+            &mut buf,
+            &|_, _| {},
+            &AtomicBool::new(false),
+        )
+        .await
+        .unwrap_err();
     assert_eq!(err.code, ErrorCode::Validation);
     assert!(buf.is_empty());
     assert_eq!(scalar(&c, "select count(*) from d2.orders").await, "1200");
     // Stop: the file holds what was written, and the connection is fine.
     let stop = AtomicBool::new(true);
     let mut buf = Vec::new();
-    let err = c.export_table("d2", "orders", "", ExportFormat::Json, true, &mut buf, &|_, _| {}, &stop).await.unwrap_err();
+    let err = c
+        .export_table(
+            "d2",
+            "orders",
+            "",
+            ExportFormat::Json,
+            true,
+            &mut buf,
+            &|_, _| {},
+            &stop,
+        )
+        .await
+        .unwrap_err();
     assert_eq!(err.message, "Stopped.");
-    let err = c.export_table("d2", "orders", "", ExportFormat::Csv, true, &mut buf, &|_, _| {}, &stop).await.unwrap_err();
+    let err = c
+        .export_table(
+            "d2",
+            "orders",
+            "",
+            ExportFormat::Csv,
+            true,
+            &mut buf,
+            &|_, _| {},
+            &stop,
+        )
+        .await
+        .unwrap_err();
     assert_eq!(err.message, "Stopped.");
     assert_eq!(scalar(&c, "select 1").await, "1");
 }
@@ -1095,35 +1548,99 @@ async fn l3_pg_import_maps_columns_loads_in_one_transaction_and_a_bad_row_loads_
     seed();
     let c = connect_direct(TlsMode::Off).await.unwrap();
     let csv = "ref,who,amt,skipme\n1,\"Ada, L\",10.50,x\n2,Bob,,y\n3,\"Cy \"\"C\"\"\",7,z\n";
-    let pv = c.import_preview("d2", "imp1", csv, ',', true).await.unwrap();
+    let pv = c
+        .import_preview("d2", "imp1", csv, ',', true)
+        .await
+        .unwrap();
     assert_eq!(pv.file_columns, ["ref", "who", "amt", "skipme"]);
     assert_eq!(pv.total_rows, 3.0);
-    assert!(pv.table_columns.iter().any(|c| c.name == "gen" && c.generated));
-    let mapping = vec![Some("id".to_string()), Some("name".to_string()), Some("amount".to_string()), None];
-    let plan = c.import_plan("d2", "imp1", csv, ',', true, &mapping).await.unwrap();
+    assert!(pv
+        .table_columns
+        .iter()
+        .any(|c| c.name == "gen" && c.generated));
+    let mapping = vec![
+        Some("id".to_string()),
+        Some("name".to_string()),
+        Some("amount".to_string()),
+        None,
+    ];
+    let plan = c
+        .import_plan("d2", "imp1", csv, ',', true, &mapping)
+        .await
+        .unwrap();
     assert_eq!(plan.rows, 3);
     assert_eq!(c.import_commit(&plan).await.unwrap(), 3);
     assert_eq!(scalar(&c, "select count(*) from d2.imp1").await, "3");
-    assert_eq!(scalar(&c, "select name from d2.imp1 where id = 3").await, "Cy \"C\"");
-    assert_eq!(scalar(&c, "select (amount is null)::text from d2.imp1 where id = 2").await, "true");
-    assert_eq!(scalar(&c, "select gen from d2.imp1 where id = 3").await, "6");
+    assert_eq!(
+        scalar(&c, "select name from d2.imp1 where id = 3").await,
+        "Cy \"C\""
+    );
+    assert_eq!(
+        scalar(
+            &c,
+            "select (amount is null)::text from d2.imp1 where id = 2"
+        )
+        .await,
+        "true"
+    );
+    assert_eq!(
+        scalar(&c, "select gen from d2.imp1 where id = 3").await,
+        "6"
+    );
     // The same keys again: the server refuses, and nothing from this load is kept.
     let again = "id,name\n10,new\n1,dup\n";
-    let plan = c.import_plan("d2", "imp2", again, ',', true, &[Some("id".into()), Some("name".into())]).await.unwrap();
+    let plan = c
+        .import_plan(
+            "d2",
+            "imp2",
+            again,
+            ',',
+            true,
+            &[Some("id".into()), Some("name".into())],
+        )
+        .await
+        .unwrap();
     assert_eq!(c.import_commit(&plan).await.unwrap(), 2);
-    let plan = c.import_plan("d2", "imp2", "id,name\n11,ok\n10,dup\n", ',', true, &[Some("id".into()), Some("name".into())]).await.unwrap();
+    let plan = c
+        .import_plan(
+            "d2",
+            "imp2",
+            "id,name\n11,ok\n10,dup\n",
+            ',',
+            true,
+            &[Some("id".into()), Some("name".into())],
+        )
+        .await
+        .unwrap();
     let err = c.import_commit(&plan).await.unwrap_err();
-    assert!(err.message.contains("Nothing was loaded"), "{}", err.message);
+    assert!(
+        err.message.contains("Nothing was loaded"),
+        "{}",
+        err.message
+    );
     assert_eq!(scalar(&c, "select count(*) from d2.imp2").await, "2");
     // Mapping mistakes and a short row are refused before anything is sent.
     for (m, text) in [
         (vec![Some("gen".to_string())], "a\n1\n"),
-        (vec![Some("id".to_string()), Some("id".to_string())], "a,b\n1,2\n"),
+        (
+            vec![Some("id".to_string()), Some("id".to_string())],
+            "a,b\n1,2\n",
+        ),
         (vec![Some("nope".to_string())], "a\n1\n"),
         (vec![None], "a\n1\n"),
-        (vec![Some("id".to_string()), Some("name".to_string())], "a,b\n1\n"),
+        (
+            vec![Some("id".to_string()), Some("name".to_string())],
+            "a,b\n1\n",
+        ),
     ] {
-        assert_eq!(c.import_plan("d2", "imp1", text, ',', true, &m).await.unwrap_err().code, ErrorCode::Validation, "{m:?}");
+        assert_eq!(
+            c.import_plan("d2", "imp1", text, ',', true, &m)
+                .await
+                .unwrap_err()
+                .code,
+            ErrorCode::Validation,
+            "{m:?}"
+        );
     }
 }
 
@@ -1131,7 +1648,10 @@ async fn l3_pg_import_maps_columns_loads_in_one_transaction_and_a_bad_row_loads_
 fn a_picked_file_is_known_only_by_its_id_and_only_to_its_own_connection() {
     let m = super::SqlManager::default();
     let id = m.put_file("c1", std::path::PathBuf::from("/data/orders.csv"));
-    assert_eq!(m.file("c1", &id).unwrap(), std::path::PathBuf::from("/data/orders.csv"));
+    assert_eq!(
+        m.file("c1", &id).unwrap(),
+        std::path::PathBuf::from("/data/orders.csv")
+    );
     assert!(m.file("c2", &id).is_err());
     assert!(m.file("c1", "/etc/passwd").is_err(), "a path is not an id");
     m.close("c1");

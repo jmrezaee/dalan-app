@@ -80,7 +80,13 @@ pub struct Activity {
 }
 
 fn link(s: &SessionRow) -> ChainLink {
-    ChainLink { pid: s.pid, user: s.user.clone(), state: s.state.clone(), age_s: s.age_s, query: s.query.clone() }
+    ChainLink {
+        pid: s.pid,
+        user: s.user.clone(),
+        state: s.state.clone(),
+        age_s: s.age_s,
+        query: s.query.clone(),
+    }
 }
 
 /// Groups the waiters under the session at the head of each chain. A cycle (a deadlock the server has not broken
@@ -106,7 +112,10 @@ pub fn chains(sessions: &[SessionRow]) -> Vec<BlockingChain> {
         }
         match out.iter_mut().find(|c| c.root.pid == root) {
             Some(c) => c.waiting.push(link(s)),
-            None => out.push(BlockingChain { root: link(r), waiting: vec![link(s)] }),
+            None => out.push(BlockingChain {
+                root: link(r),
+                waiting: vec![link(s)],
+            }),
         }
     }
     out
@@ -193,20 +202,36 @@ impl PgConn {
 
     /// Cancels the query (`end` false) or ends the session (`end` true) of another client. Dalan's own connections
     /// and anything that is not a client backend are never touched. `None`: there was no such session.
-    pub async fn signal_session(&self, pid: i32, end: bool, started: &str) -> AppResult<Option<bool>> {
-        let f = if end { "pg_terminate_backend" } else { "pg_cancel_backend" };
+    pub async fn signal_session(
+        &self,
+        pid: i32,
+        end: bool,
+        started: &str,
+    ) -> AppResult<Option<bool>> {
+        let f = if end {
+            "pg_terminate_backend"
+        } else {
+            "pg_cancel_backend"
+        };
         let sql = format!(
             "select case when exists (select 1 from pg_stat_activity where pid = $1 and backend_type = 'client backend' and coalesce(application_name, '') <> 'Dalan' and pid <> pg_backend_pid() and backend_start::text = $2)
                          then {f}($1) end"
         );
         let _scope = self.scope().await;
-        let row = self.client.query_one(&sql, &[&pid, &started]).await.map_err(|e| map_error(&e))?;
+        let row = self
+            .client
+            .query_one(&sql, &[&pid, &started])
+            .await
+            .map_err(|e| map_error(&e))?;
         Ok(row.get(0))
     }
 
     /// A session as the confirmation shows it, with when it started: a pid reused by another session within the
     /// confirmation's two minutes has another start time and is left alone.
-    pub async fn session_info(&self, pid: i32) -> AppResult<Option<(String, String, String, String)>> {
+    pub async fn session_info(
+        &self,
+        pid: i32,
+    ) -> AppResult<Option<(String, String, String, String)>> {
         let _scope = self.scope().await;
         let row = self
             .client
@@ -226,7 +251,17 @@ mod tests {
     use super::*;
 
     fn s(pid: i32, blocked_by: &[i32]) -> SessionRow {
-        SessionRow { pid, user: "u".into(), application: String::new(), state: "active".into(), age_s: 1.0, wait: String::new(), query: format!("q{pid}"), blocked_by: blocked_by.to_vec(), mine: false }
+        SessionRow {
+            pid,
+            user: "u".into(),
+            application: String::new(),
+            state: "active".into(),
+            age_s: 1.0,
+            wait: String::new(),
+            query: format!("q{pid}"),
+            blocked_by: blocked_by.to_vec(),
+            mine: false,
+        }
     }
 
     #[test]
@@ -236,7 +271,10 @@ mod tests {
         let c = chains(&all);
         assert_eq!(c.len(), 1);
         assert_eq!(c[0].root.pid, 1);
-        assert_eq!(c[0].waiting.iter().map(|w| w.pid).collect::<Vec<_>>(), [2, 3, 4]);
+        assert_eq!(
+            c[0].waiting.iter().map(|w| w.pid).collect::<Vec<_>>(),
+            [2, 3, 4]
+        );
     }
 
     #[test]

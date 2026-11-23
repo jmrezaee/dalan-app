@@ -74,16 +74,50 @@ pub struct TableStructure {
 #[derive(Debug, Clone, Deserialize, Type)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum StructureOp {
-    AddColumn { name: String, type_name: String, nullable: bool, default: Option<String> },
-    DropColumn { name: String },
-    RenameColumn { from: String, to: String },
-    ChangeType { column: String, type_name: String },
-    SetNullable { column: String, nullable: bool },
-    SetDefault { column: String, default: Option<String> },
-    CreateIndex { name: String, columns: Vec<String>, unique: bool },
-    DropIndex { name: String },
-    DropConstraint { name: String },
-    AddForeignKey { name: String, columns: Vec<String>, ref_schema: String, ref_table: String, ref_columns: Vec<String>, on_delete: Option<String> },
+    AddColumn {
+        name: String,
+        type_name: String,
+        nullable: bool,
+        default: Option<String>,
+    },
+    DropColumn {
+        name: String,
+    },
+    RenameColumn {
+        from: String,
+        to: String,
+    },
+    ChangeType {
+        column: String,
+        type_name: String,
+    },
+    SetNullable {
+        column: String,
+        nullable: bool,
+    },
+    SetDefault {
+        column: String,
+        default: Option<String>,
+    },
+    CreateIndex {
+        name: String,
+        columns: Vec<String>,
+        unique: bool,
+    },
+    DropIndex {
+        name: String,
+    },
+    DropConstraint {
+        name: String,
+    },
+    AddForeignKey {
+        name: String,
+        columns: Vec<String>,
+        ref_schema: String,
+        ref_table: String,
+        ref_columns: Vec<String>,
+        on_delete: Option<String>,
+    },
 }
 
 /// A type or a default expression: ONE expression, nothing that could end, comment out or extend the statement
@@ -150,17 +184,33 @@ pub(super) fn names(cols: &[String]) -> AppResult<String> {
 }
 
 /// The statements for the operations, in order, and a warning for each one that loses or rewrites data.
-pub fn statements(schema: &str, table: &str, ops: &[StructureOp], rows: Option<i64>) -> AppResult<(Vec<String>, Vec<String>)> {
+pub fn statements(
+    schema: &str,
+    table: &str,
+    ops: &[StructureOp],
+    rows: Option<i64>,
+) -> AppResult<(Vec<String>, Vec<String>)> {
     if ops.is_empty() {
         return Err(AppError::validation("There are no changes to apply."));
     }
     let t = format!("{}.{}", quote(schema), quote(table));
     let (mut out, mut warn) = (Vec::new(), Vec::new());
-    let rows_text = rows.filter(|r| *r > 0).map_or(String::new(), |r| format!(" (about {r} rows)"));
+    let rows_text = rows
+        .filter(|r| *r > 0)
+        .map_or(String::new(), |r| format!(" (about {r} rows)"));
     for op in ops {
         match op {
-            StructureOp::AddColumn { name, type_name, nullable, default } => {
-                let mut s = format!("alter table {t} add column {} {}", quote(name), safe_expr("The type", type_name, true)?);
+            StructureOp::AddColumn {
+                name,
+                type_name,
+                nullable,
+                default,
+            } => {
+                let mut s = format!(
+                    "alter table {t} add column {} {}",
+                    quote(name),
+                    safe_expr("The type", type_name, true)?
+                );
                 if let Some(d) = default {
                     s.push_str(&format!(" default {}", safe_expr("The default", d, false)?));
                 }
@@ -173,27 +223,87 @@ pub fn statements(schema: &str, table: &str, ops: &[StructureOp], rows: Option<i
                 out.push(format!("alter table {t} drop column {}", quote(name)));
                 warn.push(format!("Dropping {name} deletes everything stored in it."));
             }
-            StructureOp::RenameColumn { from, to } => out.push(format!("alter table {t} rename column {} to {}", quote(from), quote(to))),
+            StructureOp::RenameColumn { from, to } => out.push(format!(
+                "alter table {t} rename column {} to {}",
+                quote(from),
+                quote(to)
+            )),
             StructureOp::ChangeType { column, type_name } => {
                 let ty = safe_expr("The type", type_name, true)?;
-                out.push(format!("alter table {t} alter column {} type {ty} using {}::{ty}", quote(column), quote(column)));
+                out.push(format!(
+                    "alter table {t} alter column {} type {ty} using {}::{ty}",
+                    quote(column),
+                    quote(column)
+                ));
                 warn.push(format!("Changing the type of {column} locks the table while it is rewritten{rows_text}."));
             }
-            StructureOp::SetNullable { column, nullable } => out.push(format!("alter table {t} alter column {} {}", quote(column), if *nullable { "drop not null" } else { "set not null" })),
+            StructureOp::SetNullable { column, nullable } => out.push(format!(
+                "alter table {t} alter column {} {}",
+                quote(column),
+                if *nullable {
+                    "drop not null"
+                } else {
+                    "set not null"
+                }
+            )),
             StructureOp::SetDefault { column, default } => out.push(match default {
-                Some(d) => format!("alter table {t} alter column {} set default {}", quote(column), safe_expr("The default", d, false)?),
-                None => format!("alter table {t} alter column {} drop default", quote(column)),
+                Some(d) => format!(
+                    "alter table {t} alter column {} set default {}",
+                    quote(column),
+                    safe_expr("The default", d, false)?
+                ),
+                None => format!(
+                    "alter table {t} alter column {} drop default",
+                    quote(column)
+                ),
             }),
-            StructureOp::CreateIndex { name, columns, unique } => {
-                out.push(format!("create {}index {} on {t} ({})", if *unique { "unique " } else { "" }, quote(name), names(columns)?));
-                warn.push(format!("Building an index blocks writes to the table while it is built{rows_text}."));
+            StructureOp::CreateIndex {
+                name,
+                columns,
+                unique,
+            } => {
+                out.push(format!(
+                    "create {}index {} on {t} ({})",
+                    if *unique { "unique " } else { "" },
+                    quote(name),
+                    names(columns)?
+                ));
+                warn.push(format!(
+                    "Building an index blocks writes to the table while it is built{rows_text}."
+                ));
             }
-            StructureOp::DropIndex { name } => out.push(format!("drop index {}.{}", quote(schema), quote(name))),
-            StructureOp::DropConstraint { name } => out.push(format!("alter table {t} drop constraint {}", quote(name))),
-            StructureOp::AddForeignKey { name, columns, ref_schema, ref_table, ref_columns, on_delete } => {
-                let mut s = format!("alter table {t} add constraint {} foreign key ({}) references {}.{} ({})", quote(name), names(columns)?, quote(ref_schema), quote(ref_table), names(ref_columns)?);
+            StructureOp::DropIndex { name } => {
+                out.push(format!("drop index {}.{}", quote(schema), quote(name)))
+            }
+            StructureOp::DropConstraint { name } => {
+                out.push(format!("alter table {t} drop constraint {}", quote(name)))
+            }
+            StructureOp::AddForeignKey {
+                name,
+                columns,
+                ref_schema,
+                ref_table,
+                ref_columns,
+                on_delete,
+            } => {
+                let mut s = format!(
+                    "alter table {t} add constraint {} foreign key ({}) references {}.{} ({})",
+                    quote(name),
+                    names(columns)?,
+                    quote(ref_schema),
+                    quote(ref_table),
+                    names(ref_columns)?
+                );
                 if let Some(a) = on_delete {
-                    if !["cascade", "restrict", "no action", "set null", "set default"].contains(&a.as_str()) {
+                    if ![
+                        "cascade",
+                        "restrict",
+                        "no action",
+                        "set null",
+                        "set default",
+                    ]
+                    .contains(&a.as_str())
+                    {
                         return Err(AppError::validation("on delete must be cascade, restrict, no action, set null or set default."));
                     }
                     s.push_str(&format!(" on delete {a}"));
@@ -223,9 +333,22 @@ fn ddl(schema: &str, table: &str, s: &TableStructure) -> String {
             l
         })
         .collect();
-    lines.extend(s.constraints.iter().map(|c| format!("  constraint {} {}", quote(&c.name), c.definition)));
-    let mut out = format!("create table {}.{} (\n{}\n);\n", quote(schema), quote(table), lines.join(",\n"));
-    for i in s.indexes.iter().filter(|i| !s.constraints.iter().any(|c| c.name == i.name)) {
+    lines.extend(
+        s.constraints
+            .iter()
+            .map(|c| format!("  constraint {} {}", quote(&c.name), c.definition)),
+    );
+    let mut out = format!(
+        "create table {}.{} (\n{}\n);\n",
+        quote(schema),
+        quote(table),
+        lines.join(",\n")
+    );
+    for i in s
+        .indexes
+        .iter()
+        .filter(|i| !s.constraints.iter().any(|c| c.name == i.name))
+    {
         out.push_str(&format!("{};\n", i.definition));
     }
     out
@@ -248,7 +371,12 @@ impl PgConn {
             .map_err(|e| map_error(&e))?
             .ok_or_else(|| AppError::not_found("That table is gone."))?;
         let est: f64 = row.get(0);
-        let stats = StructureStats { rows_estimate: (est >= 0.0).then_some(est as i64), table_bytes: row.get(1), index_bytes: row.get(2), last_vacuum: row.get(3) };
+        let stats = StructureStats {
+            rows_estimate: (est >= 0.0).then_some(est as i64),
+            table_bytes: row.get(1),
+            index_bytes: row.get(2),
+            last_vacuum: row.get(3),
+        };
         let gen = self
             .client
             .query(
@@ -263,13 +391,31 @@ impl PgConn {
             .iter()
             .map(|c| {
                 let g = gen.iter().find(|r| r.get::<_, String>(0) == c.name);
-                let generated = g.and_then(|r| match (r.get::<_, String>(1).as_str(), r.get::<_, String>(2).as_str()) {
-                    ("a", _) => Some("generated always as identity".to_string()),
-                    ("d", _) => Some("generated by default as identity".to_string()),
-                    (_, "s") => c.default.as_ref().map(|d| format!("generated always as ({d}) stored")),
-                    _ => None,
+                let generated = g.and_then(|r| {
+                    match (
+                        r.get::<_, String>(1).as_str(),
+                        r.get::<_, String>(2).as_str(),
+                    ) {
+                        ("a", _) => Some("generated always as identity".to_string()),
+                        ("d", _) => Some("generated by default as identity".to_string()),
+                        (_, "s") => c
+                            .default
+                            .as_ref()
+                            .map(|d| format!("generated always as ({d}) stored")),
+                        _ => None,
+                    }
                 });
-                StructureColumn { name: c.name.clone(), type_name: c.type_name.clone(), nullable: c.nullable, default: if generated.is_some() { None } else { c.default.clone() }, generated }
+                StructureColumn {
+                    name: c.name.clone(),
+                    type_name: c.type_name.clone(),
+                    nullable: c.nullable,
+                    default: if generated.is_some() {
+                        None
+                    } else {
+                        c.default.clone()
+                    },
+                    generated,
+                }
             })
             .collect();
         let constraints = self
@@ -309,7 +455,14 @@ impl PgConn {
             .iter()
             .map(|r| StructureTrigger { name: r.get(0), definition: r.get(1), enabled: r.get(2) })
             .collect();
-        let mut s = TableStructure { stats, columns, constraints, indexes, triggers, ddl: String::new() };
+        let mut s = TableStructure {
+            stats,
+            columns,
+            constraints,
+            indexes,
+            triggers,
+            ddl: String::new(),
+        };
         s.ddl = ddl(schema, table, &s);
         Ok(s)
     }
@@ -318,7 +471,11 @@ impl PgConn {
     pub async fn structure_commit(&self, stmts: &[String]) -> AppResult<()> {
         let _scope = self.scope().await;
         self.dirty.store(true, std::sync::atomic::Ordering::SeqCst);
-        if let Err(e) = self.client.batch_execute("BEGIN; SET LOCAL lock_timeout = 5000").await {
+        if let Err(e) = self
+            .client
+            .batch_execute("BEGIN; SET LOCAL lock_timeout = 5000")
+            .await
+        {
             let _ = self.client.batch_execute("ROLLBACK").await;
             return Err(map_error(&e));
         }
@@ -330,7 +487,14 @@ impl PgConn {
                 break;
             }
         }
-        let ended = self.client.batch_execute(if failure.is_none() { "COMMIT" } else { "ROLLBACK" }).await;
+        let ended = self
+            .client
+            .batch_execute(if failure.is_none() {
+                "COMMIT"
+            } else {
+                "ROLLBACK"
+            })
+            .await;
         if ended.is_ok() {
             self.dirty.store(false, std::sync::atomic::Ordering::SeqCst);
         }
@@ -349,19 +513,49 @@ mod tests {
     #[test]
     fn operations_become_quoted_statements_with_warnings() {
         let ops = vec![
-            StructureOp::AddColumn { name: "refunded_qty".into(), type_name: "integer".into(), nullable: true, default: Some("0".into()) },
-            StructureOp::ChangeType { column: "discount".into(), type_name: "numeric(6,3)".into() },
-            StructureOp::RenameColumn { from: "a\"b".into(), to: "c".into() },
-            StructureOp::CreateIndex { name: "i".into(), columns: vec!["x".into(), "y".into()], unique: true },
-            StructureOp::AddForeignKey { name: "fk".into(), columns: vec!["o".into()], ref_schema: "public".into(), ref_table: "orders".into(), ref_columns: vec!["id".into()], on_delete: Some("cascade".into()) },
-            StructureOp::SetDefault { column: "q".into(), default: None },
+            StructureOp::AddColumn {
+                name: "refunded_qty".into(),
+                type_name: "integer".into(),
+                nullable: true,
+                default: Some("0".into()),
+            },
+            StructureOp::ChangeType {
+                column: "discount".into(),
+                type_name: "numeric(6,3)".into(),
+            },
+            StructureOp::RenameColumn {
+                from: "a\"b".into(),
+                to: "c".into(),
+            },
+            StructureOp::CreateIndex {
+                name: "i".into(),
+                columns: vec!["x".into(), "y".into()],
+                unique: true,
+            },
+            StructureOp::AddForeignKey {
+                name: "fk".into(),
+                columns: vec!["o".into()],
+                ref_schema: "public".into(),
+                ref_table: "orders".into(),
+                ref_columns: vec!["id".into()],
+                on_delete: Some("cascade".into()),
+            },
+            StructureOp::SetDefault {
+                column: "q".into(),
+                default: None,
+            },
             StructureOp::DropColumn { name: "old".into() },
         ];
         let (s, w) = statements("public", "order_items", &ops, Some(131_402)).unwrap();
-        assert_eq!(s[0], "alter table \"public\".\"order_items\" add column \"refunded_qty\" integer default 0");
+        assert_eq!(
+            s[0],
+            "alter table \"public\".\"order_items\" add column \"refunded_qty\" integer default 0"
+        );
         assert!(s[1].contains("type numeric(6,3) using \"discount\"::numeric(6,3)"));
         assert!(s[2].contains("rename column \"a\"\"b\" to \"c\""));
-        assert!(s[3].starts_with("create unique index \"i\" on") && s[3].ends_with("(\"x\", \"y\")"));
+        assert!(
+            s[3].starts_with("create unique index \"i\" on") && s[3].ends_with("(\"x\", \"y\")")
+        );
         assert!(s[4].ends_with("on delete cascade"));
         assert!(s[5].ends_with("drop default"));
         assert_eq!(w.len(), 3);
@@ -370,35 +564,120 @@ mod tests {
 
     #[test]
     fn a_type_or_default_that_could_end_the_statement_is_refused() {
-        for bad in ["int; drop table t", "int -- x", "int /* x", "text'", "int)", "bad type!", "int, disable trigger all", ") x (", "int) x (int", "int\\", "\"a"] {
-            let op = StructureOp::AddColumn { name: "a".into(), type_name: bad.into(), nullable: true, default: None };
+        for bad in [
+            "int; drop table t",
+            "int -- x",
+            "int /* x",
+            "text'",
+            "int)",
+            "bad type!",
+            "int, disable trigger all",
+            ") x (",
+            "int) x (int",
+            "int\\",
+            "\"a",
+        ] {
+            let op = StructureOp::AddColumn {
+                name: "a".into(),
+                type_name: bad.into(),
+                nullable: true,
+                default: None,
+            };
             assert!(statements("s", "t", &[op], None).is_err(), "{bad}");
         }
-        for bad in ["0; drop table t", "0, drop constraint pk", "0 /* x", "f(1) ) , (2", "'open"] {
-            let op = StructureOp::SetDefault { column: "a".into(), default: Some(bad.into()) };
+        for bad in [
+            "0; drop table t",
+            "0, drop constraint pk",
+            "0 /* x",
+            "f(1) ) , (2",
+            "'open",
+        ] {
+            let op = StructureOp::SetDefault {
+                column: "a".into(),
+                default: Some(bad.into()),
+            };
             assert!(statements("s", "t", &[op], None).is_err(), "{bad}");
         }
         // Strings and calls with commas inside are fine.
-        for ok in ["'a, b; --'", "now()", "coalesce(a, 0)", "'it''s'", "numeric(6,3)"] {
-            let op = StructureOp::SetDefault { column: "a".into(), default: Some(ok.into()) };
+        for ok in [
+            "'a, b; --'",
+            "now()",
+            "coalesce(a, 0)",
+            "'it''s'",
+            "numeric(6,3)",
+        ] {
+            let op = StructureOp::SetDefault {
+                column: "a".into(),
+                default: Some(ok.into()),
+            };
             assert!(statements("s", "t", &[op], None).is_ok(), "{ok}");
         }
-        let op = StructureOp::AddForeignKey { name: "f".into(), columns: vec!["a".into()], ref_schema: "s".into(), ref_table: "t".into(), ref_columns: vec!["id".into()], on_delete: Some("cascade; drop".into()) };
+        let op = StructureOp::AddForeignKey {
+            name: "f".into(),
+            columns: vec!["a".into()],
+            ref_schema: "s".into(),
+            ref_table: "t".into(),
+            ref_columns: vec!["id".into()],
+            on_delete: Some("cascade; drop".into()),
+        };
         assert!(statements("s", "t", &[op], None).is_err());
         assert!(statements("s", "t", &[], None).is_err());
-        assert!(statements("s", "t", &[StructureOp::CreateIndex { name: "i".into(), columns: vec![], unique: false }], None).is_err());
+        assert!(statements(
+            "s",
+            "t",
+            &[StructureOp::CreateIndex {
+                name: "i".into(),
+                columns: vec![],
+                unique: false
+            }],
+            None
+        )
+        .is_err());
     }
 
     #[test]
     fn every_generated_statement_has_a_class_the_gate_knows() {
         use crate::sql::classify::{classify, Class};
         let ops = [
-            (StructureOp::AddColumn { name: "a".into(), type_name: "int".into(), nullable: true, default: None }, Class::Schema),
-            (StructureOp::DropColumn { name: "a".into() }, Class::Dangerous),
-            (StructureOp::ChangeType { column: "a".into(), type_name: "text".into() }, Class::Dangerous),
-            (StructureOp::DropIndex { name: "i".into() }, Class::Dangerous),
-            (StructureOp::SetNullable { column: "a".into(), nullable: false }, Class::Schema),
-            (StructureOp::CreateIndex { name: "i".into(), columns: vec!["a".into()], unique: false }, Class::Schema),
+            (
+                StructureOp::AddColumn {
+                    name: "a".into(),
+                    type_name: "int".into(),
+                    nullable: true,
+                    default: None,
+                },
+                Class::Schema,
+            ),
+            (
+                StructureOp::DropColumn { name: "a".into() },
+                Class::Dangerous,
+            ),
+            (
+                StructureOp::ChangeType {
+                    column: "a".into(),
+                    type_name: "text".into(),
+                },
+                Class::Dangerous,
+            ),
+            (
+                StructureOp::DropIndex { name: "i".into() },
+                Class::Dangerous,
+            ),
+            (
+                StructureOp::SetNullable {
+                    column: "a".into(),
+                    nullable: false,
+                },
+                Class::Schema,
+            ),
+            (
+                StructureOp::CreateIndex {
+                    name: "i".into(),
+                    columns: vec!["a".into()],
+                    unique: false,
+                },
+                Class::Schema,
+            ),
         ];
         for (op, want) in ops {
             let (s, _) = statements("s", "t", &[op], None).unwrap();
