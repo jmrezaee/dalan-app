@@ -70,6 +70,12 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sql::sql_count,
             commands::sql::sql_cell,
             commands::sql::sql_run,
+            commands::sql::sql_run_commit,
+            commands::sql::sql_run_discard,
+            commands::sql::sql_txn,
+            commands::sql::sql_grid_prepare,
+            commands::sql::sql_grid_commit,
+            commands::sql::sql_grid_discard,
             commands::sql::sql_cancel,
             commands::sql::sql_editor_close,
             commands::sql::sql_catalog,
@@ -325,7 +331,7 @@ pub fn run() {
 /// `Some(n)` when quitting now would end `n` live sessions and the UI must be asked first.
 fn quit_question(app: &tauri::AppHandle) -> Option<u32> {
     let st = app.try_state::<AppState>()?;
-    match st.quit.decide(st.sessions.live_count()) {
+    match st.quit.decide(st.sessions.live_count() + st.sql.open_transactions()) {
         quit::Decision::Allow => None,
         quit::Decision::Ask(n) => Some(n),
     }

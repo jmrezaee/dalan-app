@@ -62,6 +62,20 @@ function onTabKey(e: KeyboardEvent, i: number) {
       <span class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted" :title="'Writes: ' + mode.label"><component :is="mode.icon" class="size-3.5" aria-hidden="true" />{{ mode.label }}</span>
     </header>
 
+    <AlertDialog v-for="q in store.queries.filter(x => x.closeAsk)" :key="q.id" :open="true" @update:open="(v: boolean) => { if (!v) q.closeAsk = false }">
+      <AlertDialogContent :data-testid="tid('sql-close-guard')">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Close {{ q.title }} with a transaction open?</AlertDialogTitle>
+          <AlertDialogDescription>{{ q.txn?.statements ?? 0 }} {{ q.txn?.statements === 1 ? 'statement is' : 'statements are' }} not committed. Commit keeps them; Roll back undoes them.</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Keep it open</AlertDialogCancel>
+          <Button variant="secondary" @click="store.finishAndClose(q, false)">Roll back and close</Button>
+          <Button :disabled="q.txn?.failed" @click="store.finishAndClose(q, true)">Commit and close</Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
     <div v-if="store.status === 'ready'" class="flex min-h-0 flex-1">
       <SqlTree :tab-key="tabKey" />
       <section class="flex min-w-0 flex-1 flex-col" aria-label="Tables">
@@ -82,7 +96,7 @@ function onTabKey(e: KeyboardEvent, i: number) {
             >
               {{ q.title }}<span v-if="q.text !== q.saved" class="size-1.5 rounded-full bg-accent" aria-label="unsaved" />
             </button>
-            <button type="button" class="mr-1.5 grid size-5 place-items-center rounded hover:bg-surface-hover" :aria-label="`Close ${q.title}`" @click="store.closeQuery(q.id)"><X class="size-3" aria-hidden="true" /></button>
+            <button type="button" class="mr-1.5 grid size-5 place-items-center rounded hover:bg-surface-hover" :aria-label="`Close ${q.title}`" @click="store.requestCloseQuery(q)"><X class="size-3" aria-hidden="true" /></button>
           </div>
         </div>
         <template v-for="t in store.tabs" :key="t.id">

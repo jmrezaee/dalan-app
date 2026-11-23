@@ -78,7 +78,9 @@ const closing = ref<Session | null>(null)
 const closeOpen = ref(false)
 function requestClose(s: Session) {
   const live = s.kind === 'workspace' ? s.panes.filter(p => p.status === 'ready').length : s.kind === 'session' && s.status === 'ready' ? 1 : 0
-  if (live) {
+  // An SQL tab with an open transaction would roll it back: ask first.
+  const txns = s.kind === 'sql' ? useSqlStore(s.key).openTransactions : 0
+  if (live || txns) {
     closing.value = s
     closeOpen.value = true
   }
@@ -233,7 +235,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
       <!-- Terminals stay mounted (v-show), so scrollback survives switching tabs. -->
       <div v-for="s in sessions.sessions" v-show="sessions.activeKey === s.key" :key="s.key" class="absolute inset-0">
         <WorkspaceView v-if="s.kind === 'workspace'" ref="workspaceView" :ws="s" :active="sessions.activeKey === s.key" @edit-host="editHost" @new-host="newHost" />
-        <SqlTab v-else-if="s.kind === 'sql'" :tab-key="s.key" :db-id="s.dbId" :active="sessions.activeKey === s.key" @close="sessions.close(s)" />
+        <SqlTab v-else-if="s.kind === 'sql'" :tab-key="s.key" :db-id="s.dbId" :active="sessions.activeKey === s.key" @close="requestClose(s)" />
         <RedisTab v-else-if="s.kind === 'redis'" :tab-key="s.key" :db-id="s.dbId" :active="sessions.activeKey === s.key" @close="sessions.close(s)" />
         <SessionPane v-else :session="s" :active="sessions.activeKey === s.key" @edit-host="editHost" @new-host="newHost" />
       </div>
@@ -301,7 +303,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Close {{ closing?.label }}?</AlertDialogTitle>
-          <AlertDialogDescription>This ends {{ closingCount === 1 ? 'the connection' : `all ${closingCount} connections` }}, and anything running in the shell with it.</AlertDialogDescription>
+          <AlertDialogDescription v-if="closing?.kind === 'sql'">A transaction is open in this tab. Closing it rolls the transaction back: whatever was not committed is lost.</AlertDialogDescription>
+          <AlertDialogDescription v-else>This ends {{ closingCount === 1 ? 'the connection' : `all ${closingCount} connections` }}, and anything running in the shell with it.</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>

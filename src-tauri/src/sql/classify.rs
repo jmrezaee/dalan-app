@@ -135,6 +135,21 @@ fn effectful(name: &str) -> bool {
     PREFIXES.iter().any(|p| name.starts_with(p))
 }
 
+/// `true` when the statement names a function that acts outside the transaction (see `effectful`). Such a statement
+/// is never tried out before the confirmation: a rollback would not undo what it does.
+pub fn calls_effectful(sql: &str) -> bool {
+    names(sql).iter().any(|x| effectful(x))
+}
+
+/// `begin`, `commit`, `rollback`, `savepoint` and friends. The editor has its own Manual mode with Commit and Roll
+/// back; a raw one typed in a script would end or start a transaction behind the transaction bar's back.
+pub fn is_txn_control(sql: &str) -> bool {
+    matches!(
+        words(sql).first().map(String::as_str),
+        Some("BEGIN" | "START" | "COMMIT" | "END" | "ROLLBACK" | "ABORT" | "SAVEPOINT" | "RELEASE")
+    )
+}
+
 /// The statement the cursor is in (or the last one before it, when the cursor sits in the blank space after a `;`).
 pub fn at_cursor(pieces: &[Piece], cursor: usize) -> Option<&Piece> {
     pieces
@@ -254,9 +269,12 @@ pub fn classify(sql: &str) -> Class {
                 Class::Read
             }
         }
-        "INSERT" | "MERGE" | "COPY" | "CALL" | "DO" | "LOCK" | "SET" | "RESET" | "BEGIN"
+        // Arbitrary code or a shell command: as risky as anything, so the name must be typed.
+        "DO" | "EXECUTE" => Class::Dangerous,
+        "COPY" if has("PROGRAM") => Class::Dangerous,
+        "INSERT" | "MERGE" | "COPY" | "CALL" | "LOCK" | "SET" | "RESET" | "BEGIN"
         | "START" | "COMMIT" | "END" | "ROLLBACK" | "ABORT" | "SAVEPOINT" | "RELEASE"
-        | "PREPARE" | "EXECUTE" | "DEALLOCATE" | "DISCARD" | "LISTEN" | "UNLISTEN" | "NOTIFY"
+        | "PREPARE" | "DEALLOCATE" | "DISCARD" | "LISTEN" | "UNLISTEN" | "NOTIFY"
         | "DECLARE" | "FETCH" | "MOVE" | "CLOSE" | "IMPORT" | "SECURITY" => Class::Write,
         "VACUUM" => {
             if has("FULL") {
@@ -383,7 +401,9 @@ mod tests {
             ("merge into t using s on t.id = s.id when matched then delete", Write),
             ("copy t from stdin", Write),
             ("call p()", Write),
-            ("do $$ begin null; end $$", Write),
+            ("do $$ begin null; end $$", Dangerous),
+            ("execute p", Dangerous),
+            ("copy t to program 'sh'", Dangerous),
             ("select * from t for update", Write),
             ("select * into backup from t", Write),
             ("with d as (delete from t where id = 1 returning *) select * from d", Write),
@@ -457,6 +477,17 @@ mod tests {
         let open = split("select 'abc; drop table t");
         assert_eq!(open.len(), 1);
         assert_eq!(classify(&open[0].text), Dangerous);
+    }
+
+    #[test]
+    fn transaction_verbs_and_effectful_calls_are_recognised() {
+        for t in ["begin", "COMMIT", "rollback to savepoint a", "savepoint a", "start transaction", "end", "release a"] {
+            assert!(is_txn_control(t), "{t}");
+        }
+        assert!(!is_txn_control("select 1") && !is_txn_control("update t set begin = 1 where id = 2"));
+        assert!(calls_effectful("update t set a = pg_terminate_backend(1) where id = 1"));
+        assert!(calls_effectful("insert into t select \"dblink_exec\"('x', 'y')"));
+        assert!(!calls_effectful("update t set a = 1 where id = 2"));
     }
 
     #[test]

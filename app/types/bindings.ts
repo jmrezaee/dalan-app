@@ -56,10 +56,25 @@ export const commands = {
 	/**  One whole cell (the page cut it), for the cell panel. */
 	sqlCell: (connId: string, schema: string, table: string, key: KeyPart[], column: string) => typedError<SqlCell_Serialize, AppError>(__TAURI_INVOKE("sql_cell", { connId, schema, table, key, column })),
 	/**
-	 *  Runs the editor's text: the statement at the cursor, the selection, or the whole script. Results stream over
-	 *  `events` as they come (rows in batches); the command itself answers when the run is over. D3 runs reads only.
+	 *  Runs the editor's text: the statement at the cursor, the selection, or the whole script. Reads run at once and
+	 *  stream their results over `events`. Anything else goes through the gate (one function, in Rust): refused in a
+	 *  Read-only database, held for a confirmation (or the typed name) otherwise, run when the mode is Open.
 	 */
-	sqlRun: (connId: string, editorId: string, text: string, mode: RunMode, cursor: number | null, limit: number, timeoutMs: number, events: Channel<SqlRunEvent_Deserialize>) => typedError<null, AppError>(__TAURI_INVOKE("sql_run", { connId, editorId, text, mode, cursor, limit, timeoutMs, events })),
+	sqlRun: (connId: string, editorId: string, text: string, mode: RunMode, cursor: number | null, limit: number, timeoutMs: number, events: Channel<SqlRunEvent_Deserialize>) => typedError<SqlRunReply_Serialize, AppError>(__TAURI_INVOKE("sql_run", { connId, editorId, text, mode, cursor, limit, timeoutMs, events })),
+	/**
+	 *  The answer to a held script: runs exactly what `sql_run` held, once, after the mode is asked again and (for the
+	 *  dangerous class) the database's name is checked.
+	 */
+	sqlRunCommit: (connId: string, pendingId: string, typedName: string | null, limit: number, timeoutMs: number, events: Channel<SqlRunEvent_Deserialize>) => typedError<null, AppError>(__TAURI_INVOKE("sql_run_commit", { connId, pendingId, typedName, limit, timeoutMs, events })),
+	/**  "Cancel" on the dialog: the held script is dropped. */
+	sqlRunDiscard: (connId: string, pendingId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_run_discard", { connId, pendingId })),
+	/**  The editor's manual transaction (S37's bar). Beginning one needs a database that allows writes. */
+	sqlTxn: (connId: string, editorId: string, action: TxnAction) => typedError<TxnState, AppError>(__TAURI_INVOKE("sql_txn", { connId, editorId, action })),
+	/**  Turns the grid's edits into statements and holds them for the commit review. A Read-only database refuses here. */
+	sqlGridPrepare: (connId: string, edits: GridEdits_Deserialize) => typedError<GridPending, AppError>(__TAURI_INVOKE("sql_grid_prepare", { connId, edits })),
+	/**  "Commit": runs what `sql_grid_prepare` held, in one transaction, after the mode is asked again. */
+	sqlGridCommit: (connId: string, pendingId: string) => typedError<number, AppError>(__TAURI_INVOKE("sql_grid_commit", { connId, pendingId })),
+	sqlGridDiscard: (connId: string, pendingId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_grid_discard", { connId, pendingId })),
 	/**  Stop: the running statement is cancelled by the server (a second connection), and no further statement starts. */
 	sqlCancel: (connId: string, editorId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_cancel", { connId, editorId })),
 	/**  The editor tab closed. */
@@ -409,6 +424,22 @@ export type CatalogTable = {
 	columns: string[],
 };
 
+export type CellChange = CellChange_Serialize | CellChange_Deserialize;
+
+export type CellChange_Deserialize = {
+	column: string,
+	/**  The text the person saw; `None` was NULL. */
+	old?: string | null,
+	new?: string | null,
+};
+
+export type CellChange_Serialize = {
+	column: string,
+	/**  The text the person saw; `None` was NULL. */
+	old: string | null,
+	new: string | null,
+};
+
 export type CellKind = "null" | "bool" | "int" | "decimal" | "float" | "text" | "bytes" | "json" | "datetime" | "array" | "enum" | "uuid" | "interval" | "unknown";
 
 export type Choice = "replace" | "keep_both" | "skip";
@@ -680,7 +711,13 @@ export type ErrorCode = "locked" | "wrong_password" | "too_many_attempts" |
 /**  The database is Read-only in Dalan: the statement was not sent. */
 "db_read_only_mode" | 
 /**  A write needs its confirmation (unknown, used, expired or foreign pending id, or the typed name is wrong). */
-"db_confirm_needed" | "internal";
+"db_confirm_needed" | 
+/**  A grid edit found the row changed by someone else (the optimistic check failed); nothing was written. */
+"sql_conflict" | 
+/**  The table has no primary key or unique not-null key, so its rows can't be matched safely. */
+"sql_no_key" | 
+/**  A manual transaction is open on this editor. */
+"sql_in_transaction" | "internal";
 
 export type FailKind = "error" | "timeout" | "cancelled";
 
@@ -797,6 +834,28 @@ export type GenerateInput_Serialize = {
 	kind: KeyKind,
 	passphrase: string | null,
 	save_passphrase: boolean,
+};
+
+export type GridEdits = GridEdits_Serialize | GridEdits_Deserialize;
+
+export type GridEdits_Deserialize = {
+	schema: string,
+	table: string,
+	rows: RowEdit_Deserialize[],
+};
+
+export type GridEdits_Serialize = {
+	schema: string,
+	table: string,
+	rows: RowEdit_Serialize[],
+};
+
+export type GridPending = {
+	id: string,
+	db_name: string,
+	environment: string,
+	/**  The statements as readable SQL, for the commit review. */
+	statements: string[],
 };
 
 export type GroupInput = GroupInput_Serialize | GroupInput_Deserialize;
@@ -1260,6 +1319,11 @@ export type KeyUpdate_Serialize = {
 	forget_passphrase: boolean,
 };
 
+export type KeyValue = {
+	column: string,
+	value: string,
+};
+
 export type KnownHost = KnownHost_Serialize | KnownHost_Deserialize;
 
 export type KnownHost_Deserialize = {
@@ -1370,6 +1434,49 @@ export type PageRequest_Serialize = {
 	columns: string[],
 	cursor: PageCursor_Serialize | null,
 	page_size: number,
+};
+
+export type PendingLevel = "confirm" | 
+/**  The database's exact name must be typed. */
+"typed";
+
+/**  A script that needs the person's answer first. `sql_run_commit` runs it, once. */
+export type PendingRun = PendingRun_Serialize | PendingRun_Deserialize;
+
+/**  A script that needs the person's answer first. `sql_run_commit` runs it, once. */
+export type PendingRun_Deserialize = {
+	id: string,
+	level: PendingLevel,
+	db_name: string,
+	environment: string,
+	statements: PendingStatement_Deserialize[],
+};
+
+/**  A script that needs the person's answer first. `sql_run_commit` runs it, once. */
+export type PendingRun_Serialize = {
+	id: string,
+	level: PendingLevel,
+	db_name: string,
+	environment: string,
+	statements: PendingStatement_Serialize[],
+};
+
+export type PendingStatement = PendingStatement_Serialize | PendingStatement_Deserialize;
+
+export type PendingStatement_Deserialize = {
+	index: number,
+	text: string,
+	class: Class,
+	/**  What the server says it would do ("This will change 3 rows."), when it could be asked. */
+	note?: string | null,
+};
+
+export type PendingStatement_Serialize = {
+	index: number,
+	text: string,
+	class: Class,
+	/**  What the server says it would do ("This will change 3 rows."), when it could be asked. */
+	note: string | null,
 };
 
 export type ProfileTheme = ProfileTheme_Serialize | ProfileTheme_Deserialize;
@@ -2031,6 +2138,22 @@ export type RedisWriteOutcome_Serialize =
 /**  It ran. `reply` is the server's answer when it is worth showing (a new stream entry's id). */
 { status: "done"; reply: string | null } | { status: "pending"; pending: RedisPending_Serialize };
 
+export type RowEdit = RowEdit_Serialize | RowEdit_Deserialize;
+
+export type RowEdit_Deserialize = {
+	key: KeyValue[],
+	/**  Empty and `delete` set: the row goes. Otherwise the cells to change. */
+	changes: CellChange_Deserialize[],
+	delete: boolean,
+};
+
+export type RowEdit_Serialize = {
+	key: KeyValue[],
+	/**  Empty and `delete` set: the row goes. Otherwise the cells to change. */
+	changes: CellChange_Serialize[],
+	delete: boolean,
+};
+
 export type RunColumn = {
 	name: string,
 	type_name: string,
@@ -2299,7 +2422,9 @@ export type SqlRunEvent_Deserialize =
 /**  A statement begins. `start` and `end` are its characters in the editor's text. */
 { type: "started"; index: number; statement: string; start: number; end: number } | { type: "columns"; index: number; columns: RunColumn[] } | { type: "rows"; index: number; rows: SqlCell_Deserialize[][] } | 
 /**  `rows` is what was sent; `more` says the limit cut the result off. */
-{ type: "done"; index: number; rows: number; more: boolean; elapsed_ms: number } | { type: "failed"; index: number; kind: FailKind; message: string } | 
+{ type: "done"; index: number; rows: number; more: boolean; elapsed_ms: number; 
+/**  For a statement that returns no rows: how many rows it changed. */
+affected?: number | null } | { type: "failed"; index: number; kind: FailKind; message: string } | 
 /**  Not run: not a read. Nothing of the script ran. */
 { type: "refused"; index: number; class: Class; message: string } | { type: "finished"; elapsed_ms: number };
 
@@ -2308,9 +2433,23 @@ export type SqlRunEvent_Serialize =
 /**  A statement begins. `start` and `end` are its characters in the editor's text. */
 { type: "started"; index: number; statement: string; start: number; end: number } | { type: "columns"; index: number; columns: RunColumn[] } | { type: "rows"; index: number; rows: SqlCell_Serialize[][] } | 
 /**  `rows` is what was sent; `more` says the limit cut the result off. */
-{ type: "done"; index: number; rows: number; more: boolean; elapsed_ms: number } | { type: "failed"; index: number; kind: FailKind; message: string } | 
+{ type: "done"; index: number; rows: number; more: boolean; elapsed_ms: number; 
+/**  For a statement that returns no rows: how many rows it changed. */
+affected: number | null } | { type: "failed"; index: number; kind: FailKind; message: string } | 
 /**  Not run: not a read. Nothing of the script ran. */
 { type: "refused"; index: number; class: Class; message: string } | { type: "finished"; elapsed_ms: number };
+
+export type SqlRunReply = SqlRunReply_Serialize | SqlRunReply_Deserialize;
+
+export type SqlRunReply_Deserialize = {
+	/**  `None`: the script ran (or was refused); the results arrived on `events`. */
+	pending?: PendingRun_Deserialize | null,
+};
+
+export type SqlRunReply_Serialize = {
+	/**  `None`: the script ran (or was refused); the results arrived on `events`. */
+	pending: PendingRun_Serialize | null,
+};
 
 export type SqlServerInfo = {
 	engine: string,
@@ -2489,6 +2628,17 @@ export type TunnelChanged_Serialize = {
 };
 
 export type TunnelState = "stopped" | "starting" | "active" | "reconnecting" | "error";
+
+export type TxnAction = "begin" | "commit" | "rollback" | "state";
+
+export type TxnState = {
+	active: boolean,
+	statements: number,
+	age_s: number,
+	failed: boolean,
+	/**  Locks this transaction holds on tables and rows (`pg_locks`). */
+	locks: number,
+};
 
 export type UpdateInfo = UpdateInfo_Serialize | UpdateInfo_Deserialize;
 

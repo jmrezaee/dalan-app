@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { SqlCatalog, SqlRunEvent_Serialize, RunMode, SqlCell_Serialize as Cell, DbEvent_Serialize, PageCursor_Serialize, PromptKind, RedisStepState, SqlColumn_Serialize as SqlColumn, SqlObject_Serialize as SqlObject, SqlServerInfo, SqlTableInfo_Serialize as SqlTableInfo } from '~/types/bindings'
+import type { PendingRun, TxnState, GridPending, SqlCatalog, SqlRunEvent_Serialize, RunMode, SqlCell_Serialize as Cell, DbEvent_Serialize, PageCursor_Serialize, PromptKind, RedisStepState, SqlColumn_Serialize as SqlColumn, SqlObject_Serialize as SqlObject, SqlServerInfo, SqlTableInfo_Serialize as SqlTableInfo } from '~/types/bindings'
 import { useTauri } from '~/composables/useTauri'
 
 export type SqlStatus = 'connecting' | 'ready' | 'failed' | 'closed'
@@ -35,6 +35,11 @@ export interface TableTab {
   selected: { row: number, col: number } | null
   /** The whole value of the selected cell, when the page cut it. */
   full: { text: string | null, loading: boolean } | null
+  /** Edits not yet committed (F22): `row:col` to the new text (`null` is NULL), and rows marked for deletion. */
+  edits: Record<string, string | null>
+  deleted: number[]
+  /** The commit review the gate holds, and what went wrong with it. */
+  review: { pending: GridPending, error: string, busy: boolean } | null
 }
 
 /** One statement's answer in the query editor (S37). Rows arrive in batches while `state` is `running`. */
@@ -67,6 +72,13 @@ export interface QueryTab {
   limit: number
   timeoutS: number
   totalMs: number | null
+  /** Manual transactions: each run happens inside one that stays open until Commit or Roll back. */
+  manual: boolean
+  txn: TxnState | null
+  /** A change the gate holds for the person's answer (S42). */
+  pending: PendingRun | null
+  /** The tab's × was pressed with a transaction open: asking what to do with it. */
+  closeAsk: boolean
 }
 
 export const PAGE_SIZE = 200
@@ -214,7 +226,7 @@ function setup() {
     }
     const tab = reactive<TableTab>({
       id, schema, table: o.name, kind: o.kind, info: null, filter: '', applied: '', sort: [], columns: [], cols: [], rows: [], cursors: [null], page: 0, next: null,
-      keyset: false, loading: false, error: '', elapsedMs: null, estimate: o.estimate ?? null, exact: null, selected: null, full: null,
+      keyset: false, loading: false, error: '', elapsedMs: null, estimate: o.estimate ?? null, exact: null, selected: null, full: null, edits: {}, deleted: [], review: null,
     })
     tabs.value.push(tab)
     activeTab.value = id
@@ -234,6 +246,8 @@ function setup() {
     tabs.value.splice(i, 1)
     if (activeTab.value === id) activeTab.value = tabs.value[Math.min(i, tabs.value.length - 1)]?.id ?? ''
   }
+
+  const changeCount = (tab: TableTab) => Object.keys(tab.edits).length + tab.deleted.length
 
   // An answer that comes back after a newer request for the same table is dropped.
   const runs = new Map<string, number>()
@@ -260,6 +274,8 @@ function setup() {
       tab.cursors.length = page + 2
       tab.selected = null
       tab.full = null
+      tab.edits = {}
+      tab.deleted = []
     }
     catch (e) {
       if (runs.get(tab.id) !== run) return
@@ -273,6 +289,10 @@ function setup() {
    * filter check refuses, nothing is kept: the table stays on the page, filter, sort and columns it had.
    */
   async function apply(tab: TableTab, change: { sort?: { column: string, descending: boolean }[], columns?: string[] } = {}) {
+    if (changeCount(tab) > 0) {
+      tab.error = 'Commit or discard your changes first: loading rows again would lose them.'
+      return
+    }
     const before = { applied: tab.applied, sort: tab.sort, columns: tab.columns, cursors: [...tab.cursors], exact: tab.exact }
     tab.applied = tab.filter.trim()
     if (change.sort) tab.sort = change.sort
@@ -333,6 +353,74 @@ function setup() {
     }
   }
 
+  // ---- Editing (F22): the changes stay in the grid until the commit review
+
+  function setCell(tab: TableTab, row: number, col: number, value: string | null) {
+    const key = `${row}:${col}`
+    // Back to what the server sent: nothing to commit for this cell.
+    if ((tab.rows[row]?.[col]?.v ?? null) === value) {
+      const { [key]: _same, ...rest } = tab.edits
+      tab.edits = rest
+    }
+    else tab.edits[key] = value
+  }
+  function toggleDelete(tab: TableTab, row: number) {
+    const i = tab.deleted.indexOf(row)
+    if (i >= 0) tab.deleted.splice(i, 1)
+    else tab.deleted.push(row)
+  }
+  const discardEdits = (tab: TableTab) => { tab.edits = {}; tab.deleted = [] }
+
+  /** The rows' changes as the commit wants them. A row whose key isn't shown (or was cut) can't be matched. */
+  function gridEdits(tab: TableTab) {
+    const rows: { key: { column: string, value: string }[], changes: { column: string, old: string | null, new: string | null }[], delete: boolean }[] = []
+    const byRow = new Map<number, { column: string, old: string | null, new: string | null }[]>()
+    for (const [k, v] of Object.entries(tab.edits)) {
+      const [r, c] = k.split(':').map(Number) as [number, number]
+      if (tab.deleted.includes(r)) continue
+      byRow.set(r, [...(byRow.get(r) ?? []), { column: tab.cols[c]!.name, old: tab.rows[r]?.[c]?.v ?? null, new: v }])
+    }
+    for (const [r, changes] of byRow) rows.push({ key: keyOf(tab, r), changes, delete: false })
+    for (const r of tab.deleted) rows.push({ key: keyOf(tab, r), changes: [], delete: true })
+    return rows
+  }
+
+  /** "Review changes": Rust builds the statements and holds them; the dialog shows them. */
+  async function review(tab: TableTab) {
+    const rows = gridEdits(tab)
+    if (rows.some(r => !r.key.length)) {
+      tab.error = 'A row can\'t be matched without its whole key. Show the key columns, then try again.'
+      return
+    }
+    try {
+      tab.review = { pending: await api.sqlGridPrepare(connId.value, { schema: tab.schema, table: tab.table, rows }), error: '', busy: false }
+    }
+    catch (e) {
+      tab.error = message(e, 'Couldn\'t prepare the changes.')
+    }
+  }
+  async function commitReview(tab: TableTab) {
+    const r = tab.review
+    if (!r || r.busy) return
+    r.busy = true
+    r.error = ''
+    try {
+      await api.sqlGridCommit(connId.value, r.pending.id)
+      tab.review = null
+      discardEdits(tab)
+      await loadPage(tab, tab.page)
+    }
+    catch (e) {
+      r.error = message(e, 'Couldn\'t commit.')
+      r.busy = false
+    }
+  }
+  async function cancelReview(tab: TableTab) {
+    const r = tab.review
+    tab.review = null
+    if (r) await api.sqlGridDiscard(connId.value, r.pending.id).catch(() => {})
+  }
+
   /** Opens `schema.table` filtered by a foreign key's values: "Open row" and "Show them". */
   async function jump(schema: string, table: string, where: string) {
     await openTable(schema, { name: table, kind: 'table', estimate: null })
@@ -349,13 +437,28 @@ function setup() {
     const n = ++queryCount
     const q = reactive<QueryTab>({
       id: `q${n}`, title: title ?? `Query ${n}`, text, saved: savedId ? text : '', savedId, cursor: 0, running: false, results: [], messages: [], view: 'messages',
-      limit: 1000, timeoutS: 30, totalMs: null,
+      limit: 1000, timeoutS: 30, totalMs: null, manual: false, txn: null, pending: null, closeAsk: false,
     })
     queries.value.push(q)
     activeTab.value = q.id
     if (!catalog.value) void loadCatalog(false)
     return q
   }
+
+  /** The × on a query tab: with a transaction open it asks first (S42). */
+  function requestCloseQuery(q: QueryTab) {
+    if (q.txn?.active) q.closeAsk = true
+    else closeQuery(q.id)
+  }
+  /** Commit or roll back, then close. */
+  async function finishAndClose(q: QueryTab, commit: boolean) {
+    if (await txn(q, commit ? 'commit' : 'rollback')) {
+      q.closeAsk = false
+      closeQuery(q.id)
+    }
+  }
+  /** Transactions open in this tab's editors (the tab itself closing asks about them). */
+  const openTransactions = computed(() => queries.value.filter(q => q.txn?.active).length)
 
   function closeQuery(id: string) {
     const i = queries.value.findIndex(q => q.id === id)
@@ -391,6 +494,47 @@ function setup() {
       q.view = 'messages'
       return
     }
+    // Manual: the transaction begins before the first statement.
+    if (q.manual && !q.txn?.active && !(await txn(q, 'begin'))) return
+    await start(q, events => api.sqlRun(connId.value, editorId(q), text, mode, mode === 'current' ? q.cursor : null, q.limit, q.timeoutS * 1000, events).then((r) => { q.pending = r.pending }))
+  }
+
+  /** The gate's yes: runs what it held. `typed` is the database's name for a dangerous change. */
+  async function confirmRun(q: QueryTab, typed: string | null = null) {
+    const p = q.pending
+    if (!p || q.running) return
+    q.pending = null
+    await start(q, events => api.sqlRunCommit(connId.value, p.id, typed, q.limit, q.timeoutS * 1000, events))
+    // A mistyped name leaves the confirmation valid: the dialog comes back to try again.
+    if (q.messages.some(m => m.kind === 'error' && m.text.includes('doesn\'t match'))) q.pending = p
+  }
+  async function discardRun(q: QueryTab) {
+    const p = q.pending
+    q.pending = null
+    if (p) await api.sqlRunDiscard(connId.value, p.id).catch(() => {})
+  }
+
+  /** Begin, commit or roll back the manual transaction; `state` just reads it. Returns false when the server said no. */
+  async function txn(q: QueryTab, action: 'begin' | 'commit' | 'rollback' | 'state') {
+    try {
+      const st = await api.sqlTxn(connId.value, editorId(q), action)
+      q.txn = st.active ? st : null
+      return true
+    }
+    catch (e) {
+      q.messages.push({ kind: 'error', text: message(e, 'Couldn\'t do that.') })
+      q.view = 'messages'
+      if (action === 'begin') q.manual = false
+      return false
+    }
+  }
+  async function setManual(q: QueryTab, on: boolean) {
+    q.manual = on
+    if (on) await txn(q, 'begin')
+  }
+
+  /** Streams one run's events into the tab. `call` makes the command; a newer run drops what an older one sends. */
+  async function start(q: QueryTab, call: (onEvent: (e: SqlRunEvent_Serialize) => void) => Promise<unknown>) {
     const id = (runIds.get(q) ?? 0) + 1
     runIds.set(q, id)
     q.running = true
@@ -405,9 +549,9 @@ function setup() {
       switch (e.type) {
         case 'started':
           q.results[e.index] = { index: e.index, statement: e.statement, cols: [], rows: [], state: 'running', more: false, elapsedMs: null, selected: null }
-          if (e.index === 0) q.view = 'r0'
           break
         case 'columns':
+          if (e.index === 0) q.view = 'r0'
           if (r) r.cols = e.columns.map(c => ({ name: c.name, type_name: c.type_name, kind: c.kind, nullable: true, default: null, pk_position: null }))
           break
         case 'rows':
@@ -418,7 +562,11 @@ function setup() {
             r.state = 'done'
             r.more = e.more
             r.elapsedMs = e.elapsed_ms
-            q.messages.push({ kind: 'info', statement: r.statement, text: r.cols.length ? `${e.rows.toLocaleString('en-US')} ${e.rows === 1 ? 'row' : 'rows'} · ${e.elapsed_ms} ms${e.more ? ` · stopped at the limit of ${q.limit.toLocaleString('en-US')}` : ''}` : `Done · ${e.elapsed_ms} ms` })
+            q.messages.push({
+              kind: 'info', statement: r.statement,
+              text: e.affected !== null ? `${e.affected.toLocaleString('en-US')} ${e.affected === 1 ? 'row' : 'rows'} changed · ${e.elapsed_ms} ms`
+                : r.cols.length ? `${e.rows.toLocaleString('en-US')} ${e.rows === 1 ? 'row' : 'rows'} · ${e.elapsed_ms} ms${e.more ? ` · stopped at the limit of ${q.limit.toLocaleString('en-US')}` : ''}` : `Done · ${e.elapsed_ms} ms`,
+            })
           }
           break
         case 'failed':
@@ -437,11 +585,12 @@ function setup() {
           q.totalMs = e.elapsed_ms
           q.running = false
           void loadHistory()
+          if (q.manual) void txn(q, 'state')
           break
       }
     }
     try {
-      await api.sqlRun(connId.value, editorId(q), text, mode, mode === 'current' ? q.cursor : null, q.limit, q.timeoutS * 1000, onEvent)
+      await call(onEvent)
     }
     catch (e) {
       if (live()) {
@@ -449,7 +598,7 @@ function setup() {
         q.view = 'messages'
       }
     }
-    // The command answers after its last event; if `finished` never came (an error before the run began), stop here.
+    // The command answers after its last event; if `finished` never came (a held change, or an error before the run began), stop here.
     if (live()) q.running = false
   }
 
@@ -489,7 +638,7 @@ function setup() {
     q.title = row.name
   }
 
-  return { dbId, connId, status, steps, prompt, info, error, schemas, treeFilter, tabs, activeTab, current, queries, catalog, history, newQuery, closeQuery, loadCatalog, run, stop, format, loadHistory, clearHistory, save, open, retry, respond, close, toggleSchema, openTable, closeTable, loadPage, apply, refresh, nextPage, prevPage, sortBy, countExactly, select, keyOf, jump }
+  return { dbId, connId, status, steps, prompt, info, error, schemas, treeFilter, tabs, activeTab, current, changeCount, setCell, toggleDelete, discardEdits, review, commitReview, cancelReview, queries, catalog, history, newQuery, closeQuery, requestCloseQuery, finishAndClose, openTransactions, confirmRun, discardRun, txn, setManual, loadCatalog, run, stop, format, loadHistory, clearHistory, save, open, retry, respond, close, toggleSchema, openTable, closeTable, loadPage, apply, refresh, nextPage, prevPage, sortBy, countExactly, select, keyOf, jump }
 }
 
 // One store per SQL tab, like the Redis tabs: each has its own connection, tree and open tables.

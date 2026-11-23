@@ -2,7 +2,7 @@
 // S36 (read side): a table's Data view: the Where box, sorting by a column header, which columns show, the grid, the
 // cell panel with the linked rows, and the pager with the planner's estimate ("Count exactly" asks for the real number).
 // Nothing here changes data (editing is D4). The page itself is read inside a read-only transaction by Rust.
-import { ChevronLeft, ChevronRight, Columns3, RefreshCw } from '@lucide/vue'
+import { ChevronLeft, ChevronRight, Columns3, RefreshCw, Trash2 } from '@lucide/vue'
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { PAGE_SIZE, type TableTab } from '~/stores/sql'
@@ -33,6 +33,11 @@ const total = computed(() => {
   if (!t.value.applied && t.value.estimate !== null && t.value.estimate >= last.value) return `${fmt(t.value.estimate)} (estimate)`
   return t.value.next ? 'more' : fmt(last.value)
 })
+// ---- Editing (F22): a table with a key, in a database that allows changes
+const databases = useDatabasesStore()
+const mode = computed(() => databases.rows.find(d => d.id === store.dbId)?.write_mode ?? 'confirm')
+const editable = computed(() => t.value.kind === 'table' && !!t.value.info?.columns.some(c => c.pk_position !== null) && mode.value !== 'read_only')
+const changes = computed(() => store.changeCount(t.value))
 const noKey = computed(() => !!t.value.info && !t.value.info.columns.some(c => c.pk_position !== null))
 
 // ---- The cell panel and the linked rows
@@ -101,7 +106,7 @@ const links = computed<Link[]>(() => {
         </DropdownMenuContent>
       </DropdownMenu>
       <Button type="submit" size="sm" :loading="t.loading">Apply</Button>
-      <IconButton label="Refresh" type="button" @click="store.refresh(t)"><RefreshCw /></IconButton>
+      <IconButton label="Refresh" type="button" :disabled="changes > 0" @click="store.refresh(t)"><RefreshCw /></IconButton>
     </form>
     <p v-if="t.error" role="alert" class="shrink-0 border-b border-border px-3 py-1.5 text-xs text-danger">{{ t.error }}</p>
     <p v-else-if="noKey" role="status" class="shrink-0 border-b border-border px-3 py-1.5 text-xs text-muted">This table has no key, so rows can't be matched safely. Use a query instead when editing arrives.</p>
@@ -110,7 +115,8 @@ const links = computed<Link[]>(() => {
       <div class="flex min-w-0 flex-1 flex-col">
         <DataGrid
           v-if="t.cols.length" :label="`${t.schema}.${t.table} rows`" :columns="t.cols" :rows="t.rows" :selected="t.selected"
-          :sort-column="sort?.column ?? null" :sort-descending="sort?.descending ?? false" @select="(r: number, c: number) => store.select(t, r, c)" @sort="(c: string) => store.sortBy(t, c)"
+          :sort-column="sort?.column ?? null" :sort-descending="sort?.descending ?? false" :editable="editable" :edited="t.edits" :deleted-rows="t.deleted"
+          @edit="(r: number, c: number, v: string | null) => store.setCell(t, r, c, v)" @select="(r: number, c: number) => store.select(t, r, c)" @sort="(c: string) => store.sortBy(t, c)"
         />
         <div v-else-if="t.loading" class="p-4 text-sm text-muted" aria-busy="true">Reading {{ t.table }}…</div>
         <div v-if="t.cols.length && !t.rows.length && !t.loading" class="p-4 text-sm text-muted">{{ t.applied ? 'No rows match this filter. Clear it?' : 'This table has no rows yet.' }}</div>
@@ -135,14 +141,22 @@ const links = computed<Link[]>(() => {
       </aside>
     </div>
 
+    <div v-if="changes" class="flex h-10 shrink-0 items-center gap-3 border-t border-warning/40 bg-warning/10 px-3 text-sm" role="status" :data-testid="tid('sql-changes')">
+      <span class="flex-1"><b class="font-medium">{{ changes }} {{ changes === 1 ? 'change' : 'changes' }}</b> not committed. Nothing is written until you review and commit.</span>
+      <Button variant="ghost" size="sm" @click="store.discardEdits(t)">Discard</Button>
+      <Button size="sm" @click="store.review(t)">Review changes</Button>
+    </div>
+    <p v-else-if="editable && t.rows.length" class="shrink-0 border-t border-border px-3 py-1 text-2xs text-muted">Select a cell and press Enter to edit it. Delete makes it NULL.</p>
+    <SqlCommitDialog :tab-key="tabKey" :tab="t" />
     <footer class="flex h-9 shrink-0 items-center gap-3 border-t border-border px-3 text-xs text-muted">
       <span v-if="t.rows.length" :data-testid="tid('sql-range')">Rows {{ fmt(first) }}–{{ fmt(last) }} of {{ total }}<template v-if="t.elapsedMs !== null"> · {{ t.elapsedMs }} ms</template></span>
       <span v-else-if="t.cols.length">0 rows</span>
       <Button v-if="t.exact === null && t.rows.length" variant="ghost" size="xs" @click="store.countExactly(t)">Count exactly</Button>
+      <Button v-if="editable && t.selected && cell" variant="ghost" size="xs" @click="store.toggleDelete(t, t.selected.row)"><Trash2 />{{ t.deleted.includes(t.selected.row) ? 'Keep row' : 'Delete row' }}</Button>
       <span class="ml-auto flex items-center gap-1">
-        <IconButton label="Previous page" :disabled="t.page === 0 || t.loading" @click="store.prevPage(t)"><ChevronLeft /></IconButton>
+        <IconButton label="Previous page" :disabled="t.page === 0 || t.loading || changes > 0" @click="store.prevPage(t)"><ChevronLeft /></IconButton>
         <span class="min-w-12 text-center">Page {{ t.page + 1 }}</span>
-        <IconButton label="Next page" :disabled="!t.next || t.loading" @click="store.nextPage(t)"><ChevronRight /></IconButton>
+        <IconButton label="Next page" :disabled="!t.next || t.loading || changes > 0" @click="store.nextPage(t)"><ChevronRight /></IconButton>
       </span>
     </footer>
   </div>

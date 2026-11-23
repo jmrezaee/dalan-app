@@ -14,8 +14,40 @@ const props = defineProps<{
   /** The column the data is sorted by, if any. */
   sortColumn?: string | null
   sortDescending?: boolean
+  /** Cells can be edited (F22): Enter, F2 or a double-click opens the cell; Delete makes it NULL. */
+  editable?: boolean
+  /** Pending edits by `row:col`: the new text (`null` is NULL). The cell shows it as changed. */
+  edited?: Record<string, string | null>
+  /** Rows marked for deletion, struck through. */
+  deletedRows?: number[]
 }>()
-const emit = defineEmits<{ select: [row: number, col: number], sort: [column: string] }>()
+const emit = defineEmits<{ select: [row: number, col: number], sort: [column: string], edit: [row: number, col: number, value: string | null] }>()
+
+// ---- Editing one cell
+const editing = ref<{ row: number, col: number, value: string } | null>(null)
+const cellOf = (row: number, col: number) => props.rows[row]?.[col]
+const editedKey = (row: number, col: number) => `${row}:${col}`
+const isEdited = (row: number, col: number) => !!props.edited && editedKey(row, col) in props.edited
+function shownValue(row: number, col: number, c: Cell): Cell {
+  return isEdited(row, col) ? { kind: props.edited![editedKey(row, col)] === null ? 'null' : c.kind, v: props.edited![editedKey(row, col)]!, cut: false } : c
+}
+function canEditCell(row: number, col: number) {
+  const c = cellOf(row, col)
+  return !!props.editable && !!c && !c.cut && !props.deletedRows?.includes(row)
+}
+function startEdit(row: number, col: number) {
+  if (!canEditCell(row, col)) return
+  const c = shownValue(row, col, cellOf(row, col)!)
+  editing.value = { row, col, value: c.v ?? '' }
+  emit('select', row, col)
+  nextTick(() => scroller.value?.querySelector<HTMLInputElement>('input[data-cell-editor]')?.focus())
+}
+function finishEdit(save: boolean) {
+  const e = editing.value
+  editing.value = null
+  if (save && e) emit('edit', e.row, e.col, e.value)
+  nextTick(() => scroller.value?.focus())
+}
 
 const ROW = 28
 const { scroller, onScroll, from, to, padTop, padBottom, reveal } = useVirtualRows(computed(() => props.rows.length), ROW)
@@ -59,6 +91,10 @@ function onKey(e: KeyboardEvent) {
     const out = e.shiftKey ? row.map(c => c.v ?? '').join('\t') : (row[s.col]?.v ?? '')
     void navigator.clipboard.writeText(out)
     return
+  }
+  if (props.editable && props.selected) {
+    if (e.key === 'Enter' || e.key === 'F2') { e.preventDefault(); startEdit(props.selected.row, props.selected.col); return }
+    if (e.key === 'Delete' && canEditCell(props.selected.row, props.selected.col)) { e.preventDefault(); emit('edit', props.selected.row, props.selected.col, null); return }
   }
   // The first arrow key selects the first cell instead of moving from it.
   if (!props.selected && e.key.startsWith('Arrow')) {
@@ -107,14 +143,18 @@ function onKey(e: KeyboardEvent) {
         </div>
       </div>
       <div :style="{ height: `${padTop}px` }" />
-      <div v-for="(r, ri) in shown" :key="from + ri" role="row" :aria-rowindex="from + ri + 2" class="grid border-b border-surface-raised hover:bg-surface" :style="{ gridTemplateColumns: template, height: `${ROW}px` }">
+      <div v-for="(r, ri) in shown" :key="from + ri" role="row" :aria-rowindex="from + ri + 2" :aria-label="deletedRows?.includes(from + ri) ? 'Marked for deletion' : undefined" :class="cn('grid border-b border-surface-raised hover:bg-surface', deletedRows?.includes(from + ri) && 'bg-danger/10 line-through opacity-70')" :style="{ gridTemplateColumns: template, height: `${ROW}px` }">
         <div role="rowheader" class="border-r border-surface-raised px-2 text-right font-mono leading-7 text-muted">{{ from + ri + 1 }}</div>
         <div
-          v-for="(c, ci) in r" :key="ci" role="gridcell" :aria-selected="isSelected(ri, ci)" :title="c.v !== null && c.v.length > 60 ? text(c) : undefined"
-          :class="cn('min-w-0 truncate border-r border-surface-raised px-2 font-mono leading-7', alignRight(c) && 'text-right', c.v === null && 'italic text-muted', c.kind === 'bool' && c.v !== null && 'text-ansi-blue', isSelected(ri, ci) && 'bg-accent/15 ring-1 ring-inset ring-accent')"
-          @click="emit('select', from + ri, ci)"
+          v-for="(c0, ci) in r" :key="ci" role="gridcell" :aria-selected="isSelected(ri, ci)" :title="c0.v !== null && c0.v.length > 60 ? text(c0) : undefined"
+          :class="cn('min-w-0 truncate border-r border-surface-raised px-2 font-mono leading-7', alignRight(shownValue(from + ri, ci, c0)) && 'text-right', shownValue(from + ri, ci, c0).v === null && 'italic text-muted', c0.kind === 'bool' && c0.v !== null && 'text-ansi-blue', isEdited(from + ri, ci) && 'bg-warning/15', isSelected(ri, ci) && 'bg-accent/15 ring-1 ring-inset ring-accent')"
+          @click="emit('select', from + ri, ci)" @dblclick="startEdit(from + ri, ci)"
         >
-          {{ shownText(c) }}
+          <input
+            v-if="editing && editing.row === from + ri && editing.col === ci" v-model="editing.value" data-cell-editor class="size-full bg-transparent font-mono outline-none" :aria-label="`Edit ${columns[ci]?.name}`"
+            @keydown.stop @keydown.enter.prevent="finishEdit(true)" @keydown.esc.prevent="finishEdit(false)" @blur="finishEdit(true)"
+          >
+          <template v-else>{{ shownText(shownValue(from + ri, ci, c0)) }}</template>
         </div>
       </div>
       <div :style="{ height: `${padBottom}px` }" />

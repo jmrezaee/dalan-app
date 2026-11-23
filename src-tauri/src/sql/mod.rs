@@ -3,6 +3,7 @@
 //! "Connecting" card), and keeping the open connections by id so a tab's commands find theirs.
 
 pub mod classify;
+pub mod grid;
 pub mod pg;
 pub mod run;
 #[cfg(test)]
@@ -367,6 +368,10 @@ pub struct Editor {
 /// The open SQL connections, by id. One per tab; lock closes them all.
 #[derive(Default)]
 pub struct SqlManager {
+    /// Scripts held for the gate's answer, by id (bound to their connection).
+    pub pending: crate::dbs::gate::PendingStore<run::HeldRun>,
+    /// Grid edits held for the commit review.
+    pub grid_pending: crate::dbs::gate::PendingStore<Vec<grid::GridStatement>>,
     conns: Mutex<HashMap<String, Arc<Live>>>,
 }
 
@@ -416,6 +421,20 @@ impl SqlManager {
         })
     }
 
+    /// Manual transactions open right now, for the quit question (quitting rolls them back).
+    pub fn open_transactions(&self) -> usize {
+        let Ok(conns) = self.conns.lock() else { return 0 };
+        conns
+            .values()
+            .map(|l| {
+                l.editors
+                    .try_lock()
+                    .map(|e| e.values().filter(|x| x.conn.has_txn()).count())
+                    .unwrap_or(0)
+            })
+            .sum()
+    }
+
     /// The saved database a connection was opened for.
     pub fn db_id(&self, conn_id: &str) -> AppResult<String> {
         Ok(self.get(conn_id)?.db_id.clone())
@@ -452,6 +471,8 @@ impl SqlManager {
     }
 
     pub fn close(&self, conn_id: &str) {
+        self.pending.drop_conn(conn_id);
+        self.grid_pending.drop_conn(conn_id);
         let live = self.conns.lock().ok().and_then(|mut m| m.remove(conn_id));
         if let Some(live) = live {
             live.prompts.cancel_all_pub();
@@ -471,4 +492,25 @@ impl SqlManager {
             let _ = live.cancel.send(true);
         }
     }
+}
+
+/// The database as the gate needs it, read fresh for every run (the mode may have changed since the tab opened).
+pub struct GateTarget {
+    pub name: String,
+    pub mode: crate::redis::store::RedisWriteMode,
+    pub environment: String,
+}
+
+pub async fn gate_target(store: &Store, db_id: &str) -> AppResult<GateTarget> {
+    let id = db_id.to_string();
+    store
+        .with_db_session(move |c, s| {
+            let d = dbstore::get(c, &s.vault_id, &id)?;
+            Ok(GateTarget {
+                name: d.name,
+                mode: d.write_mode,
+                environment: format!("{:?}", d.environment).to_ascii_lowercase(),
+            })
+        })
+        .await
 }

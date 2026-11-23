@@ -41,6 +41,8 @@ pub struct PgConn {
     pub(super) server_name: String,
     /// The tables and columns, for the editor's completion. Read once, again on request.
     pub(super) catalog: tokio::sync::Mutex<Option<std::sync::Arc<super::run::SqlCatalog>>>,
+    /// A manual transaction is open on this connection (editor tabs only; D4).
+    pub(super) txn: std::sync::Mutex<Option<super::run::TxnInfo>>,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -154,6 +156,7 @@ impl PgConn {
                 tls: login.tls,
                 server_name: login.server_name.clone(),
                 catalog: tokio::sync::Mutex::new(None),
+                txn: std::sync::Mutex::new(None),
             },
             info,
         ))

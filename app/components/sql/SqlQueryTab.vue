@@ -2,7 +2,7 @@
 // A query tab (S37, F23): the editor on top, the results below. Run the statement at the caret (⌘↵), the selection or
 // the whole script (⇧⌘↵); rows stream in while it runs, Stop cancels it on the server. D3 runs reads only: anything
 // else is refused with a note until the confirmation dialogs arrive (D4).
-import { Check, Copy, History, Play, Save, Square, Star, Trash2 } from '@lucide/vue'
+import { Check, Copy, History, Play, Save, Square, Star, Trash2, TriangleAlert } from '@lucide/vue'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -88,6 +88,15 @@ const cellText = computed(() => {
 function onKey(e: KeyboardEvent) {
   if (!e.defaultPrevented && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's') { e.preventDefault(); void save() }
 }
+// ---- The transaction bar: its age is read from the server every 20 s; a quiet two minutes turns it amber.
+const idle = computed(() => (q.value.txn?.age_s ?? 0) >= 120)
+const ageText = computed(() => { const a = q.value.txn?.age_s ?? 0; return a < 60 ? 'started just now' : `started ${Math.floor(a / 60)} min ago` })
+let poll: ReturnType<typeof setInterval> | undefined
+watch(() => !!q.value.txn?.active, (on) => {
+  clearInterval(poll)
+  if (on) poll = setInterval(() => { if (!q.value.running) void store.txn(q.value, 'state') }, 20_000)
+}, { immediate: true })
+onBeforeUnmount(() => clearInterval(poll))
 onMounted(() => { if (!databases.savedLoaded) void databases.refreshSaved() })
 </script>
 
@@ -100,6 +109,7 @@ onMounted(() => { if (!databases.savedLoaded) void databases.refreshSaved() })
       <Button variant="secondary" size="sm" :disabled="q.running" @click="run('all')">Run all</Button>
       <Button variant="ghost" size="sm" @click="store.format(q)">Format</Button>
       <Button variant="ghost" size="sm" @click="save()"><Save />Save</Button>
+      <Button variant="secondary" size="sm" :aria-pressed="q.manual" :disabled="q.running || !!q.txn?.active" :title="q.manual ? 'Statements wait for Commit' : 'Each statement commits on its own'" :data-testid="tid('sql-manual')" @click="store.setManual(q, !q.manual)">{{ q.manual ? 'Manual' : 'Auto-commit' }}</Button>
       <span class="ml-auto flex items-center gap-2 text-xs text-muted">
         <label :for="`${tabKey}-${q.id}-limit`">Limit</label>
         <Input :id="`${tabKey}-${q.id}-limit`" v-model="limitText" class="h-7 w-20 text-xs" inputmode="numeric" autocomplete="off" />
@@ -107,6 +117,18 @@ onMounted(() => { if (!databases.savedLoaded) void databases.refreshSaved() })
         <Input :id="`${tabKey}-${q.id}-timeout`" v-model="timeoutText" class="h-7 w-14 text-xs" inputmode="numeric" autocomplete="off" /><span aria-hidden="true">s</span>
       </span>
     </div>
+    <div v-if="q.txn?.active" :class="cn('flex h-11 shrink-0 items-center gap-3 border-b px-3 text-sm', idle ? 'border-warning/40 bg-warning/10' : 'border-border bg-surface')" role="status" :data-testid="tid('sql-txn-bar')">
+      <TriangleAlert class="size-4 shrink-0 text-warning" aria-hidden="true" />
+      <span class="min-w-0 flex-1 truncate">
+        <b class="font-medium">{{ q.txn.failed ? 'The transaction failed' : 'In a transaction' }}</b>
+        · {{ q.txn.failed ? 'roll back to carry on' : `${q.txn.statements} ${q.txn.statements === 1 ? 'statement' : 'statements'} not committed` }}
+        · {{ ageText }}<template v-if="q.txn.locks"> · holds {{ q.txn.locks }} {{ q.txn.locks === 1 ? 'lock' : 'locks' }}</template>
+        <template v-if="idle"> · still open: others may be waiting on its locks</template>
+      </span>
+      <Button variant="secondary" size="sm" :disabled="q.running" @click="store.txn(q, 'rollback')">Roll back</Button>
+      <Button size="sm" :disabled="q.running || q.txn.failed" @click="store.txn(q, 'commit')">Commit</Button>
+    </div>
+    <SqlConfirmDialog :tab-key="tabKey" :query="q" />
     <form v-if="saving" class="flex h-11 shrink-0 items-center gap-2 border-b border-border bg-surface px-3" @submit.prevent="save(true)" @keydown.esc="saving = false">
       <label :for="`${tabKey}-${q.id}-name`" class="text-xs text-muted">Name</label>
       <Input :id="`${tabKey}-${q.id}-name`" v-model="saveName" class="h-7 w-64 text-xs" autocomplete="off" data-autofocus :aria-invalid="!!saveError" />

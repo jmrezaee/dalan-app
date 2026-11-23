@@ -63,6 +63,8 @@ pub enum SqlRunEvent {
         rows: u32,
         more: bool,
         elapsed_ms: u32,
+        /// For a statement that returns no rows: how many rows it changed.
+        affected: Option<f64>,
     },
     Failed {
         index: u32,
@@ -78,6 +80,32 @@ pub enum SqlRunEvent {
     Finished {
         elapsed_ms: u32,
     },
+}
+
+/// A manual transaction (S37's bar): what the person has done in it and for how long.
+#[derive(Debug, Clone)]
+pub struct TxnInfo {
+    pub since: Instant,
+    pub statements: u32,
+    /// A statement failed: the server only accepts ROLLBACK now.
+    pub failed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct TxnState {
+    pub active: bool,
+    pub statements: u32,
+    pub age_s: u32,
+    pub failed: bool,
+    /// Locks this transaction holds on tables and rows (`pg_locks`).
+    pub locks: u32,
+}
+
+/// A script held for the person's answer (the gate's "Confirm" and "Typed" levels).
+#[derive(Debug, Clone)]
+pub struct HeldRun {
+    pub pieces: Vec<Piece>,
+    pub editor_id: String,
 }
 
 pub struct RunOpts {
@@ -126,31 +154,47 @@ impl PgConn {
         pieces: &[Piece],
         opts: &RunOpts,
         cancel: &AtomicBool,
+        allow_write: bool,
         emit: &(dyn Fn(SqlRunEvent) + Sync),
     ) -> AppResult<()> {
         let started = Instant::now();
-        // The whole script is looked at before any of it runs: a refused statement means nothing runs.
-        for (i, p) in pieces.iter().enumerate() {
-            let class = classify::classify(&p.text);
-            if class != Class::Read {
-                emit(SqlRunEvent::Refused {
-                    index: i as u32,
-                    class,
-                    message: "This changes data or structure. The editor only runs reads for now; changes arrive with the confirmation dialogs in an update.".into(),
-                });
-                emit(SqlRunEvent::Finished { elapsed_ms: ms(started) });
-                return Ok(());
-            }
+        // The whole script is looked at before any of it runs. Statements that aren't reads need the gate's yes,
+        // which the caller passes as `allow_write`; without it, a refused statement means nothing runs.
+        let all_reads = pieces.iter().all(|p| classify::classify(&p.text) == Class::Read);
+        if !all_reads && !allow_write {
+            let (i, class) = pieces
+                .iter()
+                .enumerate()
+                .map(|(i, p)| (i, classify::classify(&p.text)))
+                .find(|(_, c)| *c != Class::Read)
+                .unwrap_or((0, Class::Dangerous));
+            emit(SqlRunEvent::Refused {
+                index: i as u32,
+                class,
+                message: "This changes data or structure and hasn't been confirmed. Nothing was sent.".into(),
+            });
+            emit(SqlRunEvent::Finished { elapsed_ms: ms(started) });
+            return Ok(());
         }
         let _scope = self.scope().await;
-        self.dirty.store(true, Ordering::SeqCst);
-        self.client
-            .batch_execute(&format!(
-                "BEGIN READ ONLY; SET LOCAL statement_timeout = {}",
-                opts.timeout_ms
-            ))
-            .await
-            .map_err(|e| map_error(&e))?;
+        let manual = self.txn.lock().map(|t| t.is_some()).unwrap_or(false);
+        let timeout = opts.timeout_ms;
+        // Three footings: a manual transaction (nothing is wrapped; it is the person's), reads only (one read-only
+        // transaction, always rolled back), and writes in auto-commit (each statement stands alone).
+        if manual {
+            let _ = self.client.batch_execute(&format!("SET LOCAL statement_timeout = {timeout}")).await;
+        } else if all_reads {
+            self.dirty.store(true, Ordering::SeqCst);
+            self.client
+                .batch_execute(&format!("BEGIN READ ONLY; SET LOCAL statement_timeout = {timeout}"))
+                .await
+                .map_err(|e| map_error(&e))?;
+        } else {
+            self.client
+                .batch_execute(&format!("SET statement_timeout = {timeout}"))
+                .await
+                .map_err(|e| map_error(&e))?;
+        }
         for (i, p) in pieces.iter().enumerate() {
             if cancel.load(Ordering::SeqCst) {
                 emit(SqlRunEvent::Failed {
@@ -166,21 +210,149 @@ impl PgConn {
                 start: p.start as u32,
                 end: p.end as u32,
             });
-            if let Err((kind, message)) = self.run_one(i as u32, p, opts, cancel, emit).await {
-                emit(SqlRunEvent::Failed {
-                    index: i as u32,
-                    kind,
-                    message,
-                });
+            // A query in auto-commit needs a transaction for its cursor; it commits (or rolls back) with it.
+            let wrap = !manual && !all_reads && classify::is_query(&p.text);
+            if wrap {
+                self.client.batch_execute("BEGIN").await.map_err(|e| map_error(&e))?;
+                self.dirty.store(true, Ordering::SeqCst);
+            }
+            let out = self.run_one(i as u32, p, opts, cancel, emit).await;
+            if wrap && self.client.batch_execute(if out.is_ok() { "COMMIT" } else { "ROLLBACK" }).await.is_ok() {
+                self.dirty.store(false, Ordering::SeqCst);
+            }
+            if manual {
+                if let Ok(mut t) = self.txn.lock() {
+                    if let Some(t) = t.as_mut() {
+                        t.statements += 1;
+                        t.failed |= out.is_err();
+                    }
+                }
+            }
+            if let Err((kind, message)) = out {
+                emit(SqlRunEvent::Failed { index: i as u32, kind, message });
                 break;
             }
         }
-        // Whatever happened, the transaction ends (an aborted one can only be rolled back).
-        if self.client.batch_execute("ROLLBACK").await.is_ok() {
+        // Whatever happened, a read-only transaction ends (an aborted one can only be rolled back).
+        if !manual && all_reads && self.client.batch_execute("ROLLBACK").await.is_ok() {
             self.dirty.store(false, Ordering::SeqCst);
         }
         emit(SqlRunEvent::Finished { elapsed_ms: ms(started) });
         Ok(())
+    }
+
+    /// What each data-changing statement would do, for the confirmation dialog: it is run for real inside a
+    /// transaction that is rolled back (a savepoint when a manual transaction is open), and the server's row count
+    /// is reported. A table too big for ten seconds says so instead. Statements that aren't inserts, updates,
+    /// deletes or merges get no note. Sequences and triggers' outside effects are not undone by the rollback.
+    pub async fn preview(&self, pieces: &[Piece]) -> AppResult<Vec<Option<String>>> {
+        let _scope = self.scope().await;
+        let manual = self.txn.lock().map(|t| t.is_some()).unwrap_or(false);
+        let mut out = Vec::new();
+        for p in pieces {
+            let first = p.text.split_whitespace().next().unwrap_or("").to_ascii_uppercase();
+            if !matches!(first.as_str(), "INSERT" | "UPDATE" | "DELETE" | "MERGE") {
+                out.push(None);
+                continue;
+            }
+            // Trying it out would do for real what a rollback can't undo (a session killed, a remote call made).
+            if classify::calls_effectful(&p.text) {
+                out.push(Some("Not tried out: it calls a function that acts outside the transaction.".to_string()));
+                continue;
+            }
+            let (open, close) = if manual {
+                ("SAVEPOINT dalan_dry", "ROLLBACK TO SAVEPOINT dalan_dry")
+            } else {
+                ("BEGIN", "ROLLBACK")
+            };
+            self.dirty.store(!manual, Ordering::SeqCst);
+            self.client.batch_execute(open).await.map_err(|e| map_error(&e))?;
+            let _ = self.client.batch_execute("SET LOCAL statement_timeout = 10000").await;
+            let r = self.client.execute(&p.text, &[]).await;
+            let _ = self.client.batch_execute(close).await;
+            if manual {
+                let _ = self.client.batch_execute("RELEASE SAVEPOINT dalan_dry").await;
+            } else {
+                self.dirty.store(false, Ordering::SeqCst);
+            }
+            out.push(Some(match r {
+                Ok(1) => "This will change 1 row.".to_string(),
+                Ok(n) => format!("This will change {n} rows."),
+                Err(e) if e.as_db_error().is_some_and(|d| d.message().contains("statement timeout")) => {
+                    "Too big to count here: it ran for more than ten seconds.".to_string()
+                }
+                Err(e) => format!("The server says it would fail: {}", e.as_db_error().map_or_else(|| e.to_string(), |d| d.message().to_string())),
+            }));
+        }
+        Ok(out)
+    }
+
+    pub fn has_txn(&self) -> bool {
+        self.txn.lock().map(|t| t.is_some()).unwrap_or(false)
+    }
+
+    /// Begin a manual transaction on this connection.
+    pub async fn txn_begin(&self) -> AppResult<()> {
+        let _scope = self.scope().await;
+        if self.txn.lock().map(|t| t.is_some()).unwrap_or(true) {
+            return Err(AppError::new(
+                crate::error::ErrorCode::SqlInTransaction,
+                "A transaction is already open in this editor.",
+            ));
+        }
+        self.client.batch_execute("BEGIN").await.map_err(|e| map_error(&e))?;
+        if let Ok(mut t) = self.txn.lock() {
+            *t = Some(TxnInfo { since: Instant::now(), statements: 0, failed: false });
+        }
+        Ok(())
+    }
+
+    /// Commit or roll back the manual transaction. The transaction is over either way, even if the server complains.
+    pub async fn txn_end(&self, commit: bool) -> AppResult<()> {
+        let _scope = self.scope().await;
+        let was = self.txn.lock().ok().and_then(|mut t| t.take());
+        let Some(was) = was else {
+            return Ok(());
+        };
+        if commit && was.failed {
+            // The server turns COMMIT into ROLLBACK for an aborted transaction; say so instead of pretending.
+            let _ = self.client.batch_execute("ROLLBACK").await;
+            return Err(AppError::validation(
+                "The transaction had failed, so it was rolled back instead of committed.",
+            ));
+        }
+        self.client
+            .batch_execute(if commit { "COMMIT" } else { "ROLLBACK" })
+            .await
+            .map_err(|e| map_error(&e))
+    }
+
+    pub async fn txn_state(&self) -> AppResult<TxnState> {
+        let info = self.txn.lock().ok().and_then(|t| t.clone());
+        let Some(info) = info else {
+            return Ok(TxnState { active: false, statements: 0, age_s: 0, failed: false, locks: 0 });
+        };
+        let mut locks = 0u32;
+        if !info.failed {
+            let _scope = self.scope().await;
+            if let Ok(row) = self
+                .client
+                .query_one(
+                    "select count(*)::int from pg_locks where pid = pg_backend_pid() and granted and locktype not in ('virtualxid', 'transactionid')",
+                    &[],
+                )
+                .await
+            {
+                locks = row.get::<_, i32>(0).max(0) as u32;
+            }
+        }
+        Ok(TxnState {
+            active: true,
+            statements: info.statements,
+            age_s: info.since.elapsed().as_secs().min(u64::from(u32::MAX)) as u32,
+            failed: info.failed,
+            locks,
+        })
     }
 
     async fn run_one(
@@ -229,6 +401,12 @@ impl PgConn {
                 .map(|(i, k)| SqlCell::new(*k, row.get(i).map(str::to_string)))
                 .collect()
         };
+        if kinds.is_empty() && !classify::is_query(&p.text) {
+            // Changes something and returns no rows: the server's own count says how many it touched.
+            let n = self.client.execute(&p.text, &[]).await.map_err(fail)?;
+            emit(SqlRunEvent::Done { index, rows: 0, more: false, elapsed_ms: ms(t), affected: Some(n as f64) });
+            return Ok(());
+        }
         if !kinds.is_empty() && classify::is_query(&p.text) {
             // The text goes in on its own line: a trailing `-- comment` can't swallow what follows.
             // The extended protocol takes exactly one statement, whatever the two lexers think a `;` is.
@@ -284,7 +462,7 @@ impl PgConn {
             }
             sent = keep as u32;
         }
-        emit(SqlRunEvent::Done { index, rows: sent, more, elapsed_ms: ms(t) });
+        emit(SqlRunEvent::Done { index, rows: sent, more, elapsed_ms: ms(t), affected: None });
         Ok(())
     }
 

@@ -547,6 +547,19 @@ SqlQueryTab (S37, F23)
   Empty: "Run a query to see rows here. ⌘↵ runs the statement your cursor is in." History: newest first, a click puts the text in the editor, a clear button; "Nothing run on this database yet." Saved: this engine's saved queries ("Save a query with ⌘S and it shows up here for every database of that engine.").
   Save (⌘S): a small popover with a name field and "Only this database" toggle; Enter saves.
 
+SqlConfirmDialog (S42, the editor's gate)
+  Alert dialog, 520 wide. "Run this change?" / "Run these n statements?": each statement in mono with its class ("Changes data", "Changes structure", "Dangerous") and, under it, what the server says it would do ("This will change 3 rows.", rolled back, never kept). A production database says so in warning text. Buttons: Cancel (focused), Run.
+  Dangerous level: danger border, title "Dangerous statement on <name>?", "This can't be undone, and everyone using this database is affected.", a field "Type <name> to confirm", the button "Run it anyway" disabled until the name matches. Rust compares the name again.
+  Read-only database: no dialog; Messages says "<name> is read-only in Dalan. Nothing was sent."
+
+SqlTransactionBar (S37)
+  Shown under the toolbar while a Manual transaction is open (surface bg, h 44): "In a transaction · n statements not committed · started 3 min ago · holds n locks", [Roll back] [Commit]. Open over two minutes: warning tint and "still open: others may be waiting on its locks". After a failed statement: "The transaction failed · roll back to carry on" and Commit is disabled. The toolbar's "Auto-commit" button toggles to "Manual".
+  Closing the tab (or the whole SQL tab) with one open asks: "Close <tab> with a transaction open?" Keep it open / Roll back and close / Commit and close. Locking Dalan, quitting and a lost connection end it with a rollback by the server.
+
+SqlCommitDialog (S42, F22)
+  "Commit n changes to <name>?": the exact statements Rust built (update … where key and old values, delete … where key), then Cancel / Commit. They run in one transaction; a row changed by someone else shows "Row n was changed or removed by someone else since you loaded it. Nothing was written. Reload the table and try again." in danger text and the dialog stays open (Close).
+  Grid editing: Enter, F2 or a double-click opens a cell, Enter saves it to the pending list, Esc cancels, Delete makes it NULL; a changed cell has a warning tint, a row marked for deletion is struck through. The bar under the grid says "n changes not committed" with Discard and Review changes. Paging and Refresh wait until the changes are committed or discarded. A table with no key, a view or a Read-only database is not editable.
+
 ShortcutRecorder (S23)
   Input-like button "Press keys…"; shows captured combo as Kbd chips; conflict → danger text "Already used by New tab" + [Replace]
 

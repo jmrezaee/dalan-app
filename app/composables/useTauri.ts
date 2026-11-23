@@ -2,7 +2,7 @@
 import { Channel } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { commands } from '~/types/bindings'
-import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, SqlRunEvent_Serialize, RunMode, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
+import type { AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, SqlRunEvent_Serialize, RunMode, TxnAction, GridEdits_Deserialize, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -53,6 +53,16 @@ export function useTauri() {
       events.onmessage = onEvent
       return unwrap(commands.sqlRun(connId, editorId, text, mode, cursor, limit, timeoutMs, events as never))
     },
+    sqlRunCommit: (connId: string, pendingId: string, typedName: string | null, limit: number, timeoutMs: number, onEvent: (e: SqlRunEvent_Serialize) => void) => {
+      const events = new Channel<SqlRunEvent_Serialize>()
+      events.onmessage = onEvent
+      return unwrap(commands.sqlRunCommit(connId, pendingId, typedName, limit, timeoutMs, events as never))
+    },
+    sqlRunDiscard: (connId: string, pendingId: string) => unwrap(commands.sqlRunDiscard(connId, pendingId)),
+    sqlTxn: (connId: string, editorId: string, action: TxnAction) => unwrap(commands.sqlTxn(connId, editorId, action)),
+    sqlGridPrepare: (connId: string, edits: GridEdits_Deserialize) => unwrap(commands.sqlGridPrepare(connId, edits)),
+    sqlGridCommit: (connId: string, pendingId: string) => unwrap(commands.sqlGridCommit(connId, pendingId)),
+    sqlGridDiscard: (connId: string, pendingId: string) => unwrap(commands.sqlGridDiscard(connId, pendingId)),
     sqlCancel: (connId: string, editorId: string) => unwrap(commands.sqlCancel(connId, editorId)),
     sqlEditorClose: (connId: string, editorId: string) => unwrap(commands.sqlEditorClose(connId, editorId)),
     sqlCatalog: (connId: string, refresh: boolean) => unwrap(commands.sqlCatalog(connId, refresh)),

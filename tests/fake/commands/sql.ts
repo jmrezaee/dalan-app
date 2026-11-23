@@ -4,7 +4,7 @@
 import { fail, type Handlers } from '../types'
 import type { SqlCell_Serialize as Cell_Serialize, SqlColumn_Serialize, SqlTableInfo_Serialize } from '../../../app/types/bindings'
 
-type Keys = 'dbOpen' | 'dbRespond' | 'dbClose' | 'sqlObjects' | 'sqlTableInfo' | 'sqlTablePage' | 'sqlCount' | 'sqlCell' | 'sqlRun' | 'sqlCancel' | 'sqlEditorClose' | 'sqlCatalog' | 'sqlFormat' | 'sqlHistory' | 'sqlHistoryClear'
+type Keys = 'dbOpen' | 'dbRespond' | 'dbClose' | 'sqlObjects' | 'sqlTableInfo' | 'sqlTablePage' | 'sqlCount' | 'sqlCell' | 'sqlRun' | 'sqlRunCommit' | 'sqlRunDiscard' | 'sqlTxn' | 'sqlGridPrepare' | 'sqlGridCommit' | 'sqlGridDiscard' | 'sqlCancel' | 'sqlEditorClose' | 'sqlCatalog' | 'sqlFormat' | 'sqlHistory' | 'sqlHistoryClear'
 
 const col = (name: string, type_name: string, kind: SqlColumn_Serialize['kind'], pk: number | null = null, nullable = true): SqlColumn_Serialize =>
   ({ name, type_name, kind, nullable: pk === null && nullable, default: null, pk_position: pk })
@@ -33,6 +33,34 @@ const FKS = {
   order_items: { references: [{ name: 'order_items_order_id_fkey', columns: ['order_id'], schema: 'public', table: 'orders', target_columns: ['id'] }], referenced_by: [] },
   customers: { references: [], referenced_by: [{ name: 'orders_customer_id_fkey', columns: ['customer_id'], schema: 'public', table: 'orders', target_columns: ['id'] }] },
 } as Record<string, Pick<SqlTableInfo_Serialize, 'references' | 'referenced_by'>>
+
+// Rows changed by a grid commit (D4): `table|pk|column` -> text, and deleted rows `table|pk`.
+const patched = new Map<string, string | null>()
+const deleted = new Set<string>()
+const liveRows = (name: string) => {
+  const t = TABLES[name]!
+  return t.rows().filter(r => !deleted.has(`${name}|${r[0]}`)).map(r => r.map((v, i) => (patched.has(`${name}|${r[0]}|${t.cols[i]!.name}`) ? patched.get(`${name}|${r[0]}|${t.cols[i]!.name}`)! : v)))
+}
+const txns = new Map<string, { statements: number, since: number }>()
+const held = new Map<string, { pieces: { text: string, start: number, end: number }[], editorId: string, level: string }>()
+const gridHeld = new Map<string, { schema: string, table: string, rows: any[] }>()
+
+type Cls = 'read' | 'write' | 'schema' | 'dangerous'
+function classOf(t: string): Cls {
+  const w = (/^\s*(\w+)/.exec(t)?.[1] ?? '').toLowerCase()
+  if (['select', 'show', 'with', 'values', 'table', 'explain'].includes(w)) return 'read'
+  if (w === 'drop' || w === 'truncate') return 'dangerous'
+  if ((w === 'update' || w === 'delete') && !/\bwhere\b/i.test(t)) return 'dangerous'
+  if (['create', 'alter', 'grant', 'revoke', 'vacuum', 'comment', 'analyze'].includes(w)) return 'schema'
+  return 'write'
+}
+function decide(mode: string, c: Cls) {
+  if (c === 'read') return 'run'
+  if (mode === 'read_only') return 'refuse'
+  if (c === 'write') return mode === 'open' ? 'run' : 'confirm'
+  return c === 'schema' ? 'confirm' : 'typed'
+}
+const affectedOf = (t: string) => (classOf(t) === 'schema' ? 0 : /\bwhere\b/i.test(t) ? 1 : 50)
 
 const table = (name: string) => TABLES[name] ?? fail('not_found', `There is no table public.${name} (it may have been dropped).`)
 const cell = (c: SqlColumn_Serialize, v: string | null): Cell_Serialize => (v === null ? { kind: 'null', v: null, cut: false } : { kind: c.kind, v, cut: false })
@@ -68,7 +96,54 @@ function split(text: string) {
   }
   return out
 }
-const WRITES = /^(insert|update|delete|create|alter|drop|truncate|grant|revoke|vacuum|begin|commit|rollback|set|copy|call|do)\b/i
+async function runPieces(a: any, ch: number, send: (c: number, m: unknown) => void, pieces: { text: string, start: number, end: number }[]) {
+    const started = Date.now()
+    history.unshift(pieces.map(p => p.text).join(';\n'))
+    let stopped = false
+    stops.set(a.editorId, () => { stopped = true })
+    for (const [i, p] of pieces.entries()) {
+      if (stopped) break
+      send(ch, { type: 'started', index: i, statement: p.text, start: p.start, end: p.end })
+      if (/pg_sleep/i.test(p.text)) {
+        const limit = (a.timeoutMs ?? 30000)
+        for (let t = 0; t < limit && !stopped; t += 20) await wait(20)
+        send(ch, { type: 'failed', index: i, kind: stopped ? 'cancelled' : 'timeout', message: 'canceling statement' })
+        break
+      }
+      if (/\bmissing\b/i.test(p.text)) {
+        send(ch, { type: 'failed', index: i, kind: 'error', message: 'relation "missing" does not exist' })
+        break
+      }
+      if (classOf(p.text) !== 'read') {
+        const t = txns.get(a.editorId)
+        if (t) t.statements++
+        // The one write shape the fake really applies: `update <table> set <col> = '<text>' where id = <n>`.
+        const u = /^\s*update\s+(\w+)\s+set\s+(\w+)\s*=\s*'([^']*)'\s+where\s+id\s*=\s*(\d+)/i.exec(p.text)
+        if (u && TABLES[u[1]!]) patched.set(`${u[1]}|${u[4]}|${u[2]}`, u[3]!)
+        send(ch, { type: 'done', index: i, rows: 0, more: false, elapsed_ms: 3, affected: affectedOf(p.text) })
+        continue
+      }
+      const tname = Object.keys(TABLES).find(n => new RegExp(`\\b${n}\\b`, 'i').test(p.text))
+      let cols: SqlColumn_Serialize[]
+      let rows: (string | null)[][]
+      if (tname) {
+        cols = TABLES[tname]!.cols
+        rows = liveRows(tname)
+      }
+      else {
+        cols = [col('one', 'integer', 'int'), col('nothing', 'text', 'text')]
+        rows = [['1', null]]
+      }
+      send(ch, { type: 'columns', index: i, columns: cols.map(x => ({ name: x.name, type_name: x.type_name, kind: x.kind })) })
+      const limit = a.limit || Infinity
+      const shown = rows.slice(0, limit)
+      for (let at = 0; at < shown.length; at += 500) send(ch, { type: 'rows', index: i, rows: shown.slice(at, at + 500).map(r => r.map((v, k) => cell(cols[k]!, v))) })
+      send(ch, { type: 'done', index: i, rows: shown.length, more: rows.length > shown.length, elapsed_ms: 3, affected: null })
+    }
+    stops.delete(a.editorId)
+    send(ch, { type: 'finished', elapsed_ms: Date.now() - started })
+
+}
 
 export const sql: Pick<Handlers, Keys> = {
   dbOpen: (a, { m, id, channel, send }) => {
@@ -120,7 +195,7 @@ export const sql: Pick<Handlers, Keys> = {
     if (r.filter.includes(';')) fail('validation', 'That isn\'t a filter I can use: write one condition, like status = \'open\' and total > 100')
     const shown = r.columns.length ? r.columns.map((n: string) => t.cols.findIndex(c => c.name === n)) : t.cols.map((_, i) => i)
     if (shown.some((i: number) => i < 0)) fail('validation', 'There is no such column in this table.')
-    let rows = t.rows().filter(matcher(r.filter, t.cols))
+    let rows = liveRows(r.table).filter(matcher(r.filter, t.cols))
     const pk = t.cols.findIndex(c => c.pk_position === 1)
     const sort = r.sort[0]
     const keyset = !sort && pk >= 0
@@ -159,48 +234,91 @@ export const sql: Pick<Handlers, Keys> = {
     const all = split(a.text)
     if (!all.length) fail('validation', 'There is nothing to run.')
     const pieces = a.mode === 'current' ? [all.find(p => (a.cursor ?? 0) >= p.start && (a.cursor ?? 0) <= p.end) ?? all.filter(p => p.end <= (a.cursor ?? 0)).at(-1) ?? all[0]!] : all
-    const started = Date.now()
-    const refused = pieces.findIndex(p => WRITES.test(p.text))
-    if (refused >= 0) {
-      send(ch, { type: 'refused', index: refused, class: 'write', message: 'This changes data or structure. The editor only runs reads for now; changes arrive with the confirmation dialogs in an update.' })
+    const db = m.dbs.find(d => d.id === c.db)!
+    const tc = pieces.findIndex(p => /^\s*(begin|start|commit|end|rollback|savepoint|release)\b/i.test(p.text))
+    if (tc >= 0) {
+      send(ch, { type: 'refused', index: tc, class: 'write', message: 'Transactions are started and ended with the Manual / Auto-commit button and the Commit and Roll back buttons, not with statements.' })
       send(ch, { type: 'finished', elapsed_ms: 0 })
-      return null
+      return { pending: null }
     }
-    history.unshift(pieces.map(p => p.text).join(';\n'))
-    let stopped = false
-    stops.set(a.editorId, () => { stopped = true })
-    for (const [i, p] of pieces.entries()) {
-      if (stopped) break
-      send(ch, { type: 'started', index: i, statement: p.text, start: p.start, end: p.end })
-      if (/pg_sleep/i.test(p.text)) {
-        const limit = (a.timeoutMs ?? 30000)
-        for (let t = 0; t < limit && !stopped; t += 20) await wait(20)
-        send(ch, { type: 'failed', index: i, kind: stopped ? 'cancelled' : 'timeout', message: 'canceling statement' })
-        break
-      }
-      if (/\bmissing\b/i.test(p.text)) {
-        send(ch, { type: 'failed', index: i, kind: 'error', message: 'relation "missing" does not exist' })
-        break
-      }
-      const tname = Object.keys(TABLES).find(n => new RegExp(`\\b${n}\\b`, 'i').test(p.text))
-      let cols: SqlColumn_Serialize[]
-      let rows: (string | null)[][]
-      if (tname) {
-        cols = TABLES[tname]!.cols
-        rows = TABLES[tname]!.rows()
-      }
-      else {
-        cols = [col('one', 'integer', 'int'), col('nothing', 'text', 'text')]
-        rows = [['1', null]]
-      }
-      send(ch, { type: 'columns', index: i, columns: cols.map(x => ({ name: x.name, type_name: x.type_name, kind: x.kind })) })
-      const limit = a.limit || Infinity
-      const shown = rows.slice(0, limit)
-      for (let at = 0; at < shown.length; at += 500) send(ch, { type: 'rows', index: i, rows: shown.slice(at, at + 500).map(r => r.map((v, k) => cell(cols[k]!, v))) })
-      send(ch, { type: 'done', index: i, rows: shown.length, more: rows.length > shown.length, elapsed_ms: 3 })
+    const classes = pieces.map(p => classOf(p.text))
+    const order = ['run', 'confirm', 'typed', 'refuse']
+    const decision = classes.map(k => decide(db.write_mode, k)).reduce((x, y) => (order.indexOf(y) > order.indexOf(x) ? y : x), 'run')
+    if (decision === 'refuse') {
+      const i = Math.max(0, classes.findIndex(k => k !== 'read'))
+      send(ch, { type: 'refused', index: i, class: classes[i], message: `${db.name} is read-only in Dalan. Nothing was sent.` })
+      send(ch, { type: 'finished', elapsed_ms: 0 })
+      return { pending: null }
     }
-    stops.delete(a.editorId)
-    send(ch, { type: 'finished', elapsed_ms: Date.now() - started })
+    if (decision === 'confirm' || decision === 'typed') {
+      const id = `pend-${held.size + 1}-${Date.now()}`
+      held.set(id, { pieces, editorId: a.editorId, level: decision })
+      return { pending: { id, level: decision === 'typed' ? 'typed' : 'confirm', db_name: db.name, environment: db.environment, statements: pieces.map((p, i) => ({ index: i, text: p.text, class: classes[i]!, note: /^(insert|update|delete)/i.test(p.text) ? `This will change ${affectedOf(p.text)} ${affectedOf(p.text) === 1 ? 'row' : 'rows'}.` : null })) } }
+    }
+    await runPieces(a, ch, send, pieces)
+    return { pending: null }
+  },
+  sqlRunCommit: async (a, { m, channel, send }) => {
+    const h = held.get(a.pendingId)
+    held.delete(a.pendingId)
+    if (!h) fail('db_confirm_needed', 'That confirmation was already used or isn\'t for this tab. Nothing was sent.')
+    const c = m.sqlConns.get(a.connId)!
+    const db = m.dbs.find(d => d.id === c.db)!
+    if (h.level === 'typed' && a.typedName !== db.name) fail('db_confirm_needed', 'The name doesn\'t match the database\'s name. Nothing was sent.')
+    await runPieces({ ...a, editorId: h.editorId }, channel(a.events), send, h.pieces)
+    return null
+  },
+  sqlRunDiscard: (a) => {
+    held.delete(a.pendingId)
+    return null
+  },
+  sqlTxn: (a, { m }) => {
+    const c = m.sqlConns.get(a.connId)
+    const db = c && m.dbs.find(d => d.id === c.db)
+    if (a.action === 'begin') {
+      if (db?.write_mode === 'read_only') fail('db_read_only_mode', `${db.name} is read-only in Dalan. Nothing was sent.`)
+      if (txns.has(a.editorId)) fail('sql_in_transaction', 'A transaction is already open in this editor.')
+      txns.set(a.editorId, { statements: 0, since: Date.now() })
+    }
+    if (a.action === 'commit' || a.action === 'rollback') txns.delete(a.editorId)
+    const t = txns.get(a.editorId)
+    return { active: !!t, statements: t?.statements ?? 0, age_s: t ? Math.floor((Date.now() - t.since) / 1000) : 0, failed: false, locks: t && t.statements ? 2 : 0 }
+  },
+  sqlGridPrepare: (a, { m }) => {
+    const c = m.sqlConns.get(a.connId)
+    const db = c && m.dbs.find(d => d.id === c.db)
+    if (db?.write_mode === 'read_only') fail('db_read_only_mode', `${db.name} is read-only in Dalan. Nothing was sent.`)
+    const t = table(a.edits.table)
+    if (!t.cols.some(x => x.pk_position)) fail('sql_no_key', 'This table has no key, so rows can\'t be matched safely. Use a query instead.')
+    const q = (v: string | null) => (v === null ? 'NULL' : `'${v.replace(/'/g, '\'\'')}'`)
+    const statements = a.edits.rows.map((r: any) => r.delete
+      ? `delete from "${a.edits.schema}"."${a.edits.table}" where ${r.key.map((k: any) => `"${k.column}" = ${q(k.value)}`).join(' and ')}`
+      : `update "${a.edits.schema}"."${a.edits.table}" set ${r.changes.map((x: any) => `"${x.column}" = ${q(x.new)}`).join(', ')} where ${r.key.map((k: any) => `"${k.column}" = ${q(k.value)}`).join(' and ')} and ${r.changes.map((x: any) => `"${x.column}" is not distinct from ${q(x.old)}`).join(' and ')}`)
+    const id = `grid-${gridHeld.size + 1}-${Date.now()}`
+    gridHeld.set(id, a.edits)
+    return { id, db_name: db!.name, environment: db!.environment, statements }
+  },
+  sqlGridCommit: (a) => {
+    const e = gridHeld.get(a.pendingId)
+    gridHeld.delete(a.pendingId)
+    if (!e) fail('db_confirm_needed', 'That confirmation was already used or isn\'t for this tab. Nothing was sent.')
+    const t = table(e.table)
+    const cur = liveRows(e.table)
+    // The optimistic check first, so a stale row writes nothing at all.
+    for (const [i, r] of e.rows.entries()) {
+      const row = cur.find(x => x[0] === r.key[0].value)
+      if (!row) fail('sql_conflict', `Row ${i + 1} was changed or removed by someone else since you loaded it. Nothing was written. Reload the table and try again.`)
+      for (const ch of r.changes) if ((row[t.cols.findIndex(c => c.name === ch.column)] ?? null) !== ch.old) fail('sql_conflict', `Row ${i + 1} was changed or removed by someone else since you loaded it. Nothing was written. Reload the table and try again.`)
+    }
+    for (const r of e.rows) {
+      const pk = r.key[0].value
+      if (r.delete) deleted.add(`${e.table}|${pk}`)
+      else for (const ch of r.changes) patched.set(`${e.table}|${pk}|${ch.column}`, ch.new)
+    }
+    return e.rows.length
+  },
+  sqlGridDiscard: (a) => {
+    gridHeld.delete(a.pendingId)
     return null
   },
   sqlCancel: (a) => {

@@ -51,6 +51,12 @@ pub enum ErrorCode {
     DbReadOnlyMode,
     /// A write needs its confirmation (unknown, used, expired or foreign pending id, or the typed name is wrong).
     DbConfirmNeeded,
+    /// A grid edit found the row changed by someone else (the optimistic check failed); nothing was written.
+    SqlConflict,
+    /// The table has no primary key or unique not-null key, so its rows can't be matched safely.
+    SqlNoKey,
+    /// A manual transaction is open on this editor.
+    SqlInTransaction,
     Internal,
 }
 
@@ -148,6 +154,9 @@ mod tests {
             DbRefused,
             DbReadOnlyMode,
             DbConfirmNeeded,
+            SqlConflict,
+            SqlNoKey,
+            SqlInTransaction,
             Internal,
         ];
         // An exhaustive match: adding a variant is a compile error here until the list above has it.
@@ -158,7 +167,8 @@ mod tests {
                 | KexFailed | PortInUse | PermissionDenied | SftpDisabled | RedisAuthFailed
                 | RedisUnreachable | RedisTlsUntrusted | RedisRefused | RedisReadOnlyMode
                 | RedisConfirmNeeded | DbAuthFailed | DbUnreachable | DbTlsUntrusted
-                | DbRefused | DbReadOnlyMode | DbConfirmNeeded | Internal => {}
+                | DbRefused | DbReadOnlyMode | DbConfirmNeeded | SqlConflict | SqlNoKey
+                | SqlInTransaction | Internal => {}
             }
             let json = serde_json::to_value(AppError::new(c, "m")).unwrap();
             let obj = json.as_object().unwrap();

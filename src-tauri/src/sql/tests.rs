@@ -24,6 +24,18 @@ create table d2.order_items (order_id bigint references d2.orders(id), line_no i
 create table d2.no_key (a int, b text);
 create table d2.types (id int primary key, big bigint, dec numeric, f float8, b bytea, arr int[], u uuid, iv interval, j jsonb, long text);
 create table d2.log (n int);
+create table d2.e1 (id int primary key, name text, qty int);
+create table d2.e2 (id int primary key, name text, qty int);
+create table d2.e3 (id int primary key, name text, qty int);
+create table d2.e4 (id int primary key, name text, qty int);
+create table d2.e5 (id int primary key, name text, qty int);
+create table d2.e6 (a text, b int, "select" text, j json, primary key (a, b));
+insert into d2.e6 values ('x', 1, 's', '{"k": 1}'), ('x', 2, 't', null);
+insert into d2.e1 select g, 'n' || g, g * 10 from generate_series(1, 5) g;
+insert into d2.e2 select * from d2.e1;
+insert into d2.e3 select * from d2.e1;
+insert into d2.e4 select * from d2.e1;
+insert into d2.e5 select * from d2.e1;
 create function d2.bump() returns boolean language sql as 'insert into d2.log values (1) returning true';
 create view d2.open_orders as select * from d2.orders where status = 'open';
 insert into d2.customers select g, 'customer ' || g, jsonb_build_object('vip', g % 7 = 0) from generate_series(1, 50) g;
@@ -496,6 +508,7 @@ async fn run(c: &PgConn, sql: &str, limit: u32, timeout_ms: u32) -> Vec<SqlRunEv
         &pieces,
         &RunOpts { limit, timeout_ms },
         &AtomicBool::new(false),
+        false,
         &|e| out.lock().unwrap().push(e),
     )
     .await
@@ -626,6 +639,7 @@ async fn l3_pg_a_long_statement_times_out_and_stop_cancels_it_from_a_second_conn
             &pieces,
             &RunOpts { limit: 0, timeout_ms: 60_000 },
             &stop2,
+            false,
             &|e| events2.lock().unwrap().push(e),
         )
         .await
@@ -662,4 +676,174 @@ async fn l3_pg_the_catalog_lists_tables_and_columns_for_completion() {
     // Cached until asked again.
     assert!(std::sync::Arc::ptr_eq(&cat, &c.catalog(false).await.unwrap()));
     assert!(!std::sync::Arc::ptr_eq(&cat, &c.catalog(true).await.unwrap()));
+}
+
+// ---- D4: writes, manual transactions and grid edits
+
+use super::grid::{CellChange, GridEdits, KeyValue, RowEdit};
+
+/// Like `run`, with the gate's permission to change things.
+async fn run_w(c: &PgConn, sql: &str) -> Vec<SqlRunEvent> {
+    let pieces = pieces_for(sql, RunMode::All, None).unwrap();
+    let out = Mutex::new(Vec::new());
+    c.run_script(&pieces, &RunOpts { limit: 0, timeout_ms: 30_000 }, &AtomicBool::new(false), true, &|e| out.lock().unwrap().push(e))
+        .await
+        .unwrap();
+    out.into_inner().unwrap()
+}
+
+async fn scalar(c: &PgConn, sql: &str) -> String {
+    let ev = run(c, sql, 0, 30_000).await;
+    ev.iter()
+        .find_map(|e| match e {
+            SqlRunEvent::Rows { rows, .. } => rows[0][0].v.clone(),
+            _ => None,
+        })
+        .unwrap()
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_pg_a_confirmed_write_runs_in_auto_commit_and_a_preview_changes_nothing() {
+    seed();
+    let c = connect_direct(TlsMode::Off).await.unwrap();
+    // The preview asks the server and rolls back: the same count, and the rows are untouched.
+    let pieces = pieces_for("update d2.e1 set qty = 0 where id <= 3; delete from d2.e1", RunMode::All, None).unwrap();
+    let notes = c.preview(&pieces).await.unwrap();
+    assert_eq!(notes[0].as_deref(), Some("This will change 3 rows."));
+    assert_eq!(notes[1].as_deref(), Some("This will change 5 rows."));
+    assert_eq!(scalar(&c, "select count(*) from d2.e1").await, "5");
+    assert_eq!(scalar(&c, "select sum(qty) from d2.e1").await, "150");
+    // Allowed to write: the statements commit one by one.
+    let ev = run_w(&c, "update d2.e1 set qty = 0 where id <= 3; select count(*) from d2.e1; delete from d2.e1 where id = 5").await;
+    assert!(ev.iter().any(|e| matches!(e, SqlRunEvent::Done { index: 0, affected: Some(a), .. } if *a == 3.0)));
+    assert!(ev.iter().any(|e| matches!(e, SqlRunEvent::Done { index: 2, affected: Some(a), .. } if *a == 1.0)));
+    assert_eq!(scalar(&c, "select count(*) from d2.e1").await, "4");
+    assert_eq!(scalar(&c, "select sum(qty) from d2.e1").await, "40");
+    // Without the gate's yes, a write is refused whatever the text says.
+    let ev = run(&c, "delete from d2.e1", 0, 30_000).await;
+    assert!(ev.iter().any(|e| matches!(e, SqlRunEvent::Refused { .. })));
+    assert_eq!(scalar(&c, "select count(*) from d2.e1").await, "4");
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_pg_a_manual_transaction_holds_its_changes_until_commit_or_rollback() {
+    seed();
+    let c = connect_direct(TlsMode::Off).await.unwrap();
+    let other = connect_direct(TlsMode::Off).await.unwrap();
+    c.txn_begin().await.unwrap();
+    assert!(c.txn_begin().await.is_err(), "one at a time");
+    run_w(&c, "update d2.e2 set qty = 99 where id = 1").await;
+    let st = c.txn_state().await.unwrap();
+    assert!(st.active && st.statements == 1 && !st.failed && st.locks >= 1, "{st:?}");
+    // Another connection can't see it yet.
+    assert_eq!(scalar(&other, "select qty from d2.e2 where id = 1").await, "10");
+    // Reads in the transaction see it.
+    assert_eq!(scalar(&c, "select qty from d2.e2 where id = 1").await, "99");
+    c.txn_end(false).await.unwrap();
+    assert!(!c.txn_state().await.unwrap().active);
+    assert_eq!(scalar(&other, "select qty from d2.e2 where id = 1").await, "10");
+    // Commit keeps it.
+    c.txn_begin().await.unwrap();
+    run_w(&c, "update d2.e2 set qty = 77 where id = 2").await;
+    c.txn_end(true).await.unwrap();
+    assert_eq!(scalar(&other, "select qty from d2.e2 where id = 2").await, "77");
+    // A failing statement marks it: only rolling back is left.
+    c.txn_begin().await.unwrap();
+    run_w(&c, "select * from d2.missing").await;
+    assert!(c.txn_state().await.unwrap().failed);
+    c.txn_end(false).await.unwrap();
+    assert_eq!(scalar(&c, "select 1").await, "1");
+}
+
+fn edit(id: &str, col: &str, old: Option<&str>, new: Option<&str>) -> RowEdit {
+    RowEdit {
+        key: vec![KeyValue { column: "id".into(), value: id.into() }],
+        changes: vec![CellChange { column: col.into(), old: old.map(Into::into), new: new.map(Into::into) }],
+        delete: false,
+    }
+}
+fn edits(rows: Vec<RowEdit>) -> GridEdits {
+    GridEdits { schema: "d2".into(), table: "e3".into(), rows }
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_pg_grid_edits_commit_together_and_the_optimistic_check_stops_a_stale_row() {
+    seed();
+    let c = connect_direct(TlsMode::Off).await.unwrap();
+    let stmts = c
+        .grid_statements(&edits(vec![edit("1", "name", Some("n1"), Some("it's")), edit("2", "qty", Some("20"), None)]))
+        .await
+        .unwrap();
+    assert!(stmts[0].shown.contains("'it''s'") && stmts[0].shown.contains("is not distinct from 'n1'"));
+    assert_eq!(c.grid_commit(&stmts).await.unwrap(), 2);
+    assert_eq!(scalar(&c, "select name from d2.e3 where id = 1").await, "it's");
+    let ev = run(&c, "select qty is null from d2.e3 where id = 2", 0, 30_000).await;
+    assert!(ev.iter().any(|e| matches!(e, SqlRunEvent::Rows { rows, .. } if rows[0][0].v.as_deref() == Some("t"))));
+    // Someone else changed row 3 after it was loaded (old says 30, it is now 31): the whole commit is undone.
+    run_w(&c, "update d2.e3 set qty = 31 where id = 3").await;
+    let stmts = c
+        .grid_statements(&edits(vec![edit("4", "qty", Some("40"), Some("41")), edit("3", "qty", Some("30"), Some("35"))]))
+        .await
+        .unwrap();
+    let err = c.grid_commit(&stmts).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::SqlConflict);
+    assert_eq!(scalar(&c, "select qty from d2.e3 where id = 4").await, "40", "the first statement was rolled back too");
+    assert_eq!(scalar(&c, "select qty from d2.e3 where id = 3").await, "31");
+    // A delete removes exactly one row; a second try finds nothing and is a conflict.
+    let del = RowEdit { key: vec![KeyValue { column: "id".into(), value: "5".into() }], changes: vec![], delete: true };
+    let stmts = c.grid_statements(&edits(vec![del.clone()])).await.unwrap();
+    assert_eq!(c.grid_commit(&stmts).await.unwrap(), 1);
+    assert_eq!(c.grid_commit(&stmts).await.unwrap_err().code, ErrorCode::SqlConflict);
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_pg_grid_edits_refuse_a_keyless_table_a_partial_key_and_a_changed_key() {
+    seed();
+    let c = connect_direct(TlsMode::Off).await.unwrap();
+    let keyless = GridEdits { schema: "d2".into(), table: "no_key".into(), rows: vec![edit("1", "a", Some("1"), Some("2"))] };
+    assert_eq!(c.grid_statements(&keyless).await.unwrap_err().code, ErrorCode::SqlNoKey);
+    let partial = GridEdits {
+        schema: "d2".into(),
+        table: "order_items".into(),
+        rows: vec![RowEdit { key: vec![KeyValue { column: "order_id".into(), value: "1".into() }], changes: vec![CellChange { column: "sku".into(), old: None, new: Some("x".into()) }], delete: false }],
+    };
+    assert_eq!(c.grid_statements(&partial).await.unwrap_err().code, ErrorCode::Validation);
+    assert_eq!(c.grid_statements(&edits(vec![edit("1", "id", Some("1"), Some("9"))])).await.unwrap_err().code, ErrorCode::Validation);
+    assert_eq!(c.grid_statements(&edits(vec![edit("1", "nope", None, Some("x"))])).await.unwrap_err().code, ErrorCode::Validation);
+    // The type name is never taken from the window: the SQL only names catalog types.
+    let ok = c.grid_statements(&edits(vec![edit("1", "qty", Some("10"), Some("1); drop table d2.e3; --"))])).await.unwrap();
+    assert!(!ok[0].sql.contains("drop"));
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_pg_a_failed_transaction_is_rolled_back_not_committed_and_grid_handles_json_composite_keys_and_keyword_columns() {
+    seed();
+    let c = connect_direct(TlsMode::Off).await.unwrap();
+    c.txn_begin().await.unwrap();
+    run_w(&c, "select * from d2.missing").await;
+    let err = c.txn_end(true).await.unwrap_err();
+    assert!(err.message.contains("rolled back"), "{}", err.message);
+    assert!(!c.has_txn());
+    assert_eq!(scalar(&c, "select 1").await, "1");
+    // json has no equality operator; the key has two columns; one column is named like a keyword.
+    let key = |b: &str| vec![KeyValue { column: "a".into(), value: "x".into() }, KeyValue { column: "b".into(), value: b.into() }];
+    let g = |rows| GridEdits { schema: "d2".into(), table: "e6".into(), rows };
+    let stmts = c
+        .grid_statements(&g(vec![
+            RowEdit { key: key("1"), changes: vec![CellChange { column: "j".into(), old: Some("{\"k\": 1}".into()), new: Some("{\"k\": 2}".into()) }, CellChange { column: "select".into(), old: Some("s".into()), new: Some("z".into()) }], delete: false },
+            RowEdit { key: key("2"), changes: vec![CellChange { column: "j".into(), old: None, new: Some("[1]".into()) }], delete: false },
+        ]))
+        .await
+        .unwrap();
+    assert_eq!(c.grid_commit(&stmts).await.unwrap(), 2);
+    assert_eq!(scalar(&c, "select j::text from d2.e6 where b = 1").await, "{\"k\": 2}");
+    assert_eq!(scalar(&c, "select \"select\" from d2.e6 where b = 1").await, "z");
+    // Not tried out: a statement that calls an effectful function is not previewed.
+    let p = pieces_for("update d2.e4 set qty = pg_terminate_backend(0) where id = 1", RunMode::All, None).unwrap();
+    assert!(c.preview(&p).await.unwrap()[0].as_deref().unwrap().starts_with("Not tried out"));
 }
