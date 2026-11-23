@@ -41,6 +41,8 @@ pub struct MongoInfo {
     /// `Some` when the server is part of a replica set.
     pub replica_set: Option<String>,
     pub is_primary: bool,
+    /// The primary's `host:port` as a secondary reports it.
+    pub primary: Option<String>,
 }
 
 pub struct MongoConn {
@@ -248,6 +250,7 @@ impl MongoConn {
             latency_ms: started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32,
             replica_set: hello.get_str("setName").ok().map(str::to_string),
             is_primary: hello.get_bool("isWritablePrimary").unwrap_or(false),
+            primary: hello.get_str("primary").ok().map(str::to_string),
         };
         let mut conn = conn;
         conn.version = version;

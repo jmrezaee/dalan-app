@@ -201,22 +201,26 @@ async fn route(
     };
     let reach = hops as u32;
     step(&emit, reach, RedisStepState::Active, None);
-    let target = Target {
-        address: cfg.address.clone(),
-        port: cfg.port,
-        tls: false,
-        tls_server_name: None,
-    };
-    // The way to the server, kept: a cancel request and each editor's own connection take it again.
+    let targets = seed_targets(cfg);
+    // The way to the server, kept: a cancel request and each editor's own connection take it again. A MongoDB seed
+    // list is tried member by member; the first one that opens a stream wins.
     let reopen: Reopen = {
-        let (ssh, target, engine) = (ssh.clone(), target.clone(), cfg.engine);
+        let (ssh, engine) = (ssh.clone(), cfg.engine);
         Arc::new(move || {
-            let (ssh, target) = (ssh.clone(), target.clone());
+            let (ssh, targets) = (ssh.clone(), targets.clone());
             Box::pin(async move {
-                match &ssh {
-                    Some(ssh) => transport::through_host_for(engine, ssh, &target).await,
-                    None => transport::direct_for(engine, &target).await,
+                let mut last = None;
+                for target in &targets {
+                    let r = match &ssh {
+                        Some(ssh) => transport::through_host_for(engine, ssh, target).await,
+                        None => transport::direct_for(engine, target).await,
+                    };
+                    match r {
+                        Ok(s) => return Ok(s),
+                        Err(e) => last = Some(e),
+                    }
                 }
+                Err(last.unwrap_or_else(|| AppError::validation("This database has no address.")))
             })
         })
     };
@@ -235,6 +239,23 @@ async fn route(
     };
     step(&emit, reach, RedisStepState::Done, None);
     Ok((ssh, reopen, stream, reach))
+}
+
+/// Where to connect: the saved address, or for MongoDB every member of a seed list (`h1:27017,h2:27017`).
+fn seed_targets(cfg: &SqlConfig) -> Vec<Target> {
+    let one = |address: String, port: u16| Target { address, port, tls: false, tls_server_name: None };
+    if cfg.engine != Engine::Mongodb || !cfg.address.contains(',') && !cfg.address.contains(':') {
+        return vec![one(cfg.address.clone(), cfg.port)];
+    }
+    cfg.address
+        .split(',')
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map(|m| match m.rsplit_once(':').and_then(|(h, p)| p.parse::<u16>().ok().map(|p| (h, p))) {
+            Some((h, p)) => one(h.to_string(), p),
+            None => one(m.to_string(), cfg.port),
+        })
+        .collect()
 }
 
 /// One whole attempt: host sign-in (if any), the stream, the database sign-in. The SSH connection is returned and
@@ -331,13 +352,33 @@ async fn connect_mongo(
 ) -> AppResult<Opened> {
     let server_name = cfg.server_name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| cfg.address.clone());
     let login = crate::mongo::conn::MongoLogin { user: cfg.user.clone(), password: cfg.password.clone(), auth_db: cfg.auth_source.clone().filter(|a| !a.is_empty()).unwrap_or_else(|| "admin".into()), tls: cfg.tls, server_name };
-    let (conn, info) = match crate::mongo::conn::MongoConn::connect(stream, login, reopen).await {
+    let (mut conn, mut info) = match crate::mongo::conn::MongoConn::connect(stream, login.clone(), Arc::clone(&reopen)).await {
         Ok(v) => v,
         Err(e) => {
             step(emit, reach + 1, RedisStepState::Failed, Some(e.message.clone()));
             return Err(e);
         }
     };
+    // A secondary names the primary: go there, so writes work (one hop only; the name must be one of the seeds).
+    if !info.is_primary && info.replica_set.is_some() {
+        if let Some(primary) = info.primary.clone().and_then(|p| seed_targets(cfg).into_iter().find(|t| format!("{}:{}", t.address, t.port).eq_ignore_ascii_case(&p))) {
+            let (ssh2, engine) = (ssh.clone(), cfg.engine);
+            let to_primary: Reopen = Arc::new(move || {
+                let (ssh, target) = (ssh2.clone(), primary.clone());
+                Box::pin(async move {
+                    match &ssh {
+                        Some(ssh) => transport::through_host_for(engine, ssh, &target).await,
+                        None => transport::direct_for(engine, &target).await,
+                    }
+                })
+            });
+            if let Ok(stream) = (to_primary)().await {
+                if let Ok((c, i)) = crate::mongo::conn::MongoConn::connect(stream, login.clone(), Arc::clone(&to_primary)).await {
+                    (conn, info) = (c, i);
+                }
+            }
+        }
+    }
     step(emit, reach + 1, RedisStepState::Done, None);
     let opener: Opener = Arc::new(|| Box::pin(async { Err(AppError::validation("MongoDB tabs don't open editor connections.")) }));
     let version = match &info.replica_set {
@@ -840,4 +881,21 @@ async fn test_mongo(store: &Store, cfg: SqlConfig) -> AppResult<SqlServerInfo> {
         user: info.user,
         latency_ms: info.latency_ms,
     })
+}
+
+#[cfg(test)]
+mod seed_tests {
+    use super::*;
+
+    #[test]
+    fn a_mongo_seed_list_becomes_one_target_per_member() {
+        let mut c = SqlConfig { name: "t".into(), engine: Engine::Mongodb, route: RedisRoute::Direct, host_id: None, address: "h1:27017, h2:27018 ,h3".into(), port: 27017, database: None, user: String::new(), password: None, tls: TlsMode::Off, server_name: None, auth_source: None };
+        let t: Vec<(String, u16)> = seed_targets(&c).into_iter().map(|t| (t.address, t.port)).collect();
+        assert_eq!(t, [("h1".into(), 27017), ("h2".into(), 27018), ("h3".into(), 27017)]);
+        c.address = "db.internal".into();
+        assert_eq!(seed_targets(&c).len(), 1);
+        c.engine = Engine::Postgres;
+        c.address = "db.internal".into();
+        assert_eq!(seed_targets(&c)[0].address, "db.internal");
+    }
 }
