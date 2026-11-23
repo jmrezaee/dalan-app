@@ -226,8 +226,8 @@ async fn postgres(stream: BoxStream, tls: Option<Arc<ClientConfig>>) -> Result<S
         Some(config) => {
             cfg.ssl_mode(SslMode::Require);
             let mut make = tokio_postgres_rustls::MakeRustlsConnect::new((*config).clone());
-            let tls = MakeTlsConnect::<BoxStream>::make_tls_connect(&mut make, "pg")
-                .map_err(|e| e.to_string())?;
+            // This call can't fail (its error type is `Infallible`), so there is no error to name.
+            let Ok(tls) = MakeTlsConnect::<BoxStream>::make_tls_connect(&mut make, "pg");
             let (client, connection) = cfg
                 .connect_raw(stream, tls)
                 .await
