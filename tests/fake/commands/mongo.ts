@@ -3,7 +3,7 @@
 // real backend's job. Edits change the fake's documents so a test can see them come back.
 import { fail, type Handlers } from '../types'
 
-type Keys = 'mgTree' | 'mgFind' | 'mgCount' | 'mgDocGet' | 'mgDocPrepare' | 'mgDocCommit' | 'mgDocDiscard' | 'mgAggregate' | 'mgAggPrepare' | 'mgViewPrepare' | 'mgPipelineCode' | 'mgSchema' | 'mgIndexes' | 'mgIndexPrepare' | 'mgValidation' | 'mgValidationCheck' | 'mgValidationPrepare'
+type Keys = 'mgTree' | 'mgFind' | 'mgCount' | 'mgDocGet' | 'mgDocPrepare' | 'mgDocCommit' | 'mgDocDiscard' | 'mgAggregate' | 'mgAggPrepare' | 'mgViewPrepare' | 'mgPipelineCode' | 'mgSchema' | 'mgIndexes' | 'mgIndexPrepare' | 'mgValidation' | 'mgValidationCheck' | 'mgValidationPrepare' | 'mgShell' | 'mgShellCommit'
 type Doc = Record<string, any>
 
 const store: Record<string, Doc[]> = {}
@@ -200,5 +200,34 @@ export const mongo: Pick<Handlers, Keys> = {
   mgValidationPrepare: (a, { m }) => {
     parseJson(a.validator, 'The rules')
     return hold(m, a.connId, a.validator.trim() ? `Change the validation rules of ${a.coll} (level ${a.level}, action ${a.action}). Existing documents are not touched.` : `Remove the validation rules of ${a.coll}.`, 'confirm', () => { rules[`${a.db}.${a.coll}`] = { validator: a.validator, level: a.level, action: a.action } })
+  },
+  mgShell: (a, { m }) => {
+    const line: string = a.line.trim().replace(/;$/, '')
+    let db: string = a.db
+    if (/^use\s+\S+$/.test(line)) { db = line.split(/\s+/)[1]!; return { db, reply: { blocks: [`switched to db ${db}`], note: null }, pending: null } }
+    if (line === 'show collections') return { db, reply: { blocks: ['customers', 'orders'], note: null }, pending: null }
+    if (/\b(var|for|function)\b|=>/.test(line)) fail('validation', 'The shell runs single commands, not JavaScript. Use the Aggregations view or a saved pipeline for multi-step work.')
+    const find = /^db\.(\w+)\.find\((.*)\)$/.exec(line)
+    if (find) {
+      const f = parseJson(find[2]!.trim() || '{}', 'The filter')
+      return { db, reply: { blocks: docs(db, find[1]!).filter(d => matches(d, f)).slice(0, 20).map(d => JSON.stringify(d, null, 2)), note: null }, pending: null }
+    }
+    const del = /^db\.(\w+)\.(deleteMany|dropIndex|drop)\((.*)\)$/.exec(line)
+    if (del) {
+      const emptyMany = del[2] === 'deleteMany' && /^\{\s*\}$/.test(del[3]!.trim())
+      const typed = emptyMany || del[2] !== 'deleteMany'
+      const p = hold(m, a.connId, emptyMany ? `Delete every matching document from ${db}.${del[1]}: the filter is empty, so this deletes EVERY document. It matches ${docs(db, del[1]!).length} documents now.` : `${del[2]} on ${db}.${del[1]}.`, typed ? 'typed' : 'confirm', () => { if (emptyMany) docs(db, del[1]!).length = 0 })
+      if (typed) { heldRun.set(`${p.id}-typed`, heldRun.get(p.id)!); heldRun.delete(p.id); return { db, reply: null, pending: { ...p, id: `${p.id}-typed` } } }
+      return { db, reply: null, pending: p }
+    }
+    return fail('validation', `${line.split('(')[0]}() isn't supported in the shell yet.`)
+  },
+  mgShellCommit: (a) => {
+    const run = heldRun.get(a.pendingId)
+    if (!run) fail('db_confirm_needed', 'That confirmation was already used or isn\'t for this tab. Nothing was sent.')
+    if ((a.pendingId as string).endsWith('-typed') && a.typedName !== 'docs-prod') fail('db_confirm_needed', 'The name doesn\'t match the database\'s name. Nothing was sent.')
+    heldRun.delete(a.pendingId)
+    run()
+    return { blocks: ['{\n  "n": 1\n}'], note: null }
   },
 }

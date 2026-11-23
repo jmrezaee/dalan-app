@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { CodeLanguage, DbEvent_Serialize, MgAggResult, MgCount, MgDoc, MgDocOp, MgIndex, MgNode, MgPending_Serialize as MgPending, MgSchema, MgValidation, MgValidationCheck, PromptKind, RedisStepState, SqlServerInfo } from '~/types/bindings'
+import type { ShellReply, CodeLanguage, DbEvent_Serialize, MgAggResult, MgCount, MgDoc, MgDocOp, MgIndex, MgNode, MgPending_Serialize as MgPending, MgSchema, MgValidation, MgValidationCheck, PromptKind, RedisStepState, SqlServerInfo } from '~/types/bindings'
 import { useTauri } from '~/composables/useTauri'
 
 // MongoDB tabs (S44, F27): the connection like a SQL tab's, a tree of databases and collections, and one inner tab per
@@ -73,6 +73,9 @@ export interface CollTab {
   busy: boolean
 }
 
+/** One line of the shell's log: what was typed, and what came back (or the error). */
+export interface ShellEntry { id: number, db: string, line: string, blocks: string[], note: string | null, error: string }
+export interface ShellReview { pending: MgPending, line: string, typed: string, error: string, busy: boolean }
 export const PAGE_LIMITS = [25, 50, 100, 200, 500]
 const tabId = (db: string, coll: string) => `${db}.${coll}`
 
@@ -90,6 +93,16 @@ function setup() {
   const tabs = ref<CollTab[]>([])
   const activeTab = ref('')
   let generation = 0
+  // ---- The shell (S47): one per tab, like the connection.
+  const shellOpen = ref(false)
+  const shellDb = ref('')
+  const shellLog = ref<ShellEntry[]>([])
+  const shellInput = ref('')
+  const shellHistory = ref<string[]>([])
+  const shellBusy = ref(false)
+  const shellReview = ref<ShellReview | null>(null
+  )
+  let shellCount = 0
 
   const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : (e as { message?: string })?.message ?? fallback)
 
@@ -139,6 +152,9 @@ function setup() {
     dbs.value = []
     tabs.value = []
     activeTab.value = ''
+    shellOpen.value = false
+    shellLog.value = []
+    shellReview.value = null
     try {
       const opened = await api.dbOpen(id, e => onEvent(gen, e))
       if (gen === generation) {
@@ -458,7 +474,71 @@ function setup() {
   }
   const dropIndex = (t: CollTab, name: string) => holdWith(t, () => api.mgIndexPrepare(connId.value, t.db, t.coll, { kind: 'drop', name }), () => loadIndexes(t), t.sch)
 
-  return { aggRun, aggAdd, aggRemove, aggMove, aggWrite, aggView, aggCode, loadSchema, loadIndexes, loadValidation, openSchema, checkRules, saveRules, createIndex, dropIndex, dbId, connId, status, steps, prompt, info, error, dbs, treeFilter, tabs, activeTab, current, open, retry, respond, close, toggleDb, openColl, closeColl, load, apply, setLimit, nextPage, prevPage, countDocs, startEdit, startNew, saveEditor, deleteDoc, commitReview, cancelReview }
+  // ---- The shell
+  function openShell() {
+    shellOpen.value = true
+    activeTab.value = 'shell'
+    if (!shellDb.value) shellDb.value = info.value?.database && info.value.database !== 'admin' ? info.value.database : (dbs.value.find(d => !['admin', 'local', 'config'].includes(d.name))?.name ?? 'admin')
+  }
+  function closeShell() {
+    shellOpen.value = false
+    if (shellReview.value) void api.mgDocDiscard(connId.value, shellReview.value.pending.id)
+    shellReview.value = null
+    if (activeTab.value === 'shell') activeTab.value = tabs.value.at(-1)?.id ?? ''
+  }
+  const log = (line: string, db: string, r: Partial<ShellEntry>) => shellLog.value.push({ id: ++shellCount, db, line, blocks: [], note: null, error: '', ...r })
+  async function shellRun() {
+    const line = shellInput.value.trim()
+    if (!line || shellBusy.value || shellReview.value) return
+    shellInput.value = ''
+    if (shellHistory.value.at(-1) !== line) shellHistory.value.push(line)
+    shellBusy.value = true
+    const db = shellDb.value
+    try {
+      const r = await api.mgShell(connId.value, db, line)
+      shellDb.value = r.db
+      if (r.pending) shellReview.value = { pending: r.pending, line, typed: '', error: '', busy: false }
+      else log(line, db, { blocks: r.reply?.blocks ?? [], note: r.reply?.note ?? null })
+    }
+    catch (e) {
+      log(line, db, { error: message(e, 'The command failed.') })
+    }
+    shellBusy.value = false
+  }
+  async function shellCommit() {
+    const r = shellReview.value
+    if (!r || r.busy) return
+    r.busy = true
+    r.error = ''
+    try {
+      const reply: ShellReply = await api.mgShellCommit(connId.value, r.pending.id, r.pending.level === 'typed' ? r.typed : null)
+      log(r.line, shellDb.value, { blocks: reply.blocks, note: reply.note })
+      shellReview.value = null
+      // Collections and counts may have changed under an open tab.
+      for (const t of tabs.value) void load(t)
+    }
+    catch (e) {
+      const msg = message(e, 'The change wasn\'t made.')
+      // A wrong typed name keeps the dialog (the change is still held); anything else used it up.
+      if (r.pending.level === 'typed' && (e as { code?: string }).code === 'db_confirm_needed' && r.typed !== r.pending.db_name) {
+        r.error = msg
+        r.busy = false
+        return
+      }
+      log(r.line, shellDb.value, { error: msg })
+      shellReview.value = null
+    }
+  }
+  function shellCancel() {
+    const r = shellReview.value
+    shellReview.value = null
+    if (r) {
+      void api.mgDocDiscard(connId.value, r.pending.id)
+      log(r.line, shellDb.value, { error: 'Cancelled. Nothing was sent.' })
+    }
+  }
+
+  return { shellOpen, shellDb, shellLog, shellInput, shellHistory, shellBusy, shellReview, openShell, closeShell, shellRun, shellCommit, shellCancel, aggRun, aggAdd, aggRemove, aggMove, aggWrite, aggView, aggCode, loadSchema, loadIndexes, loadValidation, openSchema, checkRules, saveRules, createIndex, dropIndex, dbId, connId, status, steps, prompt, info, error, dbs, treeFilter, tabs, activeTab, current, open, retry, respond, close, toggleDb, openColl, closeColl, load, apply, setLimit, nextPage, prevPage, countDocs, startEdit, startNew, saveEditor, deleteDoc, commitReview, cancelReview }
 }
 
 const makeStore = (key: string) => defineStore(`mongo:${key}`, setup)

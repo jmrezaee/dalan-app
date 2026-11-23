@@ -23,7 +23,11 @@ fn err(msg: impl Into<String>) -> AppError {
 struct P<'a> {
     s: &'a [u8],
     i: usize,
+    depth: usize,
 }
+
+/// Nested values deeper than this are refused (BSON's own limit is 100): a pasted `[[[[…` must not overflow the stack.
+const MAX_DEPTH: usize = 100;
 
 impl<'a> P<'a> {
     fn ws(&mut self) {
@@ -127,6 +131,13 @@ impl<'a> P<'a> {
     }
 
     fn value(&mut self) -> AppResult<Bson> {
+        self.depth += 1;
+        let r = if self.depth > MAX_DEPTH { Err(err("That value is nested too deeply (more than 100 levels).")) } else { self.value_inner() };
+        self.depth -= 1;
+        r
+    }
+
+    fn value_inner(&mut self) -> AppResult<Bson> {
         match self.peek().ok_or_else(|| self.bad("a value is missing"))? {
             b'{' => {
                 self.i += 1;
@@ -258,11 +269,11 @@ impl<'a> P<'a> {
                 Bson::Binary(bson::Binary::from_uuid(u))
             }
             "Timestamp" => match (args.first(), args.get(1)) {
-                (Some(Bson::Int32(t)), Some(Bson::Int32(i))) => Bson::Timestamp(bson::Timestamp { time: *t as u32, increment: *i as u32 }),
+                (Some(Bson::Int32(t)), Some(Bson::Int32(i))) => Bson::Timestamp(bson::Timestamp { time: u32::try_from(*t).map_err(|_| err("Timestamp() needs positive numbers."))?, increment: u32::try_from(*i).map_err(|_| err("Timestamp() needs positive numbers."))? }),
                 _ => return Err(err("Timestamp() needs two whole numbers: seconds and an increment.")),
             },
             "BinData" => match (args.first(), args.get(1)) {
-                (Some(Bson::Int32(sub)), Some(Bson::String(b64))) => Bson::Binary(bson::Binary::from_base64(b64, Some(bson::spec::BinarySubtype::from(*sub as u8))).map_err(|_| err("BinData() needs base64 text."))?),
+                (Some(Bson::Int32(sub)), Some(Bson::String(b64))) => Bson::Binary(bson::Binary::from_base64(b64, Some(bson::spec::BinarySubtype::from(u8::try_from(*sub).map_err(|_| err("BinData() subtype is a number from 0 to 255."))?))).map_err(|_| err("BinData() needs base64 text."))?),
                 _ => return Err(err("BinData() needs a subtype number and base64 text.")),
             },
             _ => return Err(err(NOT_JS)),
@@ -325,7 +336,7 @@ pub fn parse(line: &str) -> AppResult<Stmt> {
     if !t.starts_with("db.") && !t.starts_with("db[") {
         return Err(err(if t.contains(['=', '{']) || ["var ", "let ", "const ", "for ", "for(", "function", "while"].iter().any(|k| lower.starts_with(k)) { NOT_JS } else { "Commands start with db. , use or show, like db.orders.find({})." }));
     }
-    let mut p = P { s: t.as_bytes(), i: 2 };
+    let mut p = P { s: t.as_bytes(), i: 2, depth: 0 };
     let first = if p.eat(b'.') { p.ident().ok_or_else(|| p.bad("a name after db."))? } else { return Err(err("Use db.getCollection(\"name\") for unusual collection names.")) };
     let stmt = if first == "getCollection" {
         let a = args_of(&mut p)?;
@@ -391,6 +402,21 @@ fn doc_arg(a: &[Bson], i: usize, what: &str) -> AppResult<Document> {
     }
 }
 
+/// `updateOne` and `findOneAndUpdate` take operators ($set…) or a pipeline; `replaceOne` and `findOneAndReplace` take a
+/// plain document. A mix-up would replace a whole document while the confirmation says "update".
+fn check_update(method: &str, u: &Bson) -> AppResult<()> {
+    let replacing = method.contains("eplace");
+    match u {
+        Bson::Array(_) if !replacing => Ok(()),
+        Bson::Document(d) if replacing => match d.keys().find(|k| k.starts_with('$')) {
+            Some(k) => Err(err(format!("{method}() takes a plain document, not the operator {k}. Use updateOne() for operators."))),
+            None => Ok(()),
+        },
+        Bson::Document(d) if !d.is_empty() && d.keys().all(|k| k.starts_with('$')) => Ok(()),
+        _ => Err(err(format!("{method}() needs update operators like {{ $set: {{ a: 1 }} }}. To replace a whole document use replaceOne()."))),
+    }
+}
+
 fn same_pipeline_writes(p: &[Bson]) -> bool {
     p.iter().any(|s| s.as_document().is_some_and(|d| d.keys().any(|k| k.eq_ignore_ascii_case("$out") || k.eq_ignore_ascii_case("$merge"))))
 }
@@ -398,11 +424,34 @@ fn same_pipeline_writes(p: &[Bson]) -> bool {
 /// The class of a raw `runCommand`, by the command's name: anything not known to be harmless is `Dangerous`.
 pub fn classify_command(cmd: &Document) -> Class {
     let name = cmd.keys().next().map(|k| k.to_ascii_lowercase()).unwrap_or_default();
+    let flag = |k: &str| cmd.iter().any(|(key, v)| key.eq_ignore_ascii_case(k) && matches!(v, Bson::Boolean(true)));
+    // An update or delete whose filter is empty and that reaches many documents is dangerous, whichever way it is typed.
+    let empty_many = |list: &str, many_key: &str| {
+        cmd.get_array(list).is_ok_and(|a| {
+            a.iter().filter_map(Bson::as_document).any(|e| {
+                let empty = e.get_document("q").map_or(true, Document::is_empty);
+                let many = match e.get(many_key) {
+                    Some(Bson::Boolean(b)) => *b,
+                    Some(Bson::Int32(0)) | Some(Bson::Int64(0)) => many_key == "limit",
+                    Some(Bson::Double(d)) => *d == 0.0 && many_key == "limit",
+                    _ => false,
+                };
+                empty && many
+            })
+        })
+    };
     match name.as_str() {
+        "usersinfo" if flag("showCredentials") => Class::Dangerous,
+        "connectionstatus" if flag("showPrivileges") => Class::Dangerous,
+        "validate" if flag("repair") => Class::Dangerous,
         "find" | "count" | "distinct" | "listcollections" | "listindexes" | "listdatabases" | "collstats" | "dbstats" | "ping" | "hello" | "ismaster" | "buildinfo" | "serverstatus" | "currentop" | "connectionstatus" | "usersinfo" | "rolesinfo" | "getparameter" | "validate" | "explain" | "whatsmyuri" | "hostinfo" => Class::Read,
         "aggregate" => cmd.get_array("pipeline").map_or(Class::Read, |p| if same_pipeline_writes(p) { Class::Write } else { Class::Read }),
+        "delete" if empty_many("deletes", "limit") => Class::Dangerous,
+        "update" if empty_many("updates", "multi") => Class::Dangerous,
         "insert" | "update" | "delete" | "findandmodify" => Class::Write,
-        "create" | "createindexes" | "collmod" | "renamecollection" | "converttocapped" => Class::Schema,
+        // Renaming over an existing collection drops it.
+        "renamecollection" if flag("dropTarget") => Class::Dangerous,
+        "create" | "createindexes" | "collmod" | "renamecollection" => Class::Schema,
         _ => Class::Dangerous,
     }
 }
@@ -415,7 +464,7 @@ fn find_cmd(coll: &str, args: &[Bson], chain: &[(String, Vec<Bson>)], limit_one:
     }
     let mut explain = false;
     let mut count = false;
-    let mut limit = if limit_one { 1 } else { 20 };
+    let mut explicit: Option<i64> = None;
     for (m, a) in chain {
         let first = a.first();
         let n = || match first {
@@ -428,7 +477,11 @@ fn find_cmd(coll: &str, args: &[Bson], chain: &[(String, Vec<Bson>)], limit_one:
             "sort" => cmd.insert("sort", doc_arg(a, 0, "The sort")?),
             "skip" => cmd.insert("skip", n()?.max(0)),
             "limit" => {
-                limit = n()?.clamp(0, 1000);
+                let v = n()?;
+                if v < 0 {
+                    return Err(err(".limit() needs a number of zero or more."));
+                }
+                explicit = Some(v.min(1000));
                 None
             }
             "project" => cmd.insert("projection", doc_arg(a, 0, "The projection")?),
@@ -454,14 +507,15 @@ fn find_cmd(coll: &str, args: &[Bson], chain: &[(String, Vec<Bson>)], limit_one:
                 c.insert(k, v.clone());
             }
         }
-        if limit != 20 {
-            c.insert("limit", limit);
+        if let Some(l) = explicit.filter(|l| *l > 0) {
+            c.insert("limit", l);
         }
         return Ok((c, true));
     }
-    cmd.insert("limit", limit.max(0));
-    if limit == 0 {
-        cmd.remove("limit");
+    // find() shows 20 documents unless told otherwise; findOne() one; .limit(0) means no limit.
+    let limit = explicit.unwrap_or(if limit_one { 1 } else { 20 });
+    if limit > 0 {
+        cmd.insert("limit", limit);
     }
     cmd.insert("batchSize", 101);
     if explain {
@@ -501,6 +555,9 @@ pub fn plan(stmt: &Stmt, db: &str) -> AppResult<Plan> {
                 let Some(Bson::String(name)) = args.first() else { return Err(err("createCollection() needs a name in quotes.")) };
                 let mut cmd = doc! { "create": name.clone() };
                 for (k, v) in doc_arg(args, 1, "The options")? {
+                    if k == "create" || k.starts_with('$') {
+                        return Err(err(format!("The option {k} can't be used here.")));
+                    }
                     cmd.insert(k, v);
                 }
                 p(Class::Schema, format!("Create the collection {name} in {db}."), cmd, Shape::Doc)
@@ -517,6 +574,9 @@ pub fn plan(stmt: &Stmt, db: &str) -> AppResult<Plan> {
         },
         Stmt::Coll { coll, method, args, chain } => {
             let ns = format!("{db}.{coll}");
+            if !chain.is_empty() && !matches!(method.as_str(), "find" | "findOne") {
+                return Err(err(format!(".{}() can't follow {method}(). Only find() takes cursor methods like sort and limit.", chain[0].0)));
+            }
             let filter = || doc_arg(args, 0, "The filter");
             let with_matches = |mut pl: Plan, f: Document| {
                 pl.matches = Some((coll.clone(), f));
@@ -552,9 +612,15 @@ pub fn plan(stmt: &Stmt, db: &str) -> AppResult<Plan> {
                 }
                 "updateOne" | "updateMany" | "replaceOne" => {
                     let (f, u) = (filter()?, args.get(1).cloned().ok_or_else(|| err(format!("{method}() needs a filter and an update.")))?);
+                    check_update(method, &u)?;
                     let many = method == "updateMany";
                     let o = doc_arg(args, 2, "The options")?;
                     let mut spec = doc! { "q": f.clone(), "u": u, "multi": many };
+                    for k in ["collation", "arrayFilters", "hint"] {
+                        if let Some(v) = o.get(k) {
+                            spec.insert(k, v.clone());
+                        }
+                    }
                     if o.get_bool("upsert").unwrap_or(false) {
                         spec.insert("upsert", true);
                     }
@@ -575,7 +641,9 @@ pub fn plan(stmt: &Stmt, db: &str) -> AppResult<Plan> {
                     if del {
                         cmd.insert("remove", true);
                     } else {
-                        cmd.insert("update", args.get(1).cloned().ok_or_else(|| err(format!("{method}() needs a filter and an update.")))?);
+                        let u = args.get(1).cloned().ok_or_else(|| err(format!("{method}() needs a filter and an update.")))?;
+                        check_update(method, &u)?;
+                        cmd.insert("update", u);
                     }
                     if let Some(s) = o.get("sort") {
                         cmd.insert("sort", s.clone());
@@ -596,6 +664,9 @@ pub fn plan(stmt: &Stmt, db: &str) -> AppResult<Plan> {
                         }
                         let mut s = doc! { "key": k.clone() };
                         for (a, b) in doc_arg(args, 1, "The options")? {
+                            if a == "key" {
+                                return Err(err("The option key can't be set in the options: the keys are the first argument."));
+                            }
                             s.insert(a, b);
                         }
                         if !s.contains_key("name") {
@@ -760,6 +831,45 @@ mod tests {
         assert!(plan(&parse("db.orders.dropIndex('_id_')").unwrap(), "d").is_err());
         let p = pl("db.orders.updateMany({ a: 1 }, { $set: { b: 2 } })");
         assert!(p.matches.is_some());
+    }
+
+    #[test]
+    fn raw_commands_get_the_same_care_as_the_helpers() {
+        use Class::*;
+        let c = |line: &str| pl(line).class;
+        assert_eq!(c("db.runCommand({ delete: 'o', deletes: [{ q: {}, limit: 0 }] })"), Dangerous);
+        assert_eq!(c("db.runCommand({ delete: 'o', deletes: [{ q: { a: 1 }, limit: 0 }] })"), Write);
+        assert_eq!(c("db.runCommand({ delete: 'o', deletes: [{ q: {}, limit: 1 }] })"), Write);
+        assert_eq!(c("db.runCommand({ DELETE: 'o', deletes: [{ q: {}, limit: 0 }] })"), Dangerous);
+        assert_eq!(c("db.runCommand({ update: 'o', updates: [{ q: {}, u: { $set: { a: 1 } }, multi: true }] })"), Dangerous);
+        assert_eq!(c("db.runCommand({ update: 'o', updates: [{ q: { a: 1 }, u: { $set: { a: 1 } }, multi: true }] })"), Write);
+        assert_eq!(c("db.runCommand({ Insert: 'o', documents: [{}] })"), Write);
+        assert_eq!(c("db.runCommand({ renameCollection: 'd.a', to: 'd.b', dropTarget: true })"), Dangerous);
+        assert_eq!(c("db.adminCommand({ renameCollection: 'd.a', to: 'd.b' })"), Schema);
+        assert_eq!(c("db.runCommand({ convertToCapped: 'o', size: 100 })"), Dangerous);
+        assert_eq!(c("db.runCommand({ usersInfo: 1, showCredentials: true })"), Dangerous);
+        assert_eq!(c("db.runCommand({ usersInfo: 1 })"), Read);
+        assert_eq!(c("db.runCommand({ validate: 'o', repair: true })"), Dangerous);
+        assert_eq!(c("db.runCommand({ aggregate: 'o' })"), Read);
+    }
+
+    #[test]
+    fn chains_nesting_updates_and_options_are_checked() {
+        for bad in ["db.c.deleteMany({ a: 1 }).explain()", "db.c.aggregate([]).limit(1)", "db.c.updateOne({ a: 1 }, { b: 2 })", "db.c.updateMany({}, {})", "db.c.replaceOne({ a: 1 }, { $set: { b: 2 } })", "db.createCollection('a', { create: 'b' })", "db.c.createIndex({ a: 1 }, { key: { b: 1 } })", "db.c.find().limit(-5)", "db.c.find({ t: Timestamp(-1, 1) })", "db.c.find({ b: BinData(300, 'AA==') })"] {
+            let e = parse(bad).and_then(|s| plan(&s, "d").map(|_| ())).unwrap_err();
+            assert!(!e.message.is_empty(), "{bad}");
+        }
+        assert!(plan(&parse("db.c.updateOne({ a: 1 }, [{ $set: { b: 1 } }])").unwrap(), "d").is_ok());
+        assert!(plan(&parse("db.c.replaceOne({ a: 1 }, { b: 2 })").unwrap(), "d").is_ok());
+        // Deep nesting is refused, not a stack overflow.
+        let deep = format!("db.c.find({})", "[".repeat(5000));
+        assert!(parse(&deep).unwrap_err().message.contains("nested too deeply"));
+        assert!(parse(&format!("db.c.find({}1{})", "[".repeat(50), "]".repeat(50))).is_ok());
+        // `.limit(20)` is a real limit for count().
+        let n = pl("db.c.find({ a: 1 }).limit(20).count()");
+        assert_eq!(n.cmd.get_i64("limit").unwrap(), 20);
+        assert!(pl("db.c.find().limit(0)").cmd.get("limit").is_none());
+        assert_eq!(pl("db.c.updateMany({ a: 1 }, { $set: { b: 1 } }, { collation: { locale: 'en' } })").cmd.get_array("updates").unwrap()[0].as_document().unwrap().get_document("collation").unwrap().get_str("locale").unwrap(), "en");
     }
 
     #[test]
