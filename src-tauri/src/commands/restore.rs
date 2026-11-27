@@ -20,14 +20,14 @@ use crate::sql::{self, SqlManager};
 use crate::state::AppState;
 
 /// The tab's connection, owned for the length of a command.
-enum Owned {
+pub(crate) enum Owned {
     Pg(Arc<sql::pg::PgConn>),
     My(Arc<sql::mydb::MyDb>),
     Mongo(Arc<crate::mongo::conn::MongoConn>),
 }
 
 impl Owned {
-    async fn get(m: &SqlManager, conn_id: &str, engine: Engine) -> AppResult<Owned> {
+    pub(crate) async fn get(m: &SqlManager, conn_id: &str, engine: Engine) -> AppResult<Owned> {
         Ok(match engine {
             Engine::Mongodb => Owned::Mongo(m.mongo(conn_id).await?),
             Engine::Mysql | Engine::Mariadb => {
@@ -41,7 +41,7 @@ impl Owned {
             _ => Owned::Pg(m.pg(conn_id).await?),
         })
     }
-    fn conn(&self) -> Conn<'_> {
+    pub(crate) fn conn(&self) -> Conn<'_> {
         match self {
             Owned::Pg(c) => Conn::Pg(c),
             Owned::My(c) => Conn::My(c),

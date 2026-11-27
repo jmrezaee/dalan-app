@@ -12,6 +12,12 @@ const databases = useDatabasesStore()
 const hosts = useHostsStore()
 
 const db = computed(() => databases.rows.find(d => d.id === props.dbId) ?? null)
+// "Copy to…" from the database list (S49): once connected, the Copy tab opens.
+watch(() => store.status === 'ready' && copyRequests.value.has(props.dbId), (go) => {
+  if (!go) return
+  copyRequests.value.delete(props.dbId)
+  store.openCopy()
+}, { immediate: true })
 // "Restore a dump…" from the database list (S48): once connected, the Transfer tab opens with the restore dialog.
 watch(() => store.status === 'ready' && restoreRequests.value.has(props.dbId), (go) => {
   if (!go) return
@@ -86,17 +92,22 @@ function onTabKey(e: KeyboardEvent, i: number) {
             <button :id="`${tabKey}-tab-transfer`" type="button" :aria-current="store.activeTab === 'transfer' ? 'true' : undefined" class="h-full cursor-default pl-3 pr-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" @click="store.activeTab = 'transfer'">Transfer</button>
             <button type="button" class="mr-1.5 grid size-5 place-items-center rounded hover:bg-surface-hover" aria-label="Close Transfer" @click="store.closeTransfer()"><X class="size-3" aria-hidden="true" /></button>
           </div>
+          <div v-if="store.copyOpen" :class="cn('flex shrink-0 items-center border-r border-border text-sm text-muted', store.activeTab === 'copy' && 'bg-bg text-text shadow-[inset_0_2px_0_var(--color-accent)]')">
+            <button :id="`${tabKey}-tab-copy`" type="button" :aria-current="store.activeTab === 'copy' ? 'true' : undefined" class="h-full cursor-default pl-3 pr-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" @click="store.activeTab = 'copy'">Copy</button>
+            <button type="button" class="mr-1.5 grid size-5 place-items-center rounded hover:bg-surface-hover" aria-label="Close Copy" @click="store.closeCopy()"><X class="size-3" aria-hidden="true" /></button>
+          </div>
           <div v-if="store.shellOpen" :class="cn('flex shrink-0 items-center border-r border-border text-sm text-muted', store.activeTab === 'shell' && 'bg-bg text-text shadow-[inset_0_2px_0_var(--color-accent)]')">
             <button :id="`${tabKey}-tab-shell`" type="button" :aria-current="store.activeTab === 'shell' ? 'true' : undefined" class="h-full cursor-default pl-3 pr-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" @click="store.activeTab = 'shell'">Shell</button>
             <button type="button" class="mr-1.5 grid size-5 place-items-center rounded hover:bg-surface-hover" aria-label="Close Shell" @click="store.closeShell()"><X class="size-3" aria-hidden="true" /></button>
           </div>
         </div>
         <MongoTransfer v-if="store.transferOpen" v-show="store.activeTab === 'transfer'" :tab-key="tabKey" />
+        <CopyTab v-if="store.copyOpen && db" v-show="store.activeTab === 'copy'" :tab-key="tabKey" engine="mongodb" :conn-id="store.connId" :db-name="db.name" :environment="db.environment" />
         <MongoShell v-if="store.shellOpen" v-show="store.activeTab === 'shell'" :tab-key="tabKey" />
         <template v-for="t in store.tabs" :key="t.id">
           <MongoCollection v-show="store.activeTab === t.id" :tab-key="tabKey" :tab-data="t" />
         </template>
-        <EmptyState v-if="!store.tabs.length && !store.shellOpen && !store.transferOpen" :icon="FileJson" title="Open a collection" text="Pick a collection from the list. Reads run at once; changes show what they will do and ask first." />
+        <EmptyState v-if="!store.tabs.length && !store.shellOpen && !store.transferOpen && !store.copyOpen" :icon="FileJson" title="Open a collection" text="Pick a collection from the list. Reads run at once; changes show what they will do and ask first." />
       </section>
     </div>
 

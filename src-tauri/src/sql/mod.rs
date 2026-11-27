@@ -5,6 +5,7 @@
 pub mod activity;
 pub mod backup;
 pub mod classify;
+pub mod copy;
 pub mod diagram;
 pub mod explain;
 pub mod grid;
@@ -312,6 +313,23 @@ pub async fn connect(
             }
         };
     step(&emit, reach + 1, RedisStepState::Done, None);
+    let connector: Connector = {
+        let (reopen, login) = (Arc::clone(&reopen), login.clone());
+        Arc::new(move |db: Option<String>| {
+            let (reopen, mut login) = (Arc::clone(&reopen), login.clone());
+            if db.is_some() {
+                login.database = db;
+            }
+            Box::pin(async move {
+                let stream = (reopen)().await?;
+                Ok(RawConn::Pg(Box::new(
+                    PgConn::connect(stream, login, Arc::clone(&reopen), |_| {})
+                        .await?
+                        .0,
+                )))
+            })
+        })
+    };
     let opener: Opener = Arc::new(move || {
         let (reopen, login) = (Arc::clone(&reopen), login.clone());
         Box::pin(async move {
@@ -325,6 +343,7 @@ pub async fn connect(
         info,
         ssh,
         opener,
+        connector,
     })
 }
 
@@ -363,6 +382,23 @@ async fn connect_my(
             }
         };
     step(emit, reach + 1, RedisStepState::Done, None);
+    let connector: Connector = {
+        let (reopen, login) = (Arc::clone(&reopen), login.clone());
+        Arc::new(move |db: Option<String>| {
+            let (reopen, mut login) = (Arc::clone(&reopen), login.clone());
+            if db.is_some() {
+                login.database = db;
+            }
+            Box::pin(async move {
+                let stream = (reopen)().await?;
+                Ok(RawConn::My(
+                    mysql::MyConn::connect(stream, login, Arc::clone(&reopen))
+                        .await?
+                        .0,
+                ))
+            })
+        })
+    };
     let opener: Opener = Arc::new(move || {
         let (reopen, login) = (Arc::clone(&reopen), login.clone());
         Box::pin(async move {
@@ -376,6 +412,7 @@ async fn connect_my(
         info,
         ssh,
         opener,
+        connector,
     })
 }
 
@@ -419,6 +456,8 @@ async fn connect_mongo(
                 return Err(e);
             }
         };
+    // Where more connections go: the member signed in to (the primary, after the hop below).
+    let mut used: Reopen = Arc::clone(&reopen);
     // A secondary names the primary: go there, so writes work (one hop only; the name must be one of the seeds).
     if !info.is_primary && info.replica_set.is_some() {
         if let Some(primary) = info.primary.clone().and_then(|p| {
@@ -445,6 +484,7 @@ async fn connect_mongo(
                 .await
                 {
                     (conn, info) = (c, i);
+                    used = Arc::clone(&to_primary);
                 }
             }
         }
@@ -472,11 +512,27 @@ async fn connect_mongo(
         user: info.user,
         latency_ms: info.latency_ms,
     };
+    let connector: Connector = {
+        let login = login.clone();
+        Arc::new(move |_db: Option<String>| {
+            // A MongoDB connection serves every database: the name goes with each command.
+            let (reopen, login) = (Arc::clone(&used), login.clone());
+            Box::pin(async move {
+                let stream = (reopen)().await?;
+                Ok(RawConn::Mongo(
+                    crate::mongo::conn::MongoConn::connect(stream, login, Arc::clone(&reopen))
+                        .await?
+                        .0,
+                ))
+            })
+        })
+    };
     Ok(Opened {
         db: Db::Mongo(Arc::new(conn)),
         info,
         ssh,
         opener,
+        connector,
     })
 }
 
@@ -524,8 +580,10 @@ async fn run(
             info,
             ssh,
             opener,
+            connector,
         }) => {
             *live.opener.lock().await = Some(opener);
+            *live.connector.lock().await = Some(connector);
             match db {
                 Db::Pg(c) => *live.conn.lock().await = Some(c),
                 Db::My(c) => *live.my.lock().await = Some(c),
@@ -552,6 +610,24 @@ type Opener = Arc<
         + Sync,
 >;
 
+/// A connection of the tab's own engine, by the tab's route, to any database on that server (D13 copies read and write
+/// on connections of their own, so a long copy never holds the tab's).
+pub enum RawConn {
+    Pg(Box<PgConn>),
+    My(mysql::MyConn),
+    Mongo(crate::mongo::conn::MongoConn),
+}
+
+/// Opens a [`RawConn`]; `None` keeps the saved database.
+pub type Connector = Arc<
+    dyn Fn(
+            Option<String>,
+        )
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = AppResult<RawConn>> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// What a successful sign-in gives the tab: the engine's connection for browsing, the server's answer, the host's
 /// SSH connection (if the route has one) and the way to open an editor connection.
 pub struct Opened {
@@ -559,6 +635,7 @@ pub struct Opened {
     info: SqlServerInfo,
     ssh: Option<Arc<Connected>>,
     opener: Opener,
+    connector: Connector,
 }
 
 enum Db {
@@ -601,6 +678,7 @@ struct Live {
     /// MongoDB tabs hold this.
     mongo: tokio::sync::Mutex<Option<Arc<crate::mongo::conn::MongoConn>>>,
     opener: tokio::sync::Mutex<Option<Opener>>,
+    connector: tokio::sync::Mutex<Option<Connector>>,
     /// The SSH connection to the route's last host, for tools that run there (backup, restore).
     ssh: tokio::sync::Mutex<Option<Arc<Connected>>>,
     /// One connection per editor tab, so a transaction in one never touches another (spec section 3).
@@ -705,6 +783,8 @@ pub struct SqlManager {
     dumps: Mutex<HashMap<String, (String, Arc<crate::dbs::dumpfile::Dump>)>>,
     /// Restores held for their confirmation.
     pub restore_jobs: crate::dbs::gate::PendingStore<restore::Job>,
+    /// Copies held for their confirmation (D13).
+    pub copy_jobs: crate::dbs::gate::PendingStore<copy::CopyJob>,
     /// Running exports, backups and restores by id, so Stop can reach them.
     pub transfers: Mutex<HashMap<String, Arc<AtomicBool>>>,
     pub grid_pending: crate::dbs::gate::PendingStore<Vec<grid::GridStatement>>,
@@ -730,6 +810,7 @@ impl SqlManager {
         let live = Arc::new(Live {
             db_id: db_id.clone(),
             opener: tokio::sync::Mutex::new(None),
+            connector: tokio::sync::Mutex::new(None),
             ssh: tokio::sync::Mutex::new(None),
             editors: tokio::sync::Mutex::new(HashMap::new()),
             prompts: Arc::new(Prompts::default()),
@@ -868,6 +949,23 @@ impl SqlManager {
         }
     }
 
+    /// A new connection by this tab's route, to `database` (or the saved one).
+    pub async fn connect_to(&self, conn_id: &str, database: Option<String>) -> AppResult<RawConn> {
+        let c = self
+            .get(conn_id)?
+            .connector
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| {
+                AppError::new(
+                    ErrorCode::DbUnreachable,
+                    "This database isn't connected right now.",
+                )
+            })?;
+        c(database).await
+    }
+
     /// The SSH connection of a host route (`None` on a direct route).
     pub async fn ssh(&self, conn_id: &str) -> AppResult<Option<Arc<Connected>>> {
         Ok(self.get(conn_id)?.ssh.lock().await.clone())
@@ -954,6 +1052,7 @@ impl SqlManager {
             f.retain(|_, (c, _)| c != conn_id);
         }
         self.restore_jobs.drop_conn(conn_id);
+        self.copy_jobs.drop_conn(conn_id);
         if let Ok(mut d) = self.dumps.lock() {
             d.retain(|_, (c, _)| c != conn_id);
         }

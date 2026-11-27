@@ -2,6 +2,7 @@
 // (`public`: customers, orders, order_items, a view and a keyless table) served to every PostgreSQL database.
 // Orders has 1,200 rows so paging, sorting and the estimate have something to do.
 import { fail, type Handlers } from '../types'
+import { stopCopy } from './copy'
 import { stopRestore } from './restore'
 import type { SqlCell_Serialize as Cell_Serialize, SqlColumn_Serialize, SqlTableInfo_Serialize } from '../../../app/types/bindings'
 
@@ -240,6 +241,7 @@ export const sql: Pick<Handlers, Keys> = {
   },
   sqlTransferStop: (a) => {
     stopRestore(a.transferId)
+    stopCopy(a.transferId)
     return null
   },
   sqlImportPick: () => ({ id: 'file-1', name: 'orders-nov.csv' }),

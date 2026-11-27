@@ -2,7 +2,7 @@
 import { Channel } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { commands } from '~/types/bindings'
-import type { CodeLanguage, MgAggRequest, MgDocOp, MgFindRequest, MgIndexOp, MgStage, AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, SqlRunEvent_Serialize, RunMode, TxnAction, GridEdits_Deserialize, StructureOp_Deserialize, TableRef, ActivityView, SessionAction, ExportFormat, TransferProgress, RestoreOptions_Deserialize as RestoreOptions, RestoreProgress_Serialize as RestoreProgress, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
+import type { CodeLanguage, MgAggRequest, MgDocOp, MgFindRequest, MgIndexOp, MgStage, AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, SqlRunEvent_Serialize, RunMode, TxnAction, GridEdits_Deserialize, StructureOp_Deserialize, TableRef, ActivityView, SessionAction, ExportFormat, TransferProgress, RestoreOptions_Deserialize as RestoreOptions, CopyRequest_Deserialize as CopyRequest, CopyProgress_Serialize as CopyProgress, RestoreProgress_Serialize as RestoreProgress, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -124,6 +124,13 @@ export function useTauri() {
       return unwrap(commands.restoreCommit(connId, pendingId, typedName, transferId, progress as never))
     },
     restoreForget: (connId: string, dumpId: string) => unwrap(commands.restoreForget(connId, dumpId)),
+    // D13 (S49, F32): copy between databases.
+    copyPrepare: (connId: string, request: CopyRequest) => unwrap(commands.copyPrepare(connId, request)),
+    copyCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, onProgress: (p: CopyProgress) => void) => {
+      const progress = new Channel<CopyProgress>()
+      progress.onmessage = onProgress
+      return unwrap(commands.copyCommit(connId, pendingId, typedName, transferId, progress as never))
+    },
     restoreSaveDatabase: (connId: string, database: string) => unwrap(commands.restoreSaveDatabase(connId, database)),
     sqlCancel: (connId: string, editorId: string) => unwrap(commands.sqlCancel(connId, editorId)),
     sqlEditorClose: (connId: string, editorId: string) => unwrap(commands.sqlEditorClose(connId, editorId)),

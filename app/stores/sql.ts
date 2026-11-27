@@ -123,7 +123,7 @@ function setup() {
   const history = ref<string[]>([])
   const diagrams = ref<DiagramTab[]>([])
   /** The Activity and Transfer inner tabs (S41, S43): each is open or not, one of each. */
-  const special = ref<('activity' | 'transfer')[]>([])
+  const special = ref<('activity' | 'transfer' | 'copy')[]>([])
   let diagramCount = 0
 
   const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : (e as { message?: string })?.message ?? fallback)
@@ -235,6 +235,15 @@ function setup() {
     catch (e) {
       s.error = message(e, 'Couldn\'t list the tables.')
     }
+    s.loading = false
+  }
+
+  /** The tables of a schema, without opening it in the tree (the Copy tab lists them all). */
+  async function ensureObjects(s: SchemaNode) {
+    if (s.objects || s.loading) return
+    s.loading = true
+    try { s.objects = await api.sqlObjects(connId.value, [s.name]) }
+    catch (e) { s.error = message(e, 'Couldn\'t list the tables.') }
     s.loading = false
   }
 
@@ -520,11 +529,11 @@ function setup() {
   }
 
   // ---- Activity (S41, F25) and Transfer (S43, F26)
-  function openSpecial(kind: 'activity' | 'transfer') {
+  function openSpecial(kind: 'activity' | 'transfer' | 'copy') {
     if (!special.value.includes(kind)) special.value.push(kind)
     activeTab.value = kind
   }
-  function closeSpecial(kind: 'activity' | 'transfer') {
+  function closeSpecial(kind: 'activity' | 'transfer' | 'copy') {
     special.value = special.value.filter(k => k !== kind)
     if (activeTab.value === kind) activeTab.value = queries.value[0]?.id ?? tabs.value[0]?.id ?? ''
   }
@@ -851,7 +860,7 @@ function setup() {
     q.title = row.name
   }
 
-  return { dbId, connId, status, steps, prompt, info, error, schemas, treeFilter, tabs, activeTab, current, engine, isMy, special, openSpecial, closeSpecial, activityState, refreshActivity, prepareSession, confirmSession, discardSession, newTransferId, stopTransfer, exportTable, importPick, importPreview, importPrepare, importCommit, importDiscard, backupCheck, backupStart, setView, loadStructure, addOp, removeOp, reviewStructure, applyStructure, cancelStructure, migrationText, explain, diagrams, openDiagram, loadDiagram, closeDiagram, saveExport, changeCount, setCell, toggleDelete, discardEdits, review, commitReview, cancelReview, queries, catalog, history, newQuery, closeQuery, requestCloseQuery, finishAndClose, openTransactions, confirmRun, discardRun, txn, setManual, loadCatalog, run, stop, format, loadHistory, clearHistory, save, open, retry, respond, close, toggleSchema, openTable, closeTable, loadPage, apply, refresh, nextPage, prevPage, sortBy, countExactly, select, keyOf, jump }
+  return { ensureObjects, dbId, connId, status, steps, prompt, info, error, schemas, treeFilter, tabs, activeTab, current, engine, isMy, special, openSpecial, closeSpecial, activityState, refreshActivity, prepareSession, confirmSession, discardSession, newTransferId, stopTransfer, exportTable, importPick, importPreview, importPrepare, importCommit, importDiscard, backupCheck, backupStart, setView, loadStructure, addOp, removeOp, reviewStructure, applyStructure, cancelStructure, migrationText, explain, diagrams, openDiagram, loadDiagram, closeDiagram, saveExport, changeCount, setCell, toggleDelete, discardEdits, review, commitReview, cancelReview, queries, catalog, history, newQuery, closeQuery, requestCloseQuery, finishAndClose, openTransactions, confirmRun, discardRun, txn, setManual, loadCatalog, run, stop, format, loadHistory, clearHistory, save, open, retry, respond, close, toggleSchema, openTable, closeTable, loadPage, apply, refresh, nextPage, prevPage, sortBy, countExactly, select, keyOf, jump }
 }
 
 // One store per SQL tab, like the Redis tabs: each has its own connection, tree and open tables.

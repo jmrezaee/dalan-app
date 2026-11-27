@@ -12,6 +12,13 @@ const databases = useDatabasesStore()
 const hosts = useHostsStore()
 
 const db = computed(() => databases.rows.find(d => d.id === props.dbId) ?? null)
+const SPECIAL = { activity: 'Activity', transfer: 'Transfer', copy: 'Copy' } as const
+// "Copy to…" from the database list (S49): once connected, the Copy tab opens.
+watch(() => store.status === 'ready' && copyRequests.value.has(props.dbId), (go) => {
+  if (!go) return
+  copyRequests.value.delete(props.dbId)
+  store.openSpecial('copy')
+}, { immediate: true })
 // "Restore a dump…" from the database list (S48): once connected, the Transfer tab opens with the restore dialog.
 watch(() => store.status === 'ready' && restoreRequests.value.has(props.dbId), (go) => {
   if (!go) return
@@ -97,8 +104,8 @@ function onTabKey(e: KeyboardEvent, i: number) {
             <button type="button" class="mr-1.5 grid size-5 place-items-center rounded hover:bg-surface-hover" :aria-label="`Close ${t.table}`" @click="store.closeTable(t.id)"><X class="size-3" aria-hidden="true" /></button>
           </div>
           <div v-for="k in store.special" :key="k" :class="cn('flex shrink-0 items-center border-r border-border text-sm text-muted', store.activeTab === k && 'bg-bg text-text shadow-[inset_0_2px_0_var(--color-accent)]')">
-            <button :id="`${tabKey}-tab-${k}`" type="button" :aria-current="store.activeTab === k ? 'true' : undefined" class="h-full cursor-default pl-3 pr-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" @click="store.activeTab = k">{{ k === 'activity' ? 'Activity' : 'Transfer' }}</button>
-            <button type="button" class="mr-1.5 grid size-5 place-items-center rounded hover:bg-surface-hover" :aria-label="`Close ${k === 'activity' ? 'Activity' : 'Transfer'}`" @click="store.closeSpecial(k)"><X class="size-3" aria-hidden="true" /></button>
+            <button :id="`${tabKey}-tab-${k}`" type="button" :aria-current="store.activeTab === k ? 'true' : undefined" class="h-full cursor-default pl-3 pr-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" @click="store.activeTab = k">{{ SPECIAL[k] }}</button>
+            <button type="button" class="mr-1.5 grid size-5 place-items-center rounded hover:bg-surface-hover" :aria-label="`Close ${SPECIAL[k]}`" @click="store.closeSpecial(k)"><X class="size-3" aria-hidden="true" /></button>
           </div>
           <div v-for="g in store.diagrams" :key="g.id" :class="cn('flex shrink-0 items-center border-r border-border text-sm text-muted', store.activeTab === g.id && 'bg-bg text-text shadow-[inset_0_2px_0_var(--color-accent)]')">
             <button :id="`${tabKey}-tab-${g.id}`" type="button" :aria-current="store.activeTab === g.id ? 'true' : undefined" class="flex h-full cursor-default items-center gap-1.5 pl-3 pr-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" @click="store.activeTab = g.id">{{ g.title }}</button>
@@ -120,6 +127,7 @@ function onTabKey(e: KeyboardEvent, i: number) {
         <!-- Query tabs stay mounted while another tab shows, so their editors keep the caret and the undo history. -->
         <SqlActivityTab v-if="store.special.includes('activity')" v-show="store.activeTab === 'activity'" :tab-key="tabKey" :active="active && store.activeTab === 'activity'" />
         <SqlTransferTab v-if="store.special.includes('transfer')" v-show="store.activeTab === 'transfer'" :tab-key="tabKey" />
+        <CopyTab v-if="store.special.includes('copy') && db" v-show="store.activeTab === 'copy'" :tab-key="tabKey" :engine="db.engine" :conn-id="store.connId" :db-name="db.name" :environment="db.environment" />
         <SqlDiagramTab v-for="g in store.diagrams" v-show="store.activeTab === g.id" :key="g.id" :tab-key="tabKey" :diagram="g" />
         <SqlQueryTab v-for="q in store.queries" v-show="store.activeTab === q.id" :key="q.id" :tab-key="tabKey" :query="q" />
         <EmptyState v-if="!store.tabs.length && !store.queries.length && !store.diagrams.length && !store.special.length" :icon="ShieldCheck" title="Open a table or start a query" text="Pick a table from the list, or press New query. Reads run at once; changes ask first." />

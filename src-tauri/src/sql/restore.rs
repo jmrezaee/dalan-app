@@ -173,7 +173,7 @@ pub struct Job {
 // ---------------------------------------------------------------- planning
 
 /// What the target already has: for PostgreSQL `schema.table`, for MySQL `table`, for MongoDB `collection`.
-async fn existing_names(conn: &Conn<'_>, db: &str) -> AppResult<Vec<String>> {
+pub async fn existing_names(conn: &Conn<'_>, db: &str) -> AppResult<Vec<String>> {
     Ok(match conn {
         Conn::Pg(c) => c
             .client
@@ -208,7 +208,7 @@ pub enum Conn<'a> {
     Mongo(&'a crate::mongo::conn::MongoConn),
 }
 
-async fn database_exists(conn: &Conn<'_>, name: &str) -> AppResult<bool> {
+pub async fn database_exists(conn: &Conn<'_>, name: &str) -> AppResult<bool> {
     Ok(match conn {
         Conn::Pg(c) => !c
             .client
@@ -240,7 +240,7 @@ async fn database_exists(conn: &Conn<'_>, name: &str) -> AppResult<bool> {
     })
 }
 
-async fn current_db(conn: &Conn<'_>, cfg: &SqlConfig) -> AppResult<Option<String>> {
+pub async fn current_db(conn: &Conn<'_>, cfg: &SqlConfig) -> AppResult<Option<String>> {
     if let Some(d) = cfg.database.clone().filter(|d| !d.is_empty()) {
         return Ok(Some(d));
     }
@@ -256,7 +256,7 @@ async fn current_db(conn: &Conn<'_>, cfg: &SqlConfig) -> AppResult<Option<String
     })
 }
 
-fn valid_new_name(engine: Engine, name: &str) -> AppResult<()> {
+pub fn valid_new_name(engine: Engine, name: &str) -> AppResult<()> {
     let bad = name.is_empty()
         || name.len() > 63
         || name.chars().any(|c| c.is_control())

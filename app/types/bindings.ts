@@ -181,6 +181,10 @@ export const commands = {
 	 *  one (same route, user, password and protection). The password is copied in Rust, from the vault to the vault.
 	 */
 	restoreSaveDatabase: (connId: string, database: string) => typedError<DatabaseRow_Serialize, AppError>(__TAURI_INVOKE("restore_save_database", { connId, database })),
+	/**  Plans the copy and, unless something blocks it, holds it for the confirmation. */
+	copyPrepare: (connId: string, request: CopyRequest_Deserialize) => typedError<CopyPlan_Serialize, AppError>(__TAURI_INVOKE("copy_prepare", { connId, request })),
+	/**  Runs the held copy once confirmed (typed when the review asked), with the target's mode asked again. */
+	copyCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, progress: Channel<CopyProgress_Deserialize>) => typedError<CopyReport_Serialize, AppError>(__TAURI_INVOKE("copy_commit", { connId, pendingId, typedName, transferId, progress })),
 	/**  Stop: the running statement is cancelled by the server (a second connection), and no further statement starts. */
 	sqlCancel: (connId: string, editorId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_cancel", { connId, editorId })),
 	/**  The editor tab closed. */
@@ -641,6 +645,213 @@ export type Class = "read" | "write" | "schema" | "dangerous";
 export type CodeLanguage = "mongosh" | "node" | "python" | "json";
 
 export type Content = "all" | "schema" | "data";
+
+export type CopyContent = "all" | "schema" | "data";
+
+/**  What happens to a table that already exists at the target (§3 "Existing tables at the target"). */
+export type CopyMode = 
+/**  Stop if it exists (the plan says so before anything runs). */
+"create" | 
+/**  Drop it and create it again (typed). */
+"recreate" | 
+/**  Empty it, then load (typed). */
+"empty" | 
+/**  Add the rows. */
+"append" | 
+/**  Insert or replace by primary key (typed). */
+"upsert";
+
+/**
+ *  One table, view or collection to copy. `schema` is the PostgreSQL schema, the MySQL database or the MongoDB
+ *  database it is in at the source.
+ */
+export type CopyObject = CopyObject_Serialize | CopyObject_Deserialize;
+
+/**
+ *  One table, view or collection to copy. `schema` is the PostgreSQL schema, the MySQL database or the MongoDB
+ *  database it is in at the source.
+ */
+export type CopyObject_Deserialize = {
+	schema: string,
+	name: string,
+	/**  `table`, `view` or `collection`. */
+	kind: string,
+	/**  Only these rows (a condition, checked like the grid's; for MongoDB a JSON filter). */
+	filter?: string | null,
+	/**  At most this many rows (a sample). */
+	limit?: number | null,
+	/**  Another name at the target. */
+	rename?: string | null,
+};
+
+/**
+ *  One table, view or collection to copy. `schema` is the PostgreSQL schema, the MySQL database or the MongoDB
+ *  database it is in at the source.
+ */
+export type CopyObject_Serialize = {
+	schema: string,
+	name: string,
+	/**  `table`, `view` or `collection`. */
+	kind: string,
+	/**  Only these rows (a condition, checked like the grid's; for MongoDB a JSON filter). */
+	filter: string | null,
+	/**  At most this many rows (a sample). */
+	limit: number | null,
+	/**  Another name at the target. */
+	rename: string | null,
+};
+
+export type CopyPlan = CopyPlan_Serialize | CopyPlan_Deserialize;
+
+export type CopyPlan_Deserialize = {
+	pending_id?: string | null,
+	blocked?: string | null,
+	level: string,
+	typed_name: string,
+	source_name: string,
+	target_name: string,
+	environment: string,
+	target_db: string,
+	new_database: boolean,
+	tables: CopyTablePlan_Deserialize[],
+	warnings: string[],
+	/**  The source is read in one snapshot (a MongoDB copy isn't). */
+	snapshot: boolean,
+};
+
+export type CopyPlan_Serialize = {
+	pending_id: string | null,
+	blocked: string | null,
+	level: string,
+	typed_name: string,
+	source_name: string,
+	target_name: string,
+	environment: string,
+	target_db: string,
+	new_database: boolean,
+	tables: CopyTablePlan_Serialize[],
+	warnings: string[],
+	/**  The source is read in one snapshot (a MongoDB copy isn't). */
+	snapshot: boolean,
+};
+
+export type CopyProgress = CopyProgress_Serialize | CopyProgress_Deserialize;
+
+export type CopyProgress_Deserialize = {
+	table: string,
+	index: number | null,
+	tables: number | null,
+	rows: number | null,
+	estimate?: number | null,
+	/**  `schema`, `rows`, `keys` (keys, indexes, sequences, views after the data). */
+	phase: string,
+};
+
+export type CopyProgress_Serialize = {
+	table: string,
+	index: number | null,
+	tables: number | null,
+	rows: number | null,
+	estimate: number | null,
+	/**  `schema`, `rows`, `keys` (keys, indexes, sequences, views after the data). */
+	phase: string,
+};
+
+export type CopyReport = CopyReport_Serialize | CopyReport_Deserialize;
+
+export type CopyReport_Deserialize = {
+	/**  `done`, `stopped`, `failed` (a table failed and the copy stopped) or `partial` (some tables failed). */
+	outcome: string,
+	target_db: string,
+	tables: CopyTableReport_Deserialize[],
+	warnings: string[],
+	seconds: number | null,
+};
+
+export type CopyReport_Serialize = {
+	/**  `done`, `stopped`, `failed` (a table failed and the copy stopped) or `partial` (some tables failed). */
+	outcome: string,
+	target_db: string,
+	tables: CopyTableReport_Serialize[],
+	warnings: string[],
+	seconds: number | null,
+};
+
+export type CopyRequest = CopyRequest_Serialize | CopyRequest_Deserialize;
+
+export type CopyRequest_Deserialize = {
+	/**  The open tab to copy into. */
+	target_conn_id: string,
+	/**  Create this database on the target's server first; `None`: the target tab's database. */
+	new_database?: string | null,
+	objects: CopyObject_Deserialize[],
+	mode: CopyMode,
+	content: CopyContent,
+	/**  Stop at the first failing table (default); otherwise skip it and go on. */
+	stop_on_error: boolean,
+};
+
+export type CopyRequest_Serialize = {
+	/**  The open tab to copy into. */
+	target_conn_id: string,
+	/**  Create this database on the target's server first; `None`: the target tab's database. */
+	new_database: string | null,
+	objects: CopyObject_Serialize[],
+	mode: CopyMode,
+	content: CopyContent,
+	/**  Stop at the first failing table (default); otherwise skip it and go on. */
+	stop_on_error: boolean,
+};
+
+export type CopyTablePlan = CopyTablePlan_Serialize | CopyTablePlan_Deserialize;
+
+export type CopyTablePlan_Deserialize = {
+	source: string,
+	target: string,
+	kind: string,
+	exists: boolean,
+	/**  What happens, in words: "create", "drop and create", "empty and load", "add rows", "insert or replace". */
+	action: string,
+	rows_estimate?: number | null,
+};
+
+export type CopyTablePlan_Serialize = {
+	source: string,
+	target: string,
+	kind: string,
+	exists: boolean,
+	/**  What happens, in words: "create", "drop and create", "empty and load", "add rows", "insert or replace". */
+	action: string,
+	rows_estimate: number | null,
+};
+
+export type CopyTableReport = CopyTableReport_Serialize | CopyTableReport_Deserialize;
+
+export type CopyTableReport_Deserialize = {
+	source: string,
+	target: string,
+	/**  `done`, `failed`, `stopped` or `skipped`. */
+	status: string,
+	rows: number | null,
+	/**  The row check: the source's count in the snapshot and the target's after the copy. */
+	source_rows?: number | null,
+	target_rows?: number | null,
+	error?: string | null,
+	seconds: number | null,
+};
+
+export type CopyTableReport_Serialize = {
+	source: string,
+	target: string,
+	/**  `done`, `failed`, `stopped` or `skipped`. */
+	status: string,
+	rows: number | null,
+	/**  The row check: the source's count in the snapshot and the target's after the copy. */
+	source_rows: number | null,
+	target_rows: number | null,
+	error: string | null,
+	seconds: number | null,
+};
 
 export type CsvColumn = {
 	name: string,
