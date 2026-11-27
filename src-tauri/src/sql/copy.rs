@@ -69,6 +69,9 @@ pub struct CopyObject {
     /// Between PostgreSQL and MySQL/MariaDB: the `create table` the person edited (checked again before it runs).
     #[serde(default)]
     pub ddl: Option<String>,
+    /// Masking rules for its columns (E5): applied in the stream, before anything reaches the target.
+    #[serde(default)]
+    pub masks: Option<Vec<crate::dbs::masking::MaskRule>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -95,7 +98,7 @@ pub struct NotCopied {
     pub ddl: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct CopyRequest {
     /// The open tab to copy into.
     pub target_conn_id: String,
@@ -125,6 +128,10 @@ pub struct CopyTablePlan {
     /// Between PostgreSQL and MySQL/MariaDB: each column's mapping, and the `create table` that will run.
     pub columns: Vec<CopyColumn>,
     pub ddl: Option<String>,
+    /// Every column (or a document's top-level fields), for masking rules.
+    pub column_names: Vec<String>,
+    /// Columns that look personal and have no rule yet.
+    pub suggested_masks: Vec<crate::dbs::masking::MaskSuggestion>,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -393,6 +400,40 @@ pub async fn estimates(conn: &RawConn, objs: &[CopyObject]) -> Vec<Option<f64>> 
     out
 }
 
+/// The masker for one object's stream, if it has rules for any of `columns`.
+pub fn masker(
+    job: &CopyJob,
+    o: &CopyObject,
+    columns: &[String],
+) -> Option<crate::dbs::masking::Masker> {
+    crate::dbs::masking::Masker::new(job.mask_key, o.masks.as_deref().unwrap_or(&[]), columns)
+}
+
+/// The column names of a table (or the top-level fields of a collection's first document).
+pub async fn column_names(conn: &RawConn, o: &CopyObject) -> Vec<String> {
+    match conn {
+        RawConn::Pg(c) => c
+            .client
+            .query("select column_name::text from information_schema.columns where table_schema = $1 and table_name = $2 order by ordinal_position", &[&o.schema, &o.name])
+            .await
+            .map(|r| r.iter().map(|x| x.get(0)).collect())
+            .unwrap_or_default(),
+        RawConn::My(c) => c
+            .query(&format!("select column_name from information_schema.columns where table_schema = {} and table_name = {} order by ordinal_position", lit(&o.schema), lit(&o.name)), 0)
+            .await
+            .map(|r| r.rows.into_iter().filter_map(|x| x.into_iter().next().flatten()).collect())
+            .unwrap_or_default(),
+        RawConn::Mongo(c) => c
+            .command(&o.schema, doc! { "find": &o.name, "limit": 1, "singleBatch": true })
+            .await
+            .ok()
+            .and_then(|r| r.get_document("cursor").ok().map(|cur| crate::mongo::docs::names(cur, "firstBatch")))
+            .and_then(|d| d.into_iter().next())
+            .map(|d| d.keys().cloned().collect())
+            .unwrap_or_default(),
+    }
+}
+
 /// The tables `objects` reference by foreign key, followed to the end (those already chosen are left out).
 pub async fn related(conn: &RawConn, objects: &[CopyObject]) -> AppResult<Vec<CopyObject>> {
     let mut seen: Vec<(String, String)> = objects
@@ -437,6 +478,7 @@ pub async fn related(conn: &RawConn, objects: &[CopyObject]) -> AppResult<Vec<Co
                     rename: None,
                     types: None,
                     ddl: None,
+                    masks: None,
                 });
             }
         }
@@ -446,6 +488,10 @@ pub async fn related(conn: &RawConn, objects: &[CopyObject]) -> AppResult<Vec<Co
 
 /// Everything a run needs (held by the gate between the review and the confirmation).
 pub struct CopyJob {
+    /// Masking key: a saved job's own (so its hashes and fakes are the same on every run), else a new one.
+    pub mask_key: [u8; 32],
+    /// The saved job this run belongs to (its run is recorded).
+    pub job_id: Option<String>,
     pub req: CopyRequest,
     pub source_engine: Engine,
     pub target_db: String,
@@ -1061,6 +1107,15 @@ mod pg {
             futures_util::pin_mut!(out);
             futures_util::pin_mut!(sink);
             let mut last = Instant::now();
+            // Masking: the COPY lines are decoded, masked and encoded again on the way (whole lines only).
+            let names: Vec<String> = t
+                .cols
+                .iter()
+                .filter(|c| !c.4.as_deref().is_some_and(|g| g.contains("stored")))
+                .map(|c| c.0.clone())
+                .collect();
+            let mask = super::masker(job, o, &names);
+            let mut partial: Vec<u8> = Vec::new();
             while let Some(chunk) = out.next().await {
                 let chunk = chunk.map_err(|e| map_error(&e))?;
                 if stop.load(Ordering::SeqCst) {
@@ -1068,6 +1123,37 @@ mod pg {
                     return Err(stopped());
                 }
                 rows += chunk.iter().filter(|b| **b == b'\n').count() as u64;
+                let chunk = match &mask {
+                    None => chunk,
+                    Some(m) => {
+                        partial.extend_from_slice(&chunk);
+                        let Some(end) = partial.iter().rposition(|b| *b == b'\n') else {
+                            continue;
+                        };
+                        let whole: Vec<u8> = partial.drain(..=end).collect();
+                        let mut batch: Vec<Vec<Option<String>>> = whole
+                            .split_inclusive(|b| *b == b'\n')
+                            .map(super::super::copycross::copy_fields)
+                            .collect();
+                        m.batch(&mut batch);
+                        let text: String = batch
+                            .iter()
+                            .map(|r| {
+                                format!(
+                                    "{}\n",
+                                    r.iter()
+                                        .map(|v| super::super::copycross::copy_field(
+                                            v,
+                                            super::super::typemap::Conv::Plain
+                                        ))
+                                        .collect::<Vec<_>>()
+                                        .join("\t")
+                                )
+                            })
+                            .collect();
+                        bytes::Bytes::from(text)
+                    }
+                };
                 sink.send(chunk).await.map_err(|e| map_error(&e))?;
                 if last.elapsed().as_millis() > 200 {
                     last = Instant::now();
@@ -1489,7 +1575,12 @@ mod my {
                 .collect();
             let got = res.rows.len();
             let mut batch = String::new();
-            for row in &res.rows {
+            // Masked values go to the target; the page's keys (for the next page) stay the source's.
+            let mut masked = res.rows.clone();
+            if let Some(m) = super::masker(job, o, &names) {
+                m.batch(&mut masked);
+            }
+            for row in &masked {
                 let vals = row
                     .iter()
                     .enumerate()
@@ -1765,9 +1856,14 @@ mod mongo {
             .unwrap_or(0) as u64;
         let mut r = s.command(&o.schema, find).await?;
         let mut rows = 0u64;
+        let fields: Vec<String> = o.masks.iter().flatten().map(|m| m.column.clone()).collect();
+        let mask = super::masker(job, o, &fields);
         let mut last = Instant::now();
         loop {
-            let (docs, id) = cursor(&r)?;
+            let (mut docs, id) = cursor(&r)?;
+            if let Some(m) = &mask {
+                m.documents(&mut docs);
+            }
             // Ordered batches: a failure stops at the document that failed (the report says how many went in).
             let mut batch: Vec<Document> = Vec::new();
             let mut size = 0usize;
@@ -1870,6 +1966,7 @@ mod tests {
             rename: Some(" ".into()),
             types: None,
             ddl: None,
+            masks: None,
         };
         assert!(
             compatible(Engine::Postgres, Engine::Mariadb)

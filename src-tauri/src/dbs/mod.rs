@@ -5,6 +5,8 @@ pub mod dumpfile;
 pub mod dumpscan;
 pub mod gate;
 pub mod history;
+pub mod jobs;
+pub mod masking;
 pub mod route;
 pub mod saved;
 pub mod store;

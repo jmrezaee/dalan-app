@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { Activity_Serialize as Activity, ActivityView, CsvPreview, SessionPending, SessionAction, ExportFormat, TransferProgress, Diagram, ExplainPlan_Serialize as ExplainPlan, StructureOp_Deserialize as StructureOp, StructurePending, TableStructure_Serialize as TableStructure, PendingRun, TxnState, GridPending, SqlCatalog, SqlRunEvent_Serialize, RunMode, SqlCell_Serialize as Cell, DbEvent_Serialize, PageCursor_Serialize, PromptKind, RedisStepState, SqlColumn_Serialize as SqlColumn, SqlObject_Serialize as SqlObject, SqlServerInfo, SqlTableInfo_Serialize as SqlTableInfo } from '~/types/bindings'
+import type { MaskRule_Deserialize as MaskRule, Activity_Serialize as Activity, ActivityView, CsvPreview, SessionPending, SessionAction, ExportFormat, TransferProgress, Diagram, ExplainPlan_Serialize as ExplainPlan, StructureOp_Deserialize as StructureOp, StructurePending, TableStructure_Serialize as TableStructure, PendingRun, TxnState, GridPending, SqlCatalog, SqlRunEvent_Serialize, RunMode, SqlCell_Serialize as Cell, DbEvent_Serialize, PageCursor_Serialize, PromptKind, RedisStepState, SqlColumn_Serialize as SqlColumn, SqlObject_Serialize as SqlObject, SqlServerInfo, SqlTableInfo_Serialize as SqlTableInfo } from '~/types/bindings'
 import { useTauri } from '~/composables/useTauri'
 
 export type SqlStatus = 'connecting' | 'ready' | 'failed' | 'closed'
@@ -600,7 +600,10 @@ function setup() {
   let transferCount = 0
   const newTransferId = () => `t${++transferCount}-${Date.now()}`
   const stopTransfer = (id: string) => api.sqlTransferStop(id).catch(() => {})
-  const exportTable = (id: string, schema: string, table: string, filter: string, format: ExportFormat, header: boolean, onProgress: (p: TransferProgress) => void) => api.sqlExportTable(connId.value, id, schema, table, filter, format, header, onProgress)
+  /** A saved backup job, into its folder (D14). */
+  const backupJob = (jobId: string, id: string, onProgress: (p: TransferProgress) => void) => api.jobBackupRun(connId.value, jobId, id, onProgress).finally(() => { void useJobsStore().refresh() })
+  const saveBackupJob = (name: string) => api.jobSaveBackup(connId.value, name)
+  const exportTable = (id: string, schema: string, table: string, filter: string, format: ExportFormat, header: boolean, onProgress: (p: TransferProgress) => void, masks: MaskRule[] = []) => api.sqlExportTable(connId.value, id, schema, table, filter, format, header, masks, onProgress)
   const importPick = () => api.sqlImportPick(connId.value)
   const importPreview = (schema: string, table: string, path: string, delimiter: string, header: boolean): Promise<CsvPreview> => api.sqlImportPreview(connId.value, schema, table, path, delimiter, header)
   const importPrepare = (schema: string, table: string, path: string, delimiter: string, header: boolean, mapping: (string | null)[]) => api.sqlImportPrepare(connId.value, schema, table, path, delimiter, header, mapping)
@@ -860,7 +863,7 @@ function setup() {
     q.title = row.name
   }
 
-  return { ensureObjects, dbId, connId, status, steps, prompt, info, error, schemas, treeFilter, tabs, activeTab, current, engine, isMy, special, openSpecial, closeSpecial, activityState, refreshActivity, prepareSession, confirmSession, discardSession, newTransferId, stopTransfer, exportTable, importPick, importPreview, importPrepare, importCommit, importDiscard, backupCheck, backupStart, setView, loadStructure, addOp, removeOp, reviewStructure, applyStructure, cancelStructure, migrationText, explain, diagrams, openDiagram, loadDiagram, closeDiagram, saveExport, changeCount, setCell, toggleDelete, discardEdits, review, commitReview, cancelReview, queries, catalog, history, newQuery, closeQuery, requestCloseQuery, finishAndClose, openTransactions, confirmRun, discardRun, txn, setManual, loadCatalog, run, stop, format, loadHistory, clearHistory, save, open, retry, respond, close, toggleSchema, openTable, closeTable, loadPage, apply, refresh, nextPage, prevPage, sortBy, countExactly, select, keyOf, jump }
+  return { ensureObjects, dbId, connId, status, steps, prompt, info, error, schemas, treeFilter, tabs, activeTab, current, engine, isMy, special, openSpecial, closeSpecial, activityState, refreshActivity, prepareSession, confirmSession, discardSession, newTransferId, stopTransfer, backupJob, saveBackupJob, exportTable, importPick, importPreview, importPrepare, importCommit, importDiscard, backupCheck, backupStart, setView, loadStructure, addOp, removeOp, reviewStructure, applyStructure, cancelStructure, migrationText, explain, diagrams, openDiagram, loadDiagram, closeDiagram, saveExport, changeCount, setCell, toggleDelete, discardEdits, review, commitReview, cancelReview, queries, catalog, history, newQuery, closeQuery, requestCloseQuery, finishAndClose, openTransactions, confirmRun, discardRun, txn, setManual, loadCatalog, run, stop, format, loadHistory, clearHistory, save, open, retry, respond, close, toggleSchema, openTable, closeTable, loadPage, apply, refresh, nextPage, prevPage, sortBy, countExactly, select, keyOf, jump }
 }
 
 // One store per SQL tab, like the Redis tabs: each has its own connection, tree and open tables.

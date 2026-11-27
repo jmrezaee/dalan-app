@@ -129,11 +129,14 @@ fn obj(schema: &str, name: &str, kind: &str) -> CopyObject {
         rename: None,
         types: None,
         ddl: None,
+        masks: None,
     }
 }
 
 fn job(engine: Engine, target_db: &str, objects: Vec<CopyObject>, mode: CopyMode) -> CopyJob {
     CopyJob {
+        mask_key: [3; 32],
+        job_id: None,
         req: CopyRequest {
             target_conn_id: String::new(),
             new_database: None,
@@ -592,4 +595,106 @@ async fn l3_copy_across_engines_types_keys_related_and_routines() {
         vec!["1", "1"],
         "{got}"
     );
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_copy_masks_values_in_the_stream_on_every_path() {
+    use crate::dbs::masking::{MaskKind, MaskRule};
+    let rule = |c: &str, k: MaskKind| MaskRule {
+        column: c.into(),
+        kind: k,
+        value: None,
+    };
+    for db in ["d14_src", "d14_dst"] {
+        psql("shop", &format!("drop database if exists {db}"));
+        psql("shop", &format!("create database {db}"));
+    }
+    docker_in(
+        "dalan-test-pg",
+        &["psql", "-q", "-U", "app", "-d", "d14_src"],
+        &fixture("pg16.sql"),
+    );
+    let mut o = obj("public", "customers", "table");
+    o.masks = Some(vec![
+        rule("email", MaskKind::FakeEmail),
+        rule("name", MaskKind::FakeName),
+    ]);
+    let mut orders = obj("public", "orders", "table");
+    orders.masks = Some(vec![rule("note", MaskKind::Null)]);
+    let r = go(
+        &job(
+            Engine::Postgres,
+            "d14_dst",
+            vec![o.clone(), orders],
+            CopyMode::Create,
+        ),
+        pg("d14_src").await,
+        pg("d14_dst").await,
+        &AtomicBool::new(false),
+    )
+    .await;
+    assert_eq!(r.outcome, "done", "{r:?}");
+    let emails = psql(
+        "d14_dst",
+        "select string_agg(coalesce(email, '-'), ',' order by id) from public.customers",
+    );
+    assert!(
+        !emails.contains("ada@example.test")
+            && emails.contains("@example.test")
+            && emails.ends_with(",-"),
+        "{emails}"
+    );
+    let names = psql(
+        "d14_dst",
+        "select string_agg(name, ',' order by id) from public.customers",
+    );
+    assert!(
+        names
+            .split(',')
+            .all(|n| n.contains(' ') && !["Ada", "Bo", "Cy"].contains(&n)),
+        "{names}"
+    );
+    assert_eq!(
+        psql("d14_dst", "select count(note) from public.orders"),
+        "0"
+    );
+    assert_eq!(
+        psql("d14_dst", "select count(*) from public.orders"),
+        "4",
+        "keys and rows are untouched"
+    );
+    // PostgreSQL → MySQL with the same rules: the same key gives the same fakes on both paths.
+    docker_in(
+        "dalan-test-mysql",
+        &[
+            "mysql",
+            "-uroot",
+            "-ptest-mysql",
+            "-e",
+            "drop database if exists d14; create database d14",
+        ],
+        b"",
+    );
+    let r = go(
+        &job(Engine::Postgres, "d14", vec![o], CopyMode::Create),
+        pg("d14_src").await,
+        my(13306, "test-mysql", Some("d14")).await,
+        &AtomicBool::new(false),
+    )
+    .await;
+    assert_eq!(r.outcome, "done", "{r:?}");
+    let my_emails = docker_in(
+        "dalan-test-mysql",
+        &[
+            "mysql",
+            "-uroot",
+            "-ptest-mysql",
+            "-N",
+            "-e",
+            "select group_concat(coalesce(email, '-') order by id) from d14.customers",
+        ],
+        b"",
+    );
+    assert_eq!(my_emails, emails, "keyed: the same input, the same fake");
 }

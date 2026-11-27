@@ -988,6 +988,14 @@ async fn pick_open(
         .transpose()
 }
 
+/// An export's header row and masking rules (E5).
+#[derive(Deserialize, Type)]
+pub struct ExportOptions {
+    pub header: bool,
+    #[serde(default)]
+    pub masks: Vec<crate::dbs::masking::MaskRule>,
+}
+
 #[derive(Serialize, Type)]
 pub struct TransferDone {
     pub path: String,
@@ -1009,10 +1017,11 @@ pub async fn sql_export_table(
     table: String,
     filter: String,
     format: ExportFormat,
-    header: bool,
+    options: ExportOptions,
     progress: Channel<TransferProgress>,
 ) -> AppResult<Option<TransferDone>> {
     state.require_unlocked()?;
+    let ExportOptions { header, masks } = options;
     let my = state.sql.my(&conn_id).await?;
     let pg = if my.is_some() {
         None
@@ -1033,13 +1042,13 @@ pub async fn sql_export_table(
     let result = match (&my, &pg) {
         (Some(my), _) => {
             my.export_table(
-                &schema, &table, &filter, format, header, &mut out, &report, &stop,
+                &schema, &table, &filter, format, header, &masks, &mut out, &report, &stop,
             )
             .await
         }
         (None, Some(pg)) => {
             pg.export_table(
-                &schema, &table, &filter, format, header, &mut out, &report, &stop,
+                &schema, &table, &filter, format, header, &masks, &mut out, &report, &stop,
             )
             .await
         }
@@ -1356,7 +1365,7 @@ pub async fn sql_backup_start(
 }
 
 /// Today as YYYY-MM-DD in UTC, without a date crate.
-fn chrono_free_date() -> String {
+pub(crate) fn chrono_free_date() -> String {
     let days = (std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())

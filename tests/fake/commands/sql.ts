@@ -236,6 +236,7 @@ export const sql: Pick<Handlers, Keys> = {
     const rows = TABLES[a.table]?.rows().length ?? 0
     send(ch, { rows: Math.floor(rows / 2), bytes: 1024 })
     tag(`export:${a.table}.${a.format}`)
+    for (const mk of a.options?.masks ?? []) tag(`export-mask:${mk.column}=${mk.kind}`)
     exportsDone.push(a.table)
     return { path: `/tmp/${a.table}.${a.format}`, rows, bytes: rows * 20 }
   },

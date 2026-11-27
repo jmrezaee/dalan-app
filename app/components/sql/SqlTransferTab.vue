@@ -5,7 +5,7 @@
 // progress.
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import type { BackupInfo_Serialize as BackupInfo, CsvPreview, ExportFormat, CsvImportPending as ImportPending, TransferProgress } from '~/types/bindings'
+import type { MaskKind, BackupInfo_Serialize as BackupInfo, CsvPreview, ExportFormat, CsvImportPending as ImportPending, TransferProgress } from '~/types/bindings'
 import { cn } from '@/lib/utils'
 
 const props = defineProps<{ tabKey: string }>()
@@ -24,12 +24,14 @@ const target = computed(() => tables.value.find(t => t.id === pick.value) ?? nul
 // ---- Export
 const FORMATS: { id: ExportFormat, label: string }[] = [{ id: 'csv', label: 'CSV' }, { id: 'tsv', label: 'TSV' }, { id: 'json', label: 'JSON' }, { id: 'sql', label: 'SQL inserts' }]
 const exp = reactive({ format: 'csv' as ExportFormat, header: true, filter: '', running: false, id: '', rows: 0, bytes: 0, done: '', error: '' })
+// Masking (E5): rules for the export's columns, applied in Rust before anything is written.
+const masks = reactive<{ column: string, kind: MaskKind, value: string }[]>([])
 async function doExport() {
   const t = target.value
   if (!t || exp.running) return
   Object.assign(exp, { running: true, id: store.newTransferId(), rows: 0, bytes: 0, done: '', error: '' })
   try {
-    const r = await store.exportTable(exp.id, t.schema, t.name, exp.filter, exp.format, exp.header, (p: TransferProgress) => { exp.rows = p.rows ?? 0; exp.bytes = p.bytes ?? 0 })
+    const r = await store.exportTable(exp.id, t.schema, t.name, exp.filter, exp.format, exp.header, (p: TransferProgress) => { exp.rows = p.rows ?? 0; exp.bytes = p.bytes ?? 0 }, masks.filter(m => m.column.trim()).map(m => ({ column: m.column.trim(), kind: m.kind, value: m.value.trim() || null })))
     exp.done = r ? `Saved ${r.path} · ${fmt(r.rows ?? 0)} rows · ${mb(r.bytes ?? 0)}` : ''
   }
   catch (e) { exp.error = message(e, 'Couldn\'t export.') }
@@ -96,6 +98,31 @@ async function check() {
   catch (e) { bk.error = message(e, 'Couldn\'t check the tool.') }
 }
 onMounted(check)
+// A saved backup job (D14): run into its folder when Jobs asks, or save this backup as one.
+const job = reactive({ naming: false, name: '', saved: '' })
+watch(() => backupRequests.value.get(props.tabKey), async (id) => {
+  if (!id || bk.running) return
+  backupRequests.value.delete(props.tabKey)
+  Object.assign(bk, { running: true, id: store.newTransferId(), bytes: 0, done: '', error: '' })
+  try {
+    const r = await store.backupJob(id, bk.id, (p: TransferProgress) => { bk.bytes = p.bytes ?? 0 })
+    bk.done = `Saved ${r.path} · ${mb(r.bytes ?? 0)}`
+  }
+  catch (e) { bk.error = message(e, 'The backup failed.') }
+  bk.running = false
+}, { immediate: true })
+async function saveBackupJob() {
+  bk.error = ''
+  try {
+    const row = await store.saveBackupJob(job.name)
+    if (row) {
+      job.saved = `Saved as the job “${row.name}”. Run it from Jobs.`
+      job.naming = false
+      void useJobsStore().refresh()
+    }
+  }
+  catch (e) { bk.error = message(e, 'Couldn\'t save the job.') }
+}
 async function backup() {
   if (bk.running) return
   Object.assign(bk, { running: true, id: store.newTransferId(), bytes: 0, done: '', error: '' })
@@ -121,6 +148,15 @@ const panel = 'flex flex-col gap-3 rounded-lg border border-border bg-surface p-
         <div class="flex flex-wrap gap-1" role="group" aria-label="Format"><button v-for="f in FORMATS" :key="f.id" type="button" :aria-pressed="exp.format === f.id" :class="cn(buttonVariants({ variant: exp.format === f.id ? 'secondary' : 'ghost', size: 'sm' }))" @click="exp.format = f.id">{{ f.label }}</button></div>
         <label class="flex flex-col gap-1 text-xs text-muted">Only rows where (optional)<Input v-model="exp.filter" class="h-7 font-mono text-xs text-text" placeholder="status = 'open'" autocomplete="off" /></label>
         <label v-if="exp.format === 'csv' || exp.format === 'tsv'" class="flex items-center gap-2 text-xs"><input v-model="exp.header" type="checkbox">Header row</label>
+        <details class="text-xs" :data-testid="tid('export-masks')"><summary class="cursor-default text-muted">Mask columns{{ masks.length ? ` · ${masks.length}` : '' }}</summary>
+          <div v-for="(m, i) in masks" :key="i" class="mt-1 flex items-center gap-1">
+            <Input v-model="m.column" class="h-7 w-28 font-mono text-xs" placeholder="column" :aria-label="`Masked column ${i + 1}`" />
+            <MaskKindSelect v-model="m.kind" :label="`Masking for column ${i + 1}`" />
+            <Input v-if="['fixed', 'truncate', 'date_shift'].includes(m.kind)" v-model="m.value" class="h-7 w-20 text-xs" :placeholder="m.kind === 'fixed' ? 'value' : m.kind === 'truncate' ? 'chars' : '± days'" :aria-label="`Value for column ${i + 1}`" />
+            <Button size="sm" variant="ghost" :aria-label="`Remove rule ${i + 1}`" @click="masks.splice(i, 1)">×</Button>
+          </div>
+          <Button size="sm" variant="ghost" class="mt-1" @click="masks.push({ column: '', kind: 'hash', value: '' })">Add a rule</Button>
+        </details>
         <p class="text-xs text-muted">Saved on this computer. Big exports stream to the file instead of loading into the window.</p>
         <p v-if="exp.running" role="status" class="text-xs text-muted" data-part="progress">Writing… {{ fmt(exp.rows) }} rows · {{ mb(exp.bytes) }}</p>
         <p v-if="exp.done" role="status" class="text-xs text-success" data-part="done">{{ exp.done }}</p>
@@ -165,7 +201,9 @@ const panel = 'flex flex-col gap-3 rounded-lg border border-border bg-surface p-
         <p v-if="bk.done" role="status" class="text-xs text-success" data-part="done">{{ bk.done }}</p>
         <p v-if="bk.error" role="alert" class="text-xs text-danger" data-part="error">{{ bk.error }}</p>
         <p class="text-xs text-muted">Restore takes any dump, from Dalan or made elsewhere, into this database or a new one. You see what is inside before anything runs.</p>
-        <div class="mt-auto flex justify-end gap-2"><Button v-if="bk.running" variant="secondary" @click="store.stopTransfer(bk.id)">Stop</Button><Button variant="secondary" :disabled="bk.running" :data-testid="tid('sql-restore')" @click="restore.start(store.connId, db?.environment === 'production')">Restore…</Button><Button :disabled="bk.running || !!bk.info?.problem" @click="backup">Back up…</Button></div>
+                <div v-if="job.naming" class="flex items-center gap-2"><Input v-model="job.name" class="h-7 text-xs" placeholder="Nightly backup" aria-label="Job name" /><Button size="sm" :disabled="!job.name.trim()" :data-testid="tid('backup-save-job')" @click="saveBackupJob">Choose folder and save</Button></div>
+        <p v-if="job.saved" role="status" class="text-xs text-success">{{ job.saved }}</p>
+<div class="mt-auto flex justify-end gap-2"><Button v-if="bk.running" variant="secondary" @click="store.stopTransfer(bk.id)">Stop</Button><Button variant="ghost" :disabled="bk.running || !!bk.info?.problem" @click="job.naming = !job.naming">Save as a job…</Button><Button variant="secondary" :disabled="bk.running" :data-testid="tid('sql-restore')" @click="restore.start(store.connId, db?.environment === 'production')">Restore…</Button><Button :disabled="bk.running || !!bk.info?.problem" @click="backup">Back up…</Button></div>
       </section>
     </div>
 

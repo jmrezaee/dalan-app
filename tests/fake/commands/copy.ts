@@ -1,11 +1,12 @@
 // Copy between databases (D13, S49, F32). The fake moves no rows: it plans from the made-up schema (every
 // PostgreSQL database has the same tables, so a target that isn't new already has them) and keeps the gate's rules.
 import { fail, type Handlers } from '../types'
+import { recordJobRun } from './jobs'
 import type { CopyObject_Deserialize, CopyPlan_Serialize, CopyReport_Serialize, CopyRequest_Deserialize, CopyTablePlan_Serialize } from '../../../app/types/bindings'
 
 type Keys = 'copyPrepare' | 'copyCommit' | 'copyRelated'
 
-const held = new Map<string, { connId: string, typed: string, plan: CopyPlan_Serialize, slow: boolean }>()
+const held = new Map<string, { connId: string, typed: string, plan: CopyPlan_Serialize, slow: boolean, jobId: string | null }>()
 const stops = new Set<string>()
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 const EXISTING = ['customers', 'orders', 'order_items', 'open_orders', 'no_key']
@@ -30,7 +31,7 @@ export const copy: Pick<Handlers, Keys> = {
     if (dst.environment === 'production' && dst.write_mode !== 'open') fail('db_read_only_mode', `${dst.name} is a production database. To copy into it, switch it to Open first (that needs the master password).`)
     const newDb = (r.new_database ?? '').trim()
     const targetDb = newDb || dst.default_database || 'app'
-    tag(`copy-request:${JSON.stringify({ objects: r.objects.map((o: CopyObject_Deserialize) => o.rename ? `${o.name}>${o.rename}` : o.name), mode: r.mode, content: r.content, newDb, routines: r.routines ?? false, types: r.objects.flatMap((o: CopyObject_Deserialize) => (o.types ?? []).map(t => `${o.name}.${t.name}=${t.target_type}`)), ddl: r.objects.some((o: CopyObject_Deserialize) => !!o.ddl) })}`)
+    tag(`copy-request:${JSON.stringify({ masks: r.objects.flatMap((o: CopyObject_Deserialize) => (o.masks ?? []).map(x => `${o.name}.${x.column}=${x.kind}`)), objects: r.objects.map((o: CopyObject_Deserialize) => o.rename ? `${o.name}>${o.rename}` : o.name), mode: r.mode, content: r.content, newDb, routines: r.routines ?? false, types: r.objects.flatMap((o: CopyObject_Deserialize) => (o.types ?? []).map(t => `${o.name}.${t.name}=${t.target_type}`)), ddl: r.objects.some((o: CopyObject_Deserialize) => !!o.ddl) })}`)
     const tables: CopyTablePlan_Serialize[] = r.objects.map((o: CopyObject_Deserialize) => {
       const to = o.rename || o.name
       const exists = !newDb && EXISTING.includes(to)
@@ -42,7 +43,7 @@ export const copy: Pick<Handlers, Keys> = {
         : []
       const ddl = columns.length ? (o.ddl ?? `create table ${to} (\n${columns.map(c => `  ${c.name} ${c.target_type}`).join(',\n')},\n  primary key (id)\n) engine=InnoDB default charset=utf8mb4`) : null
       if (o.ddl && !/^\s*create\s+table\b/i.test(o.ddl)) fail('validation', 'The edited DDL must be one CREATE TABLE statement and nothing else.')
-      return { source: `${o.schema}.${o.name}`, target: cross && dst.engine === 'postgres' ? `public.${to}` : (cross ? to : `${o.schema}.${to}`), kind: o.kind, exists: cross ? false : exists, action, rows_estimate: o.limit ?? ROWS[o.name] ?? null, columns, ddl }
+      return { source: `${o.schema}.${o.name}`, target: cross && dst.engine === 'postgres' ? `public.${to}` : (cross ? to : `${o.schema}.${to}`), kind: o.kind, exists: cross ? false : exists, action, rows_estimate: o.limit ?? ROWS[o.name] ?? null, columns, ddl, column_names: o.kind === 'table' ? ['id', 'name', 'email'] : [], suggested_masks: o.kind === 'table' && !(o.masks ?? []).some(x => x.column === 'email') ? [{ table: o.name, column: 'email', kind: 'fake_email' as const }] : [] }
     })
     const there = tables.filter(t => t.exists && r.mode === 'create' && r.content !== 'data').map(t => t.target)
     const missing = tables.filter(t => !t.exists && ['empty', 'append', 'upsert'].includes(r.mode)).map(t => t.target)
@@ -58,12 +59,12 @@ export const copy: Pick<Handlers, Keys> = {
       target_db: targetDb,
       new_database: !!newDb,
       tables,
-      warnings: src.environment === 'production' && dst.environment !== 'production' ? [`Copying production data to ${dst.name}. Masking arrives later; check what the tables hold.`] : [],
+      warnings: src.environment === 'production' && dst.environment !== 'production' && !r.objects.some((o: CopyObject_Deserialize) => (o.masks ?? []).length) ? [`Copying production data to ${dst.name} with no masking. Add rules?`] : [],
       snapshot: src.engine !== 'mongodb',
     }
     if (!plan.blocked) {
       const id = `copy-${held.size + 1}-${Date.now()}`
-      held.set(id, { connId: a.connId, typed: dst.name, plan, slow: m.restoreNext === 'slow' })
+      held.set(id, { connId: a.connId, typed: dst.name, plan, slow: m.restoreNext === 'slow', jobId: a.jobId ?? null })
       plan.pending_id = id
     }
     return plan
@@ -74,7 +75,7 @@ export const copy: Pick<Handlers, Keys> = {
     const have = new Set(a.objects.map((o: CopyObject_Deserialize) => o.name))
     const out = new Set<string>()
     for (const o of a.objects as CopyObject_Deserialize[]) for (const r of refs[o.name] ?? []) if (!have.has(r)) out.add(r)
-    return [...out].map(name => ({ schema: 'public', name, kind: 'table', filter: null, limit: null, rename: null, types: null, ddl: null }))
+    return [...out].map(name => ({ schema: 'public', name, kind: 'table', filter: null, limit: null, rename: null, types: null, ddl: null, masks: null }))
   },
   copyCommit: async (a, { channel, send, tag }) => {
     const h = held.get(a.pendingId)
@@ -103,6 +104,7 @@ export const copy: Pick<Handlers, Keys> = {
     }
     if (report.tables.some(t => t.status === 'failed')) report.outcome = 'partial'
     tag(`copy:${h.plan.target_db}`)
+    recordJobRun(h.jobId, report.outcome === 'done' ? 'ok' : 'failed', report.tables.reduce((n, t) => n + (t.rows ?? 0), 0), report.tables.map(t => `${t.source} → ${t.target}: ${t.status}`).join('\n'))
     return report
   },
 }

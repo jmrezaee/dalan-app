@@ -3,6 +3,7 @@
 // refuses, an existing production database needs Open, an existing database is typed, a new one is a confirm
 // (typed on production).
 import { fail, type Handlers } from '../types'
+import { recordJobRun } from './jobs'
 import type { DumpInfo_Serialize, RestorePlan_Serialize } from '../../../app/types/bindings'
 
 type Keys = 'restorePick' | 'restorePrepare' | 'restoreCommit' | 'restoreForget' | 'restoreSaveDatabase'
@@ -11,7 +12,7 @@ const held = new Map<string, { connId: string, typed: string, target: string, ne
 const stops = new Set<string>()
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
-function dumpFor(engine: string, kind: string, folder: boolean): DumpInfo_Serialize {
+export function dumpFor(engine: string, kind: string, folder: boolean): DumpInfo_Serialize {
   const mongo = engine === 'mongodb'
   const my = engine === 'mysql' || engine === 'mariadb'
   const base: DumpInfo_Serialize = {
@@ -118,6 +119,7 @@ export const restore: Pick<Handlers, Keys> = {
       await sleep(h.slow ? 100 : 10)
     }
     tag(`restore:${h.target}`)
+    recordJobRun(a.jobId, 'ok', null, `restore into ${h.target}: done, 12 objects`)
     return {
       outcome: 'done',
       message: null,

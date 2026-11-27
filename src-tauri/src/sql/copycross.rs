@@ -966,9 +966,19 @@ async fn one(
                         return Err(stopped());
                     }
                     partial.extend_from_slice(&chunk);
+                    let mut lines: Vec<Vec<Option<String>>> = Vec::new();
                     while let Some(p) = partial.iter().position(|b| *b == b'\n') {
                         let line: Vec<u8> = partial.drain(..=p).collect();
-                        let f = copy_fields(&line);
+                        lines.push(copy_fields(&line));
+                    }
+                    if let Some(m) = super::copy::masker(
+                        job,
+                        o,
+                        &cols.iter().map(|c| c.name.clone()).collect::<Vec<_>>(),
+                    ) {
+                        m.batch(&mut lines);
+                    }
+                    for f in lines {
                         let vals = f
                             .iter()
                             .zip(&cols)
@@ -1059,6 +1069,14 @@ async fn one(
                         return Err(stopped());
                     }
                     let mut buf = String::new();
+                    let mut page = page;
+                    if let Some(m) = super::copy::masker(
+                        job,
+                        o,
+                        &cols.iter().map(|c| c.name.clone()).collect::<Vec<_>>(),
+                    ) {
+                        m.batch(&mut page);
+                    }
                     for row in &page {
                         let line = row
                             .iter()

@@ -149,7 +149,7 @@ export const commands = {
 	 *  Writes a table (or the rows matching `filter`) to a file the person picks. Rows stream to the file; progress
 	 *  arrives on `progress`. `None` when the save dialog was cancelled.
 	 */
-	sqlExportTable: (connId: string, transferId: string, schema: string, table: string, filter: string, format: ExportFormat, header: boolean, progress: Channel<TransferProgress>) => typedError<TransferDone | null, AppError>(__TAURI_INVOKE("sql_export_table", { connId, transferId, schema, table, filter, format, header, progress })),
+	sqlExportTable: (connId: string, transferId: string, schema: string, table: string, filter: string, format: ExportFormat, options: ExportOptions_Deserialize, progress: Channel<TransferProgress>) => typedError<TransferDone | null, AppError>(__TAURI_INVOKE("sql_export_table", { connId, transferId, schema, table, filter, format, options, progress })),
 	/**  Stop for an export, a backup or a restore. */
 	sqlTransferStop: (transferId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_transfer_stop", { transferId })),
 	/**  The open-file dialog for an import. Rust keeps the path; the window only shows the name. */
@@ -173,7 +173,7 @@ export const commands = {
 	/**  Plans the restore and, unless something blocks it, holds it for the confirmation. */
 	restorePrepare: (connId: string, dumpId: string, options: RestoreOptions_Deserialize) => typedError<RestorePlan_Serialize, AppError>(__TAURI_INVOKE("restore_prepare", { connId, dumpId, options })),
 	/**  Runs the held restore once the confirmation (typed when the review asked for it) arrives and the mode is asked again. */
-	restoreCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, progress: Channel<RestoreProgress_Deserialize>) => typedError<RestoreResult_Serialize, AppError>(__TAURI_INVOKE("restore_commit", { connId, pendingId, typedName, transferId, progress })),
+	restoreCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, progress: Channel<RestoreProgress_Deserialize>, jobId: string | null) => typedError<RestoreResult_Serialize, AppError>(__TAURI_INVOKE("restore_commit", { connId, pendingId, typedName, transferId, progress, jobId })),
 	/**  The dump isn't needed any more (the dialog closed): its unpacked folder, if any, goes with it. */
 	restoreForget: (connId: string, dumpId: string) => typedError<null, AppError>(__TAURI_INVOKE("restore_forget", { connId, dumpId })),
 	/**
@@ -182,7 +182,7 @@ export const commands = {
 	 */
 	restoreSaveDatabase: (connId: string, database: string) => typedError<DatabaseRow_Serialize, AppError>(__TAURI_INVOKE("restore_save_database", { connId, database })),
 	/**  Plans the copy and, unless something blocks it, holds it for the confirmation. */
-	copyPrepare: (connId: string, request: CopyRequest_Deserialize) => typedError<CopyPlan_Serialize, AppError>(__TAURI_INVOKE("copy_prepare", { connId, request })),
+	copyPrepare: (connId: string, request: CopyRequest_Deserialize, jobId: string | null) => typedError<CopyPlan_Serialize, AppError>(__TAURI_INVOKE("copy_prepare", { connId, request, jobId })),
 	/**  Runs the held copy once confirmed (typed when the review asked), with the target's mode asked again. */
 	copyCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, progress: Channel<CopyProgress_Deserialize>) => typedError<CopyReport_Serialize, AppError>(__TAURI_INVOKE("copy_commit", { connId, pendingId, typedName, transferId, progress })),
 	/**
@@ -190,6 +190,21 @@ export const commands = {
 	 *  its keys. Returns them (the chosen ones not repeated).
 	 */
 	copyRelated: (connId: string, objects: CopyObject_Deserialize[]) => typedError<CopyObject_Serialize[], AppError>(__TAURI_INVOKE("copy_related", { connId, objects })),
+	jobsList: () => typedError<JobRow_Serialize[], AppError>(__TAURI_INVOKE("jobs_list")),
+	jobRuns: (jobId: string) => typedError<JobRun_Serialize[], AppError>(__TAURI_INVOKE("job_runs", { jobId })),
+	jobRename: (jobId: string, name: string) => typedError<null, AppError>(__TAURI_INVOKE("job_rename", { jobId, name })),
+	jobDelete: (jobId: string) => typedError<null, AppError>(__TAURI_INVOKE("job_delete", { jobId })),
+	/**  Saves the copy set up in this tab's Copy view (its target is the other tab's saved database). */
+	jobSaveCopy: (connId: string, name: string, request: CopyRequest_Deserialize) => typedError<JobRow_Serialize, AppError>(__TAURI_INVOKE("job_save_copy", { connId, name, request })),
+	/**  Saves the restore set up in this tab's restore dialog: the dump's path (it stays in Rust) and the options. */
+	jobSaveRestore: (connId: string, dumpId: string, name: string, options: RestoreOptions_Deserialize) => typedError<JobRow_Serialize, AppError>(__TAURI_INVOKE("job_save_restore", { connId, dumpId, name, options })),
+	/**  Saves a backup of this tab's database into a folder chosen now (`None` when the dialog was cancelled). */
+	jobSaveBackup: (connId: string, name: string) => typedError<JobRow_Serialize | null, AppError>(__TAURI_INVOKE("job_save_backup", { connId, name })),
+	jobSetup: (jobId: string) => typedError<JobSetup_Serialize, AppError>(__TAURI_INVOKE("job_setup", { jobId })),
+	/**  A saved restore's dump, read again from where it was (it may have changed since: the safety scan runs again). */
+	restorePickJob: (connId: string, jobId: string) => typedError<DumpInfo_Serialize, AppError>(__TAURI_INVOKE("restore_pick_job", { connId, jobId })),
+	/**  Runs a saved backup into its folder: `<database>-<job>-<yyyy-mm-dd-hhmm>.<ext>`. Recorded as a run. */
+	jobBackupRun: (connId: string, jobId: string, transferId: string, progress: Channel<TransferProgress>) => typedError<TransferDone, AppError>(__TAURI_INVOKE("job_backup_run", { connId, jobId, transferId, progress })),
 	/**  Stop: the running statement is cancelled by the server (a second connection), and no further statement starts. */
 	sqlCancel: (connId: string, editorId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_cancel", { connId, editorId })),
 	/**  The editor tab closed. */
@@ -717,6 +732,8 @@ export type CopyObject_Deserialize = {
 	types?: CopyColumnType[] | null,
 	/**  Between PostgreSQL and MySQL/MariaDB: the `create table` the person edited (checked again before it runs). */
 	ddl?: string | null,
+	/**  Masking rules for its columns (E5): applied in the stream, before anything reaches the target. */
+	masks?: MaskRule_Deserialize[] | null,
 };
 
 /**
@@ -738,6 +755,8 @@ export type CopyObject_Serialize = {
 	types: CopyColumnType[] | null,
 	/**  Between PostgreSQL and MySQL/MariaDB: the `create table` the person edited (checked again before it runs). */
 	ddl: string | null,
+	/**  Masking rules for its columns (E5): applied in the stream, before anything reaches the target. */
+	masks: MaskRule_Serialize[] | null,
 };
 
 export type CopyPlan = CopyPlan_Serialize | CopyPlan_Deserialize;
@@ -869,6 +888,10 @@ export type CopyTablePlan_Deserialize = {
 	/**  Between PostgreSQL and MySQL/MariaDB: each column's mapping, and the `create table` that will run. */
 	columns: CopyColumn_Deserialize[],
 	ddl?: string | null,
+	/**  Every column (or a document's top-level fields), for masking rules. */
+	column_names: string[],
+	/**  Columns that look personal and have no rule yet. */
+	suggested_masks: MaskSuggestion[],
 };
 
 export type CopyTablePlan_Serialize = {
@@ -882,6 +905,10 @@ export type CopyTablePlan_Serialize = {
 	/**  Between PostgreSQL and MySQL/MariaDB: each column's mapping, and the `create table` that will run. */
 	columns: CopyColumn_Serialize[],
 	ddl: string | null,
+	/**  Every column (or a document's top-level fields), for masking rules. */
+	column_names: string[],
+	/**  Columns that look personal and have no rule yet. */
+	suggested_masks: MaskSuggestion[],
 };
 
 export type CopyTableReport = CopyTableReport_Serialize | CopyTableReport_Deserialize;
@@ -1393,6 +1420,21 @@ export type ExplainPlan_Serialize = {
 };
 
 export type ExportFormat = "csv" | "tsv" | "json" | "sql";
+
+/**  An export's header row and masking rules (E5). */
+export type ExportOptions = ExportOptions_Serialize | ExportOptions_Deserialize;
+
+/**  An export's header row and masking rules (E5). */
+export type ExportOptions_Deserialize = {
+	header: boolean,
+	masks?: MaskRule_Deserialize[],
+};
+
+/**  An export's header row and masking rules (E5). */
+export type ExportOptions_Serialize = {
+	header: boolean,
+	masks: MaskRule_Serialize[],
+};
 
 export type FailKind = "error" | "timeout" | "cancelled";
 
@@ -1937,6 +1979,87 @@ export type Inherited_Serialize = {
 	startup_snippet: InheritedText | null,
 };
 
+export type JobKind = "backup" | "restore" | "copy";
+
+export type JobRow = JobRow_Serialize | JobRow_Deserialize;
+
+export type JobRow_Deserialize = {
+	id: string,
+	name: string,
+	kind: JobKind,
+	source_database_id?: string | null,
+	source_name?: string | null,
+	target_database_id?: string | null,
+	target_name?: string | null,
+	/**  What it does, in words ("3 tables from shop to staging, masked"), from the plan. */
+	summary: string,
+	created_at: number | null,
+	last_run?: JobRun_Deserialize | null,
+};
+
+export type JobRow_Serialize = {
+	id: string,
+	name: string,
+	kind: JobKind,
+	source_database_id: string | null,
+	source_name: string | null,
+	target_database_id: string | null,
+	target_name: string | null,
+	/**  What it does, in words ("3 tables from shop to staging, masked"), from the plan. */
+	summary: string,
+	created_at: number | null,
+	last_run: JobRun_Serialize | null,
+};
+
+export type JobRun = JobRun_Serialize | JobRun_Deserialize;
+
+export type JobRun_Deserialize = {
+	id: string,
+	started_at: number | null,
+	ended_at?: number | null,
+	/**  `ok`, `failed`, `stopped` or `missed`. */
+	status: string,
+	rows?: number | null,
+	bytes?: number | null,
+	warnings: number | null,
+	log: string,
+};
+
+export type JobRun_Serialize = {
+	id: string,
+	started_at: number | null,
+	ended_at: number | null,
+	/**  `ok`, `failed`, `stopped` or `missed`. */
+	status: string,
+	rows: number | null,
+	bytes: number | null,
+	warnings: number | null,
+	log: string,
+};
+
+/**  What the window needs to set a saved job up for its review (never a path or the masking key). */
+export type JobSetup = JobSetup_Serialize | JobSetup_Deserialize;
+
+/**  What the window needs to set a saved job up for its review (never a path or the masking key). */
+export type JobSetup_Deserialize = {
+	kind: JobKind,
+	source_database_id?: string | null,
+	target_database_id?: string | null,
+	copy?: CopyRequest_Deserialize | null,
+	restore?: RestoreOptions_Deserialize | null,
+	file_name?: string | null,
+};
+
+/**  What the window needs to set a saved job up for its review (never a path or the masking key). */
+export type JobSetup_Serialize = {
+	kind: JobKind,
+	source_database_id: string | null,
+	target_database_id: string | null,
+	copy: CopyRequest_Serialize | null,
+	restore: RestoreOptions_Serialize | null,
+	file_name: string | null,
+};
+
 export type KeyKind = "ed25519" | "ecdsa_p256" | "ecdsa_p384" | "ecdsa_p521" | "rsa4096";
 
 export type KeyPart = {
@@ -2063,6 +2186,39 @@ export type LogSummary_Serialize = {
 	size_bytes: number | null,
 	bookmarked: boolean,
 	comment: string | null,
+};
+
+export type MaskKind = "keep" | "null" | 
+/**  `value` in every row. */
+"fixed" | "fake_email" | "fake_name" | "fake_phone" | "fake_address" | "fake_iban" | 
+/**  Same shape (digits stay digits, letters letters), keyed: joins survive. */
+"hash" | 
+/**  The column's values, shuffled within each batch of rows. */
+"shuffle" | 
+/**  The first `value` characters. */
+"truncate" | 
+/**  Dates moved by up to ± `value` days (the same value moves the same way). */
+"date_shift";
+
+export type MaskRule = MaskRule_Serialize | MaskRule_Deserialize;
+
+export type MaskRule_Deserialize = {
+	column: string,
+	kind: MaskKind,
+	value?: string | null,
+};
+
+export type MaskRule_Serialize = {
+	column: string,
+	kind: MaskKind,
+	value: string | null,
+};
+
+/**  A column that looks personal, and the rule Dalan suggests for it. */
+export type MaskSuggestion = {
+	table: string,
+	column: string,
+	kind: MaskKind,
 };
 
 export type MgAggRequest = MgAggRequest_Serialize | MgAggRequest_Deserialize;

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The app shell: tab bar, the Vault sections (S02 Hosts and the rest), terminals kept mounted, and the global shortcuts.
-import { ScrollText, ArrowDownUp, Code2, Copy, Database, LayoutGrid, KeyRound, Lock, Server, Settings, ShieldCheck, Star, Trash2, Vault, Waypoints } from '@lucide/vue'
+import { ListChecks, ScrollText, ArrowDownUp, Code2, Copy, Database, LayoutGrid, KeyRound, Lock, Server, Settings, ShieldCheck, Star, Trash2, Vault, Waypoints } from '@lucide/vue'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { buttonVariants } from '@/components/ui/button'
 import type { Session } from '~/stores/sessions'
@@ -16,11 +16,12 @@ const forwardsStore = useForwardsStore()
 const quitStore = useQuitStore()
 const redisDatabases = useRedisDatabasesStore()
 const databasesStore = useDatabasesStore()
+const jobsStore = useJobsStore()
 const linksStore = useLinksStore()
 const workspaces = useWorkspacesStore()
 const workspaceView = ref<{ askSave: () => void }[] | null>(null)
 const settings = useSettingsStore()
-const section = ref<'hosts' | 'keychain' | 'databases' | 'forwards' | 'snippets' | 'saved' | 'logs' | 'known-hosts' | 'settings'>('hosts')
+const section = ref<'hosts' | 'keychain' | 'databases' | 'jobs' | 'forwards' | 'snippets' | 'saved' | 'logs' | 'known-hosts' | 'settings'>('hosts')
 const paletteOpen = ref(false)
 const knownHosts = ref<{ refresh: () => void } | null>(null)
 onMounted(() => {
@@ -31,6 +32,7 @@ onMounted(() => {
   workspaces.refresh()
   redisDatabases.refresh()
   databasesStore.refreshSaved()
+  void jobsStore.refresh()
   forwardsStore.watch()
   quitStore.watch()
   linksStore.watch()
@@ -56,6 +58,7 @@ const nav = computed(() => [
   { id: 'forwards', label: 'Port forwarding', icon: Waypoints, count: forwardsStore.rules.length },
   { id: 'snippets', label: 'Snippets', icon: Code2, count: snippetsStore.snippets.length },
   { id: 'saved', label: 'Saved queries', icon: Star, count: databasesStore.saved.length },
+  { id: 'jobs', label: 'Jobs', icon: ListChecks, count: jobsStore.rows.length },
   { id: 'logs', label: 'Logs', icon: ScrollText },
   { id: 'known-hosts', label: 'Known hosts', icon: ShieldCheck },
 ])
@@ -285,6 +288,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
           <ForwardsView v-else-if="section === 'forwards'" />
           <SnippetsView v-else-if="section === 'snippets'" />
           <SavedQueriesView v-else-if="section === 'saved'" />
+          <JobsView v-else-if="section === 'jobs'" />
           <LogsView v-else-if="section === 'logs'" @settings="go('settings')" />
           <SettingsView v-else-if="section === 'settings'" />
           <HostsView v-else />

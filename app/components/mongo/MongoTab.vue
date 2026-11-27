@@ -12,6 +12,25 @@ const databases = useDatabasesStore()
 const hosts = useHostsStore()
 
 const db = computed(() => databases.rows.find(d => d.id === props.dbId) ?? null)
+// A saved job being run (D14): once connected, this tab takes its part (the review still asks, built fresh).
+const sessionsForJobs = useSessionsStore()
+watch(() => store.status === 'ready' && jobRequests.value.has(props.dbId), (go) => {
+  if (!go) return
+  const r = jobRequests.value.get(props.dbId)!
+  jobRequests.value.delete(props.dbId)
+  if (r.kind === 'copy' && r.copy) {
+    store.openCopy()
+    useCopyStore(props.tabKey).loadJob(r.jobId, r.copy, sessionsForJobs.sessions.find(s => s.dbId === r.targetDbId)?.key ?? '')
+  }
+  else if (r.kind === 'restore') {
+    store.openTransfer()
+    void useRestoreStore(props.tabKey).startJob(store.connId, r.jobId, r.restore, db.value?.environment === 'production')
+  }
+  else {
+    store.openTransfer()
+    backupRequests.value.set(props.tabKey, r.jobId)
+  }
+}, { immediate: true })
 // "Copy to…" from the database list (S49): once connected, the Copy tab opens.
 watch(() => store.status === 'ready' && copyRequests.value.has(props.dbId), (go) => {
   if (!go) return

@@ -1,12 +1,12 @@
 import { defineStore } from 'pinia'
-import type { CopyContent, CopyMode, CopyObject_Deserialize as CopyObject, CopyPlan_Serialize as CopyPlan, CopyProgress_Serialize as CopyProgress, CopyReport_Serialize as CopyReport } from '~/types/bindings'
+import type { MaskKind, CopyRequest_Serialize as SavedRequest, CopyContent, CopyMode, CopyObject_Deserialize as CopyObject, CopyPlan_Serialize as CopyPlan, CopyProgress_Serialize as CopyProgress, CopyReport_Serialize as CopyReport } from '~/types/bindings'
 import { useTauri } from '~/composables/useTauri'
 
 /** S49's steps: choose (source, target, objects, options), review, progress, report. */
 export type CopyStep = 'choose' | 'review' | 'progress' | 'report'
 
 /** One object of the source as the Copy tab shows it, with what the person set for it. */
-export interface CopyPick { schema: string, name: string, kind: string, checked: boolean, rename: string, filter: string, limit: string, /** Between engines: target types chosen in the review, by column. */ types: Record<string, string>, /** Between engines: the edited DDL (`null`: the generated one). */ ddl: string | null }
+export interface CopyPick { schema: string, name: string, kind: string, checked: boolean, rename: string, filter: string, limit: string, /** Between engines: target types chosen in the review, by column. */ types: Record<string, string>, /** Between engines: the edited DDL (`null`: the generated one). */ ddl: string | null, /** Masking rules by column (E5). */ masks: Record<string, { kind: MaskKind, value: string }> }
 
 const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : (e as { message?: string })?.message ?? fallback)
 export const pickKey = (p: { schema: string, name: string }) => `${p.schema}\u0000${p.name}`
@@ -27,6 +27,10 @@ function setup() {
   const stopOnError = ref(true)
   const routines = ref(false)
   const lastTarget = ref('')
+  /** The saved job being run (its masking key and its run record live in Rust), and whether to plan it at once. */
+  const jobId = ref<string | null>(null)
+  const autoReview = ref(false)
+  const saved = ref('')
   const busy = ref(false)
   const error = ref('')
   const plan = ref<CopyPlan | null>(null)
@@ -40,7 +44,7 @@ function setup() {
   function offer(objects: { schema: string, name: string, kind: string }[]) {
     for (const o of objects) {
       const k = pickKey(o)
-      if (!picks.value[k]) picks.value[k] = { ...o, checked: false, rename: '', filter: '', limit: '', types: {}, ddl: null }
+      if (!picks.value[k]) picks.value[k] = { ...o, checked: false, rename: '', filter: '', limit: '', types: {}, ddl: null, masks: {} }
     }
   }
 
@@ -59,6 +63,7 @@ function setup() {
         rename: p.rename.trim() || null,
         types: Object.keys(p.types).length ? Object.entries(p.types).map(([name, target_type]) => ({ name, target_type })) : null,
         ddl: p.ddl?.trim() || null,
+        masks: Object.entries(p.masks).filter(([, m]) => m.kind !== 'keep').map(([column, m]) => ({ column, kind: m.kind, value: m.value.trim() || null })),
       })),
       mode: mode.value,
       content: content.value,
@@ -72,7 +77,7 @@ function setup() {
     error.value = ''
     busy.value = true
     try {
-      plan.value = await api.copyPrepare(sourceConnId, request(targetConnId))
+      plan.value = await api.copyPrepare(sourceConnId, request(targetConnId), jobId.value)
       typed.value = ''
       step.value = 'review'
     }
@@ -90,6 +95,7 @@ function setup() {
     step.value = 'progress'
     try {
       report.value = await api.copyCommit(sourceConnId, p.pending_id, p.level === 'typed' ? typed.value : null, transferId.value, (x) => { progress.value = x })
+      if (jobId.value) void useJobsStore().refresh()
       step.value = 'report'
     }
     catch (e) {
@@ -110,6 +116,46 @@ function setup() {
     catch (e) { error.value = message(e, 'Couldn\'t follow the foreign keys.') }
   }
 
+  /** Sets a saved copy up as it was saved; the tab plans it as soon as its target is connected. */
+  function loadJob(id: string, req: SavedRequest, target: string) {
+    reset()
+    for (const p of Object.values(picks.value)) p.checked = false
+    offer(req.objects)
+    for (const o of req.objects) {
+      const p = picks.value[pickKey(o)]!
+      Object.assign(p, {
+        checked: true,
+        rename: o.rename ?? '',
+        filter: o.filter ?? '',
+        limit: o.limit === null || o.limit === undefined ? '' : String(o.limit),
+        types: Object.fromEntries((o.types ?? []).map(t => [t.name, t.target_type])),
+        ddl: o.ddl ?? null,
+        masks: Object.fromEntries((o.masks ?? []).map(m => [m.column, { kind: m.kind, value: m.value ?? '' }])),
+      })
+    }
+    mode.value = req.mode
+    content.value = req.content
+    stopOnError.value = req.stop_on_error
+    routines.value = req.routines ?? false
+    targetNew.value = !!req.new_database
+    newName.value = req.new_database ?? ''
+    targetKey.value = target
+    jobId.value = id
+    autoReview.value = true
+  }
+
+  /** Saves what is set up now as a job (its target is the chosen tab's saved database). */
+  async function saveJob(sourceConnId: string, targetConnId: string, name: string) {
+    error.value = ''
+    saved.value = ''
+    try {
+      const row = await api.jobSaveCopy(sourceConnId, name, request(targetConnId))
+      saved.value = `Saved as the job “${row.name}”. Run it again from Jobs.`
+      void useJobsStore().refresh()
+    }
+    catch (e) { error.value = message(e, 'Couldn\'t save the job.') }
+  }
+
   const stop = () => api.sqlTransferStop(transferId.value).catch(() => {})
 
   /** "Run again from the failed table": that table and the ones after it, the same options. */
@@ -127,13 +173,14 @@ function setup() {
   }
 
   function reset() {
+    saved.value = ''
     step.value = 'choose'
     plan.value = null
     report.value = null
     error.value = ''
   }
 
-  return { routines, lastTarget, selectRelated, step, targetKey, targetNew, newName, picks, mode, content, stopOnError, busy, error, plan, typed, progress, report, startedAt, chosen, offer, review, commit, stop, again, reset }
+  return { jobId, autoReview, saved, loadJob, saveJob, routines, lastTarget, selectRelated, step, targetKey, targetNew, newName, picks, mode, content, stopOnError, busy, error, plan, typed, progress, report, startedAt, chosen, offer, review, commit, stop, again, reset }
 }
 
 const makeStore = (key: string) => defineStore(`copy:${key}`, setup)

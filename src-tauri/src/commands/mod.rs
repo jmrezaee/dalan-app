@@ -9,6 +9,7 @@ pub mod env;
 pub mod history;
 pub mod hosts;
 pub mod import;
+pub mod jobs;
 pub mod keychain;
 pub mod logs;
 pub mod mongo;

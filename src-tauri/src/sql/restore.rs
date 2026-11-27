@@ -29,7 +29,7 @@ use crate::error::{AppError, AppResult, ErrorCode};
 use crate::ssh::Connected;
 
 /// What the person chose in "Target and options".
-#[derive(Debug, Clone, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct RestoreOptions {
     /// `Some(name)`: create this database on the same server and restore into it. `None`: the tab's database.
     pub new_database: Option<String>,
@@ -55,7 +55,7 @@ pub struct RestoreOptions {
     pub disable_triggers: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct RenameSchema {
     pub from: String,
     pub to: String,

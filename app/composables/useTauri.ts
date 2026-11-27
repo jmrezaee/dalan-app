@@ -2,7 +2,7 @@
 import { Channel } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { commands } from '~/types/bindings'
-import type { CodeLanguage, MgAggRequest, MgDocOp, MgFindRequest, MgIndexOp, MgStage, AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, SqlRunEvent_Serialize, RunMode, TxnAction, GridEdits_Deserialize, StructureOp_Deserialize, TableRef, ActivityView, SessionAction, ExportFormat, TransferProgress, RestoreOptions_Deserialize as RestoreOptions, CopyRequest_Deserialize as CopyRequest, CopyObject_Deserialize as CopyObject, CopyProgress_Serialize as CopyProgress, RestoreProgress_Serialize as RestoreProgress, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
+import type { CodeLanguage, MgAggRequest, MgDocOp, MgFindRequest, MgIndexOp, MgStage, AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, SqlRunEvent_Serialize, RunMode, TxnAction, GridEdits_Deserialize, StructureOp_Deserialize, TableRef, ActivityView, SessionAction, ExportFormat, TransferProgress, RestoreOptions_Deserialize as RestoreOptions, CopyRequest_Deserialize as CopyRequest, CopyObject_Deserialize as CopyObject, MaskRule_Deserialize as MaskRule, CopyProgress_Serialize as CopyProgress, RestoreProgress_Serialize as RestoreProgress, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -98,10 +98,10 @@ export function useTauri() {
     sqlSessionPrepare: (connId: string, pid: number, action: SessionAction) => unwrap(commands.sqlSessionPrepare(connId, pid, action)),
     sqlSessionCommit: (connId: string, pendingId: string, typedName: string | null) => unwrap(commands.sqlSessionCommit(connId, pendingId, typedName)),
     sqlSessionDiscard: (connId: string, pendingId: string) => unwrap(commands.sqlSessionDiscard(connId, pendingId)),
-    sqlExportTable: (connId: string, transferId: string, schema: string, table: string, filter: string, format: ExportFormat, header: boolean, onProgress: (p: TransferProgress) => void) => {
+    sqlExportTable: (connId: string, transferId: string, schema: string, table: string, filter: string, format: ExportFormat, header: boolean, masks: MaskRule[], onProgress: (p: TransferProgress) => void) => {
       const progress = new Channel<TransferProgress>()
       progress.onmessage = onProgress
-      return unwrap(commands.sqlExportTable(connId, transferId, schema, table, filter, format, header, progress as never))
+      return unwrap(commands.sqlExportTable(connId, transferId, schema, table, filter, format, { header, masks }, progress as never))
     },
     sqlTransferStop: (transferId: string) => unwrap(commands.sqlTransferStop(transferId)),
     sqlImportPick: (connId: string) => unwrap(commands.sqlImportPick(connId)),
@@ -118,14 +118,29 @@ export function useTauri() {
     // D12 (S48, F31): restore any dump. The file's path stays in Rust; the window holds the dump's id.
     restorePick: (connId: string, folder: boolean) => unwrap(commands.restorePick(connId, folder)),
     restorePrepare: (connId: string, dumpId: string, options: RestoreOptions) => unwrap(commands.restorePrepare(connId, dumpId, options)),
-    restoreCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, onProgress: (p: RestoreProgress) => void) => {
+    restoreCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, onProgress: (p: RestoreProgress) => void, jobId: string | null = null) => {
       const progress = new Channel<RestoreProgress>()
       progress.onmessage = onProgress
-      return unwrap(commands.restoreCommit(connId, pendingId, typedName, transferId, progress as never))
+      return unwrap(commands.restoreCommit(connId, pendingId, typedName, transferId, progress as never, jobId))
     },
     restoreForget: (connId: string, dumpId: string) => unwrap(commands.restoreForget(connId, dumpId)),
     // D13 (S49, F32): copy between databases.
-    copyPrepare: (connId: string, request: CopyRequest) => unwrap(commands.copyPrepare(connId, request)),
+    copyPrepare: (connId: string, request: CopyRequest, jobId: string | null = null) => unwrap(commands.copyPrepare(connId, request, jobId)),
+    // D14 (E1): saved jobs.
+    jobsList: () => unwrap(commands.jobsList()),
+    jobRuns: (jobId: string) => unwrap(commands.jobRuns(jobId)),
+    jobRename: (jobId: string, name: string) => unwrap(commands.jobRename(jobId, name)),
+    jobDelete: (jobId: string) => unwrap(commands.jobDelete(jobId)),
+    jobSaveCopy: (connId: string, name: string, request: CopyRequest) => unwrap(commands.jobSaveCopy(connId, name, request)),
+    jobSaveRestore: (connId: string, dumpId: string, name: string, options: RestoreOptions) => unwrap(commands.jobSaveRestore(connId, dumpId, name, options)),
+    jobSaveBackup: (connId: string, name: string) => unwrap(commands.jobSaveBackup(connId, name)),
+    jobSetup: (jobId: string) => unwrap(commands.jobSetup(jobId)),
+    restorePickJob: (connId: string, jobId: string) => unwrap(commands.restorePickJob(connId, jobId)),
+    jobBackupRun: (connId: string, jobId: string, transferId: string, onProgress: (p: TransferProgress) => void) => {
+      const progress = new Channel<TransferProgress>()
+      progress.onmessage = onProgress
+      return unwrap(commands.jobBackupRun(connId, jobId, transferId, progress as never))
+    },
     copyRelated: (connId: string, objects: CopyObject[]) => unwrap(commands.copyRelated(connId, objects)),
     copyCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, onProgress: (p: CopyProgress) => void) => {
       const progress = new Channel<CopyProgress>()

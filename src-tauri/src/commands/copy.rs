@@ -23,6 +23,7 @@ pub async fn copy_prepare(
     state: State<'_, AppState>,
     conn_id: String,
     request: CopyRequest,
+    job_id: Option<String>,
 ) -> AppResult<CopyPlan> {
     state.require_unlocked()?;
     let src_id = state.sql.db_id(&conn_id)?;
@@ -89,6 +90,11 @@ pub async fn copy_prepare(
             to.clone()
         };
         let exists = have.contains(&key.to_ascii_lowercase());
+        let names = if o.kind == "view" || o.kind == "matview" {
+            Vec::new()
+        } else {
+            copy::column_names(&src_raw, o).await
+        };
         // Between engines: each column's mapping (with the person's choices), and the DDL that will run.
         let (columns, ddl) = if cross && o.kind == "table" {
             let t = match &src_raw {
@@ -165,6 +171,20 @@ pub async fn copy_prepare(
             rows_estimate: rows,
             columns,
             ddl,
+            suggested_masks: names
+                .iter()
+                .filter(|c| !o.masks.iter().flatten().any(|m| m.column == **c))
+                .filter_map(|c| {
+                    crate::dbs::masking::suggest(c).map(|kind| {
+                        crate::dbs::masking::MaskSuggestion {
+                            table: o.name.clone(),
+                            column: c.clone(),
+                            kind,
+                        }
+                    })
+                })
+                .collect(),
+            column_names: names,
         });
     }
     let blocked = if !there.is_empty() {
@@ -207,9 +227,15 @@ pub async fn copy_prepare(
     } else if src_cfg.engine != dst_cfg.engine {
         warnings.push(format!("{} to {}: most tables copy as they are; features only one of them has will fail and be reported.", src_cfg.engine.label(), dst_cfg.engine.label()));
     }
-    if source.environment == "production" && target.environment != "production" {
+    let masked = request.objects.iter().any(|o| {
+        o.masks
+            .iter()
+            .flatten()
+            .any(|m| m.kind != crate::dbs::masking::MaskKind::Keep)
+    });
+    if source.environment == "production" && target.environment != "production" && !masked {
         warnings.push(format!(
-            "Copying production data to {}. Masking arrives later; check what the tables hold.",
+            "Copying production data to {} with no masking. Add rules?",
             target.name
         ));
     }
@@ -228,7 +254,22 @@ pub async fn copy_prepare(
         snapshot: src_cfg.engine != crate::dbs::Engine::Mongodb,
     };
     if plan.blocked.is_none() {
+        // A saved job keeps its masking key, so its hashes and fakes match run after run.
+        let mask_key = match &job_id {
+            Some(id) => {
+                let id = id.clone();
+                let plan = state
+                    .store()
+                    .with_db_session(move |c, s| crate::dbs::jobs::plan(c, s, &id))
+                    .await?
+                    .1;
+                super::jobs::key_of(&plan)
+            }
+            None => crate::dbs::masking::new_key(),
+        };
         let job = CopyJob {
+            mask_key,
+            job_id,
             req: request,
             source_engine: src_cfg.engine,
             target_db,
@@ -271,6 +312,7 @@ pub async fn copy_commit(
         .sql
         .connect_to(&job.req.target_conn_id, Some(job.target_db.clone()))
         .await?;
+    let started = crate::db::now_ms();
     let stop = state.sql.begin_transfer(&transfer_id);
     let res = copy::run(copy::Run {
         job: &job,
@@ -284,6 +326,42 @@ pub async fn copy_commit(
     .await;
     state.sql.end_transfer(&transfer_id);
     let rep = res?;
+    if let Some(id) = &job.job_id {
+        let status = match rep.outcome.as_str() {
+            "done" => "ok",
+            "stopped" => "stopped",
+            _ => "failed",
+        };
+        let mut log: Vec<String> = rep
+            .tables
+            .iter()
+            .map(|t| {
+                format!(
+                    "{} → {}: {}, {} rows{}",
+                    t.source,
+                    t.target,
+                    t.status,
+                    t.rows,
+                    t.error
+                        .as_ref()
+                        .map(|e| format!(" ({e})"))
+                        .unwrap_or_default()
+                )
+            })
+            .collect();
+        log.extend(rep.warnings.iter().cloned());
+        super::jobs::record(
+            &state,
+            id,
+            started,
+            status,
+            Some(rep.tables.iter().map(|t| t.rows).sum::<f64>() as i64),
+            None,
+            rep.warnings.len() as i64,
+            log.join("\n"),
+        )
+        .await;
+    }
     let source = sql::gate_target(&state.store(), &state.sql.db_id(&conn_id)?).await?;
     let text = format!(
         "copy from {} into {}: {}, {} tables, {} rows, {:.0} s",

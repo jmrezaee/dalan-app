@@ -146,7 +146,9 @@ pub async fn restore_commit(
     typed_name: Option<String>,
     transfer_id: String,
     progress: Channel<RestoreProgress>,
+    job_id: Option<String>,
 ) -> AppResult<RestoreResult> {
+    let started = crate::db::now_ms();
     state.require_unlocked()?;
     let class = state.sql.restore_jobs.peek_class(&conn_id, &pending_id)?;
     let db_id = state.sql.db_id(&conn_id)?;
@@ -195,6 +197,32 @@ pub async fn restore_commit(
     };
     let result = restore::result(&job, outcome, message, rep, removed);
     let text = restore::summary(&dump.info.file_name, &result);
+    if let Some(id) = &job_id {
+        let status = match result.outcome.as_str() {
+            "done" => "ok",
+            "stopped" => "stopped",
+            _ => "failed",
+        };
+        let mut log = vec![text.clone()];
+        log.extend(result.message.clone());
+        log.extend(
+            result
+                .warnings
+                .iter()
+                .map(|w| format!("{} ×{}", w.text, w.count)),
+        );
+        super::jobs::record(
+            &state,
+            id,
+            started,
+            status,
+            None,
+            Some(dump.info.bytes as i64),
+            result.warnings.len() as i64,
+            log.join("\n"),
+        )
+        .await;
+    }
     let _ = state
         .store()
         .with_db_session(move |c, s| crate::dbs::history::remember(c, s, &db_id, "restore", &text))

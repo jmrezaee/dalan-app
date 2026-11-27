@@ -15,7 +15,7 @@ use crate::error::{AppError, AppResult, ErrorCode};
 
 /// One field of a CSV or TSV line: NULL is empty, an empty string is `""`, anything with a separator, quote or line
 /// break is quoted.
-fn field(v: &Option<String>, delim: char) -> String {
+pub(super) fn field(v: &Option<String>, delim: char) -> String {
     match v {
         None => String::new(),
         Some(t) if t.is_empty() => "\"\"".into(),
@@ -64,10 +64,14 @@ impl MyDb {
         filter: &str,
         format: ExportFormat,
         header: bool,
+        masks: &[crate::dbs::masking::MaskRule],
         out: &mut (dyn Write + Send),
         progress: &(dyn Fn(f64, f64) + Sync),
         stop: &AtomicBool,
     ) -> AppResult<(f64, f64)> {
+        // Masking (E5): a new key per export, applied row by row (a shuffle needs rows together: not here).
+        let key = crate::dbs::masking::new_key();
+        let mut mask: Option<Option<crate::dbs::masking::Masker>> = None;
         let filter = filter.trim();
         if !filter.is_empty() {
             check_filter(filter)?;
@@ -112,6 +116,21 @@ impl MyDb {
         let result = self
             .conn
             .stream(&sql, |cols: &[MyColumn], row: Vec<Option<String>>| {
+                let m = mask.get_or_insert_with(|| {
+                    crate::dbs::masking::Masker::new(
+                        key,
+                        masks,
+                        &cols.iter().map(|c| c.name.clone()).collect::<Vec<_>>(),
+                    )
+                });
+                let row = match m {
+                    Some(m) => {
+                        let mut one = vec![row];
+                        m.batch(&mut one);
+                        one.pop().unwrap_or_default()
+                    }
+                    None => row,
+                };
                 let step = (|| -> Result<(), AppError> {
                     if first {
                         first = false;

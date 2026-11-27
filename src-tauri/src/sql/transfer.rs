@@ -94,6 +94,7 @@ impl PgConn {
         filter: &str,
         format: ExportFormat,
         header: bool,
+        masks: &[crate::dbs::masking::MaskRule],
         out: &mut (dyn Write + Send),
         progress: &(dyn Fn(f64, f64) + Sync),
         stop: &AtomicBool,
@@ -103,7 +104,10 @@ impl PgConn {
             check_filter(filter)?;
         }
         // The table must exist (and its name is quoted from what the catalog says).
-        self.table_info(schema, table).await?;
+        let info = self.table_info(schema, table).await?;
+        // Masking (E5): a new key per export, rules by column; masked rows go through the row-by-row writer.
+        let names: Vec<String> = info.columns.iter().map(|c| c.name.clone()).collect();
+        let mask = crate::dbs::masking::Masker::new(crate::dbs::masking::new_key(), masks, &names);
         let from = format!("{}.{}", quote(schema), quote(table));
         let select = if filter.is_empty() {
             format!("select * from {from}")
@@ -117,7 +121,16 @@ impl PgConn {
             .await
             .map_err(|e| map_error(&e))?;
         let result = self
-            .export_inner(&from, &select, format, header, out, progress, stop)
+            .export_inner(
+                &from,
+                &select,
+                format,
+                header,
+                mask.as_ref(),
+                out,
+                progress,
+                stop,
+            )
             .await;
         if self.client.batch_execute("ROLLBACK").await.is_ok() {
             self.dirty.store(false, Ordering::SeqCst);
@@ -132,6 +145,7 @@ impl PgConn {
         select: &str,
         format: ExportFormat,
         header: bool,
+        mask: Option<&crate::dbs::masking::Masker>,
         out: &mut (dyn Write + Send),
         progress: &(dyn Fn(f64, f64) + Sync),
         stop: &AtomicBool,
@@ -139,7 +153,7 @@ impl PgConn {
         let io = |e: std::io::Error| AppError::internal(format!("Couldn't write the file: {e}"));
         let (mut rows, mut bytes) = (0f64, 0f64);
         match format {
-            ExportFormat::Csv | ExportFormat::Tsv => {
+            ExportFormat::Csv | ExportFormat::Tsv if mask.is_none() => {
                 let delim = if format == ExportFormat::Tsv {
                     ", DELIMITER E'\\t'"
                 } else {
@@ -170,7 +184,12 @@ impl PgConn {
                     rows = (rows - 1.0).max(0.0);
                 }
             }
-            ExportFormat::Json | ExportFormat::Sql => {
+            _ => {
+                let delim = if format == ExportFormat::Tsv {
+                    '\t'
+                } else {
+                    ','
+                };
                 let stmt = self
                     .client
                     .prepare(select)
@@ -197,8 +216,17 @@ impl PgConn {
                     *bytes += s.len() as f64;
                     Ok(())
                 };
-                if format == ExportFormat::Json {
-                    put("[", &mut bytes)?;
+                match format {
+                    ExportFormat::Json => put("[", &mut bytes)?,
+                    ExportFormat::Csv | ExportFormat::Tsv if header => {
+                        let line = cols
+                            .iter()
+                            .map(|(n, _)| super::mytransfer::field(&Some(n.clone()), delim))
+                            .collect::<Vec<_>>()
+                            .join(&delim.to_string());
+                        put(&format!("{line}\n"), &mut bytes)?;
+                    }
+                    _ => {}
                 }
                 'outer: loop {
                     let msgs = self
@@ -207,12 +235,32 @@ impl PgConn {
                         .await
                         .map_err(|e| map_error(&e))?;
                     let mut got = 0;
-                    for m in &msgs {
-                        let tokio_postgres::SimpleQueryMessage::Row(r) = m else {
-                            continue;
-                        };
+                    let mut batch: Vec<Vec<Option<String>>> = msgs
+                        .iter()
+                        .filter_map(|m| match m {
+                            tokio_postgres::SimpleQueryMessage::Row(r) => Some(
+                                (0..cols.len())
+                                    .map(|i| r.get(i).map(str::to_string))
+                                    .collect(),
+                            ),
+                            _ => None,
+                        })
+                        .collect();
+                    if let Some(m) = mask {
+                        m.batch(&mut batch);
+                    }
+                    for row in &batch {
+                        let r = RowView(row);
                         got += 1;
-                        let line = if format == ExportFormat::Json {
+                        let line = if matches!(format, ExportFormat::Csv | ExportFormat::Tsv) {
+                            format!(
+                                "{}\n",
+                                row.iter()
+                                    .map(|v| super::mytransfer::field(v, delim))
+                                    .collect::<Vec<_>>()
+                                    .join(&delim.to_string())
+                            )
+                        } else if format == ExportFormat::Json {
                             let obj: serde_json::Map<String, serde_json::Value> = cols
                                 .iter()
                                 .enumerate()
@@ -252,6 +300,15 @@ impl PgConn {
         }
         out.flush().map_err(io)?;
         Ok((rows, bytes))
+    }
+}
+
+/// A masked row, read like a server row (`get(i)`).
+struct RowView<'a>(&'a [Option<String>]);
+
+impl RowView<'_> {
+    fn get(&self, i: usize) -> Option<&str> {
+        self.0.get(i).and_then(|v| v.as_deref())
     }
 }
 

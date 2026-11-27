@@ -85,6 +85,8 @@ watch(() => store.options.existing, (v) => { if (v === 'append') store.options.c
 
 // ---- Review
 const p = computed(() => store.plan)
+const naming = ref(false)
+const jobName = ref('')
 const typedOk = computed(() => !p.value || p.value.level !== 'typed' || store.typed === p.value.typed_name)
 // The review opens with Cancel focused: Enter must never start a restore by accident.
 const cancelBtn = ref<{ $el: HTMLElement } | null>(null)
@@ -238,6 +240,11 @@ const radio = 'flex items-start gap-2 text-sm'
             <ul class="m-0 list-disc pl-4 text-xs" data-part="skipped"><li v-for="s in p.skipped" :key="s">{{ s }}</li></ul>
           </div>
           <ul v-if="p.warnings.length" class="m-0 flex list-none flex-col gap-1 p-0 text-xs text-warning" data-part="warnings"><li v-for="w in p.warnings" :key="w">{{ w }}</li></ul>
+          <div v-if="!store.jobId && !p.blocked" class="flex items-center gap-2 text-xs">
+            <template v-if="naming"><Input v-model="jobName" class="h-7 w-56 text-xs" placeholder="Restore last night's dump" aria-label="Job name" /><Button size="sm" :disabled="!jobName.trim()" :data-testid="tid('restore-save-job')" @click="store.saveJob(jobName); naming = false">Save</Button></template>
+            <Button v-else size="sm" variant="ghost" @click="naming = true">Save as a job…</Button>
+            <span v-if="store.saved" role="status" class="text-success">{{ store.saved }}</span>
+          </div>
           <label v-if="p.level === 'typed' && !p.blocked" class="flex flex-col gap-1 text-xs text-muted">Type {{ p.typed_name }} to confirm
             <Input v-model="store.typed" class="font-mono text-xs text-text" autocomplete="off" spellcheck="false" :data-testid="tid('restore-typed')" @keydown.enter.prevent="typedOk && store.commit()" />
           </label>

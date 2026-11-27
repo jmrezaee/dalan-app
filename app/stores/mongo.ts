@@ -507,6 +507,9 @@ function setup() {
   }
   const newTransferId = () => `t${++transferCount}-${Date.now()}`
   const stopTransfer = (id: string) => api.sqlTransferStop(id).catch(() => {})
+  /** A saved backup job, into its folder (D14). */
+  const backupJob = (jobId: string, id: string, onProgress: (p: TransferProgress) => void) => api.jobBackupRun(connId.value, jobId, id, onProgress).finally(() => { void useJobsStore().refresh() })
+  const saveBackupJob = (name: string) => api.jobSaveBackup(connId.value, name)
   const exportColl = (id: string, db: string, coll: string, filter: string, onProgress: (p: TransferProgress) => void) => api.mgExport(connId.value, id, db, coll, filter, onProgress)
   const backupCheck = () => api.sqlBackupCheck(connId.value)
   const backupStart = (id: string, onProgress: (p: TransferProgress) => void) => api.sqlBackupStart(connId.value, id, onProgress)
@@ -575,7 +578,7 @@ function setup() {
     }
   }
 
-  return { ensureColls, copyOpen, openCopy, closeCopy, transferOpen, openTransfer, closeTransfer, newTransferId, stopTransfer, exportColl, backupCheck, backupStart, shellOpen, shellDb, shellLog, shellInput, shellHistory, shellBusy, shellReview, openShell, closeShell, shellRun, shellCommit, shellCancel, aggRun, aggAdd, aggRemove, aggMove, aggWrite, aggView, aggCode, loadSchema, loadIndexes, loadValidation, openSchema, checkRules, saveRules, createIndex, dropIndex, dbId, connId, status, steps, prompt, info, error, dbs, treeFilter, tabs, activeTab, current, open, retry, respond, close, toggleDb, openColl, closeColl, load, apply, setLimit, nextPage, prevPage, countDocs, startEdit, startNew, saveEditor, deleteDoc, commitReview, cancelReview }
+  return { ensureColls, copyOpen, openCopy, closeCopy, transferOpen, openTransfer, closeTransfer, newTransferId, stopTransfer, backupJob, saveBackupJob, exportColl, backupCheck, backupStart, shellOpen, shellDb, shellLog, shellInput, shellHistory, shellBusy, shellReview, openShell, closeShell, shellRun, shellCommit, shellCancel, aggRun, aggAdd, aggRemove, aggMove, aggWrite, aggView, aggCode, loadSchema, loadIndexes, loadValidation, openSchema, checkRules, saveRules, createIndex, dropIndex, dbId, connId, status, steps, prompt, info, error, dbs, treeFilter, tabs, activeTab, current, open, retry, respond, close, toggleDb, openColl, closeColl, load, apply, setLimit, nextPage, prevPage, countDocs, startEdit, startNew, saveEditor, deleteDoc, commitReview, cancelReview }
 }
 
 const makeStore = (key: string) => defineStore(`mongo:${key}`, setup)

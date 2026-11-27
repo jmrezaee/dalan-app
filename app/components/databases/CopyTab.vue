@@ -7,7 +7,7 @@ import { Copy, Search } from '@lucide/vue'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
-import type { Engine } from '~/types/bindings'
+import type { Engine, MaskKind } from '~/types/bindings'
 import { cn } from '@/lib/utils'
 import { pickKey } from '~/stores/copy'
 
@@ -63,6 +63,28 @@ function setDdl(source: string, value: string) {
   const p = pickOf(source)
   if (p) p.ddl = value
 }
+// A saved job being run: planned as soon as its target tab is connected.
+watch(() => store.autoReview && !!target.value?.ready, (go) => {
+  if (!go || !target.value) return
+  store.autoReview = false
+  void store.review(props.connId, target.value.connId)
+})
+// Masking (E5): a rule per column, set in the review; suggestions for columns that look personal.
+function setMask(source: string, col: string, kind: MaskKind) {
+  const p = pickOf(source)
+  if (!p) return
+  p.masks[col] = { kind, value: p.masks[col]?.value ?? '' }
+}
+function setMaskValue(source: string, col: string, value: string) {
+  const p = pickOf(source)
+  if (p?.masks[col]) p.masks[col]!.value = value
+}
+const maskOf = (source: string, col: string) => pickOf(source)?.masks[col] ?? { kind: 'keep' as MaskKind, value: '' }
+function applySuggestions() {
+  for (const t of p.value?.tables ?? []) for (const s of t.suggested_masks) setMask(t.source, s.column, s.kind)
+  void store.review(props.connId, store.lastTarget)
+}
+const job = reactive({ naming: false, name: '' })
 const canReview = computed(() => !!target.value?.ready && store.chosen.length > 0 && (!store.targetNew || store.newName.trim().length > 0))
 
 // ---- Review, progress, report
@@ -179,11 +201,32 @@ const section = 'flex flex-col gap-2 rounded-lg border border-border bg-surface 
         </label>
         <div class="mt-2 flex justify-end"><Button size="sm" variant="secondary" :loading="store.busy" @click="store.review(connId, store.lastTarget)">Apply changes</Button></div>
       </details>
+      <!-- Masking: per column, in the stream. -->
+      <details class="rounded-md border border-border bg-surface p-3" :data-testid="tid('copy-masking')" :open="p.tables.some(t => t.suggested_masks.length || Object.values(pickOf(t.source)?.masks ?? {}).some(m => m.kind !== 'keep')) || undefined">
+        <summary class="cursor-default text-xs font-medium">Masking<span v-if="p.tables.some(t => t.suggested_masks.length)" class="text-warning"> · {{ p.tables.reduce((n, t) => n + t.suggested_masks.length, 0) }} columns look personal</span></summary>
+        <p class="mt-1 text-xs text-muted">Values are changed between the source and the target: the real ones never reach it. Hashes and fakes are keyed, so the same value is masked the same way in every table{{ store.jobId ? ' and on every run of this job' : '' }}.</p>
+        <div v-for="t in p.tables.filter(x => x.column_names.length)" :key="`mask-${t.source}`" class="mt-2">
+          <h4 class="text-xs font-medium text-muted">{{ t.source }}</h4>
+          <div v-for="c in t.column_names" :key="c" class="mt-1 flex items-center gap-2 text-xs">
+            <span class="w-40 truncate font-mono">{{ c }}<span v-if="t.suggested_masks.some(s => s.column === c)" class="ml-1 text-warning" title="Looks personal">•</span></span>
+            <MaskKindSelect :model-value="maskOf(t.source, c).kind" :label="`Masking for ${t.source}.${c}`" @update:model-value="(k: MaskKind) => setMask(t.source, c, k)" />
+            <Input v-if="['fixed', 'truncate', 'date_shift'].includes(maskOf(t.source, c).kind)" :model-value="maskOf(t.source, c).value" class="h-7 w-24 text-xs" :aria-label="`Value for ${c}`" @update:model-value="(v: string | number) => setMaskValue(t.source, c, String(v))" />
+          </div>
+        </div>
+        <div class="mt-2 flex justify-end gap-2">
+          <Button v-if="p.tables.some(t => t.suggested_masks.length)" size="sm" variant="ghost" :data-testid="tid('copy-mask-suggested')" @click="applySuggestions">Use the suggestions</Button>
+          <Button size="sm" variant="secondary" :loading="store.busy" @click="store.review(connId, store.lastTarget)">Apply changes</Button>
+        </div>
+      </details>
       <label v-if="p.level === 'typed' && !p.blocked" class="flex max-w-md flex-col gap-1 text-xs text-muted">Type {{ p.typed_name }} to confirm
         <Input v-model="store.typed" class="font-mono text-xs text-text" autocomplete="off" spellcheck="false" :data-testid="tid('copy-typed')" />
       </label>
       <p v-if="store.error" role="alert" class="text-danger" data-part="error">{{ store.error }}</p>
+      <div v-if="job.naming && !store.jobId" class="flex items-center justify-end gap-2"><Input v-model="job.name" class="h-8 w-64 text-xs" placeholder="Nightly staging refresh" aria-label="Job name" /><Button size="sm" :disabled="!job.name.trim()" :data-testid="tid('copy-save-job')" @click="store.saveJob(connId, store.lastTarget, job.name); job.naming = false">Save</Button></div>
+      <p v-if="store.saved" role="status" class="text-right text-xs text-success">{{ store.saved }}</p>
       <div class="flex justify-end gap-2">
+        <Button v-if="!store.jobId" variant="ghost" class="mr-auto" @click="job.naming = !job.naming">Save as a job…</Button>
+        <span v-else class="mr-auto self-center text-xs text-muted">Running a saved job: it asks again, as on its first run.</span>
         <Button variant="secondary" @click="store.reset()">Back</Button>
         <Button :class="p.level === 'typed' ? buttonVariants({ variant: 'destructive' }) : ''" :disabled="!p.pending_id || !typedOk" :data-testid="tid('copy-run')" @click="store.commit(connId)">Copy</Button>
       </div>
