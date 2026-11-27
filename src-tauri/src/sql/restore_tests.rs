@@ -72,7 +72,7 @@ fn stand_ins() -> std::path::PathBuf {
     // A directory dump is copied into the container first.
     script(
         "pg_restore",
-        "out=(); prev=\nfor a in \"$@\"; do\n  if [ \"$prev\" = \"-Fd\" ]; then docker exec dalan-test-pg rm -rf /tmp/dalan-dir; docker cp \"$a\" dalan-test-pg:/tmp/dalan-dir >/dev/null; a=/tmp/dalan-dir; fi\n  out+=(\"$a\"); prev=\"$a\"\ndone\nexec docker exec -i -e PGPASSWORD dalan-test-pg pg_restore \"${out[@]}\"",
+        "out=(); prev=\nfor a in \"$@\"; do\n  case \"$prev\" in -Fd|-Fc|-L) n=/tmp/dalan-$RANDOM; docker exec dalan-test-pg rm -rf $n; docker cp \"$a\" dalan-test-pg:$n >/dev/null; a=$n;; esac\n  out+=(\"$a\"); prev=\"$a\"\ndone\nexec docker exec -i -e PGPASSWORD dalan-test-pg pg_restore \"${out[@]}\"",
     );
     for (name, c) in [
         ("mysql", "dalan-test-mysql"),
@@ -193,6 +193,10 @@ fn opts(new_db: Option<&str>) -> RestoreOptions {
         skip_owner_acl: true,
         include_roles: false,
         single_transaction: true,
+        objects: None,
+        rename_schema: None,
+        jobs: 0,
+        disable_triggers: false,
     }
 }
 
@@ -400,6 +404,84 @@ async fn l3_restore_real_dumps_into_new_and_existing_databases_on_every_engine()
         ErrorCode::DbDumpUnsafe
     );
     let _ = std::fs::remove_file(&bad);
+    // Part 2: only some tables (an archive through -L, a plain dump through the stream filter), a schema renamed in
+    // the stream, and parallel jobs from a gzipped custom archive (unpacked into a file first).
+    for db in ["d12_some", "d12_some_plain", "d12_rename", "d12_jobs"] {
+        psql("shop", &format!("drop database if exists {db}"));
+    }
+    let only = |db: &str| RestoreOptions {
+        objects: Some(vec!["public.customers".into()]),
+        ..opts(Some(db))
+    };
+    for (file, db) in [("pg16.custom", "d12_some"), ("pg16.sql", "d12_some_plain")] {
+        let (plan, r) = restore(Conn::Pg(&shop), &tool, None, &fixture(file), only(db), None)
+            .await
+            .unwrap_or_else(|e| panic!("{file}: {}", e.message));
+        let r = r.unwrap();
+        assert_eq!(r.outcome, "done", "{file}: {r:?}");
+        assert_eq!(plan.rows, 3.0, "{file}");
+        assert_eq!(
+            psql(db, "select count(*) from public.customers"),
+            "3",
+            "{file}"
+        );
+        assert_eq!(
+            psql(db, "select count(*) from pg_class where relname = 'orders'"),
+            "0",
+            "{file}"
+        );
+    }
+    let (_, r) = restore(
+        Conn::Pg(&shop),
+        &tool,
+        None,
+        &fixture("pg16.sql"),
+        RestoreOptions {
+            rename_schema: Some(RenameSchema {
+                from: "public".into(),
+                to: "shop2".into(),
+            }),
+            ..opts(Some("d12_rename"))
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(r.unwrap().outcome, "done");
+    assert_eq!(psql("d12_rename", "select count(*) from shop2.orders"), "4");
+    let (_, r) = restore(
+        Conn::Pg(&shop),
+        &tool,
+        None,
+        &fixture("pg16.custom.gz"),
+        RestoreOptions {
+            jobs: 2,
+            single_transaction: false,
+            ..opts(Some("d12_jobs"))
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(r.unwrap().outcome, "done");
+    assert_eq!(psql("d12_jobs", "select count(*) from public.orders"), "4");
+    assert_eq!(
+        restore(
+            Conn::Pg(&shop),
+            &tool,
+            None,
+            &fixture("pg16.custom"),
+            RestoreOptions {
+                jobs: 2,
+                ..opts(Some("d12_x"))
+            },
+            None
+        )
+        .await
+        .unwrap_err()
+        .code,
+        ErrorCode::Validation
+    );
     // A MySQL dump can't go into PostgreSQL.
     assert_eq!(
         restore(

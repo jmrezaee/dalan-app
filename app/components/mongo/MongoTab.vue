@@ -12,6 +12,13 @@ const databases = useDatabasesStore()
 const hosts = useHostsStore()
 
 const db = computed(() => databases.rows.find(d => d.id === props.dbId) ?? null)
+// "Restore a dump…" from the database list (S48): once connected, the Transfer tab opens with the restore dialog.
+watch(() => store.status === 'ready' && restoreRequests.value.has(props.dbId), (go) => {
+  if (!go) return
+  restoreRequests.value.delete(props.dbId)
+  store.openTransfer()
+  useRestoreStore(props.tabKey).start(store.connId, db.value?.environment === 'production')
+}, { immediate: true })
 const name = computed(() => db.value?.name ?? 'this database')
 const routeText = computed(() => {
   const d = db.value

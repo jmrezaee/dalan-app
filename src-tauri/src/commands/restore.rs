@@ -82,7 +82,19 @@ pub async fn restore_pick(
         .into_path()
         .map_err(|_| AppError::validation("That location can't be used."))?;
     let id = uuid::Uuid::now_v7().to_string();
-    let dump = dumpfile::pick(&path, id.clone()).await?;
+    let mut dump = dumpfile::pick(&path, id.clone()).await?;
+    // An archive newer than Dalan's reader: pg_restore on the target lists it, when it can.
+    if matches!(
+        dump.info.format,
+        dumpfile::DumpFormat::PgCustom | dumpfile::DumpFormat::PgTar
+    ) && dump.toc.is_empty()
+        && dump.info.notes.iter().any(|n| n.code == "toc")
+    {
+        let ssh = state.sql.ssh(&conn_id).await?;
+        if let Ok(text) = restore::list_archive(ssh.as_deref(), &dump).await {
+            dumpfile::apply_list(&mut dump, &text);
+        }
+    }
     let info = dump.info.clone();
     state.sql.put_dump(&conn_id, id, dump);
     Ok(Some(info))
@@ -177,6 +189,10 @@ pub async fn restore_commit(
         }
     };
     let removed = restore::after(&owned.conn(), &job, &outcome).await;
+    let message = match (outcome.as_str(), message) {
+        ("done", None) => restore::rename_after(&owned.conn(), &job).await,
+        (_, m) => m,
+    };
     let result = restore::result(&job, outcome, message, rep, removed);
     let text = restore::summary(&dump.info.file_name, &result);
     let _ = state
@@ -200,4 +216,44 @@ pub fn restore_forget(
 ) -> AppResult<()> {
     state.sql.forget_dump(&conn_id, &dump_id);
     Ok(())
+}
+
+/// "Open the database" after a restore into a new database: a saved copy of this tab's database that opens the new
+/// one (same route, user, password and protection). The password is copied in Rust, from the vault to the vault.
+#[tauri::command]
+#[specta::specta]
+pub async fn restore_save_database(
+    state: State<'_, AppState>,
+    conn_id: String,
+    database: String,
+) -> AppResult<crate::dbs::store::DatabaseRow> {
+    state.require_unlocked()?;
+    let db_id = state.sql.db_id(&conn_id)?;
+    state
+        .with_db_session(move |c, s| {
+            use crate::dbs::store;
+            let d = store::get(c, &s.vault_id, &db_id)?;
+            let password = store::password(c, s, &db_id)?.map(|p| p.to_string());
+            let input = store::DatabaseInput {
+                id: None,
+                engine: d.engine,
+                name: format!("{} · {database}", d.name),
+                environment: d.environment,
+                route: d.route,
+                host_id: d.host_id,
+                address: d.address,
+                port: d.port,
+                default_database: Some(database),
+                username: d.username,
+                password,
+                clear_password: false,
+                tls: d.tls,
+                tls_server_name: d.tls_server_name,
+                write_mode: d.write_mode,
+                options: d.options,
+                from_url: None,
+            };
+            store::save(c, s, input, false)
+        })
+        .await
 }

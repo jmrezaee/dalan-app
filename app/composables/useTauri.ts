@@ -124,6 +124,7 @@ export function useTauri() {
       return unwrap(commands.restoreCommit(connId, pendingId, typedName, transferId, progress as never))
     },
     restoreForget: (connId: string, dumpId: string) => unwrap(commands.restoreForget(connId, dumpId)),
+    restoreSaveDatabase: (connId: string, database: string) => unwrap(commands.restoreSaveDatabase(connId, database)),
     sqlCancel: (connId: string, editorId: string) => unwrap(commands.sqlCancel(connId, editorId)),
     sqlEditorClose: (connId: string, editorId: string) => unwrap(commands.sqlEditorClose(connId, editorId)),
     sqlCatalog: (connId: string, refresh: boolean) => unwrap(commands.sqlCatalog(connId, refresh)),

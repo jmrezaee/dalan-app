@@ -41,6 +41,24 @@ pub struct RestoreOptions {
     pub include_roles: bool,
     /// PostgreSQL: one transaction that stops at the first error. Elsewhere: stop at the first error.
     pub single_transaction: bool,
+    /// Only these tables or collections (names as the preview shows them). `None`: everything.
+    #[serde(default)]
+    pub objects: Option<Vec<String>>,
+    /// PostgreSQL: restore one schema of the dump under another name.
+    #[serde(default)]
+    pub rename_schema: Option<RenameSchema>,
+    /// PostgreSQL custom and directory archives: parallel jobs (not with one transaction). 0 or 1: one at a time.
+    #[serde(default)]
+    pub jobs: u32,
+    /// PostgreSQL archives, data only: turn triggers off while loading (needs a superuser).
+    #[serde(default)]
+    pub disable_triggers: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Type)]
+pub struct RenameSchema {
+    pub from: String,
+    pub to: String,
 }
 
 /// The review (S48 "Review"): everything the person confirms, in plain words.
@@ -144,6 +162,12 @@ pub struct Job {
     pub typed_name: String,
     pub atomic: bool,
     encoding: Option<String>,
+    /// PostgreSQL archives: the TOC entries to restore (`-L`), when only some objects were chosen.
+    list: Option<Vec<i64>>,
+    /// The schema to rename, and when: in the stream (plain SQL) or after the tool (archives into this database).
+    pub rename: Option<(String, String)>,
+    /// A custom archive restored with parallel jobs: the tool needs it as a file, not on its input.
+    as_file: bool,
 }
 
 // ---------------------------------------------------------------- planning
@@ -390,6 +414,73 @@ pub async fn plan(p: PlanInput<'_>) -> AppResult<(RestorePlan, Job)> {
         d.databases.first().cloned()
     };
     let ssh = p.ssh;
+    let pg_engine = engine == Engine::Postgres;
+    if (opts.rename_schema.is_some() || opts.jobs > 1 || opts.disable_triggers) && !pg_engine {
+        return Err(AppError::validation(
+            "Renaming a schema, parallel jobs and turning triggers off are for PostgreSQL dumps.",
+        ));
+    }
+    let jobs = opts.jobs.max(1);
+    if jobs > 1 {
+        if !matches!(d.format, DumpFormat::PgCustom | DumpFormat::PgDirectory) {
+            return Err(AppError::validation(
+                "Parallel jobs work with custom and directory archives only.",
+            ));
+        }
+        if opts.single_transaction {
+            return Err(AppError::validation("Parallel jobs can't run in one transaction. Choose “Keep going and report the errors” to use them."));
+        }
+        if jobs > 16 {
+            return Err(AppError::validation("Use at most 16 parallel jobs."));
+        }
+    }
+    if opts.disable_triggers && (kind != Kind::PgArchive || opts.content != Content::Data) {
+        return Err(AppError::validation(
+            "Turning triggers off is for data-only restores of PostgreSQL archives.",
+        ));
+    }
+    let mut rename = None;
+    if let Some(r) = &opts.rename_schema {
+        let (from, to) = (r.from.trim().to_string(), r.to.trim().to_string());
+        if from.is_empty()
+            || to.is_empty()
+            || from == to
+            || to.len() > 63
+            || to.chars().any(|c| c.is_control())
+        {
+            return Err(AppError::validation(
+                "Give the schema in the dump and a different new name for it.",
+            ));
+        }
+        if !d.objects.iter().any(|o| {
+            o.name.starts_with(&format!("{from}.")) || (o.kind == "schema" && o.name == from)
+        }) {
+            return Err(AppError::validation(format!(
+                "The dump has no schema named {from}."
+            )));
+        }
+        if kind == Kind::PgArchive && new_db {
+            return Err(AppError::validation("Renaming a schema of an archive works when restoring into this database. Into a new database, restore it and rename the schema from the editor."));
+        }
+        if let Conn::Pg(c) = &p.conn {
+            if !new_db {
+                let have: Vec<String> = c
+                    .client
+                    .query("select nspname::text from pg_namespace", &[])
+                    .await
+                    .map_err(|e| super::pg::map_error(&e))?
+                    .iter()
+                    .map(|r| r.get(0))
+                    .collect();
+                for n in [&from, &to] {
+                    if have.contains(n) {
+                        return Err(AppError::validation(format!("{target_db} already has a schema named {n}, so the dump's {from} can't be restored as {to}. Restore into a new database instead.")));
+                    }
+                }
+            }
+        }
+        rename = Some((from, to));
+    }
     let (tool, tool_version) = resolve(ssh, kind, engine).await?;
     let mut warnings = Vec::new();
     let mut skipped = Vec::new();
@@ -424,11 +515,37 @@ pub async fn plan(p: PlanInput<'_>) -> AppResult<(RestorePlan, Job)> {
         existing_names(&p.conn, &target_db).await?
     };
     let have_lc: Vec<String> = have.iter().map(|h| h.to_ascii_lowercase()).collect();
+    // Only some objects: each name must be one the dump has.
+    let chosen = opts.objects.clone().filter(|o| !o.is_empty());
+    if let Some(sel) = &chosen {
+        let known: Vec<&str> = d
+            .objects
+            .iter()
+            .filter(|o| {
+                matches!(
+                    o.kind.as_str(),
+                    "table" | "table data" | "collection" | "time series"
+                )
+            })
+            .map(|o| o.name.as_str())
+            .collect();
+        if let Some(bad) = sel.iter().find(|n| !known.contains(&n.as_str())) {
+            return Err(AppError::validation(format!(
+                "The dump has no table or collection named {bad}."
+            )));
+        }
+    }
+    let dump_name = |s: &str, t: &str| match kind {
+        Kind::Mongo | Kind::My => t.to_string(),
+        _ if s.is_empty() => t.to_string(),
+        _ => format!("{s}.{t}"),
+    };
     let wanted: Vec<String> = p
         .dump
         .tables
         .iter()
         .filter(|(db, _)| kind != Kind::Mongo || source_db.as_deref().is_none_or(|s| s == db))
+        .filter(|(s, t)| chosen.as_ref().is_none_or(|c| c.contains(&dump_name(s, t))))
         .map(|(s, t)| match kind {
             Kind::Mongo | Kind::My => t.clone(),
             _ => format!("{}.{}", if s.is_empty() { "public" } else { s }, t),
@@ -581,7 +698,8 @@ pub async fn plan(p: PlanInput<'_>) -> AppResult<(RestorePlan, Job)> {
     } else {
         p.saved_name.clone()
     };
-    let rows: f64 = d.objects.iter().filter_map(|o| o.rows).sum();
+    let picked = |o: &&dumpfile::DumpObject| chosen.as_ref().is_none_or(|c| c.contains(&o.name));
+    let rows: f64 = d.objects.iter().filter(picked).filter_map(|o| o.rows).sum();
     let blocked = (!clashes.is_empty()).then(|| {
         format!(
             "{} of the dump's tables already exist in {target_db}: {}. Choose “Drop and replace” or “Add rows”, or restore into a new database.",
@@ -589,6 +707,23 @@ pub async fn plan(p: PlanInput<'_>) -> AppResult<(RestorePlan, Job)> {
             clashes.iter().take(6).map(String::as_str).collect::<Vec<_>>().join(", ")
         )
     });
+    let list = match (&chosen, kind) {
+        (Some(c), Kind::PgArchive) if !p.dump.toc.is_empty() => Some(toc_list(&p.dump.toc, c)),
+        (Some(_), Kind::PgArchive) => {
+            return Err(AppError::validation(
+                "This archive's contents couldn't be listed, so it can only be restored whole.",
+            ))
+        }
+        _ => None,
+    };
+    if rename.is_some() && kind == Kind::PgArchive {
+        warnings.push("The schema is renamed after pg_restore ends: if the rename fails, the objects stay under their old schema.".to_string());
+    }
+    if opts.disable_triggers {
+        warnings.push(
+            "Turning triggers off needs a superuser; the restore fails without one.".to_string(),
+        );
+    }
     let plan = RestorePlan {
         pending_id: None,
         blocked,
@@ -606,7 +741,10 @@ pub async fn plan(p: PlanInput<'_>) -> AppResult<(RestorePlan, Job)> {
         clashes,
         skipped,
         warnings,
-        objects: d.objects.len() as f64 + d.objects_more,
+        objects: match &chosen {
+            Some(c) => c.len() as f64,
+            None => d.objects.len() as f64 + d.objects_more,
+        },
         rows,
         bytes: d.bytes,
         upload: d.format.is_folder() && ssh.is_some(),
@@ -626,8 +764,120 @@ pub async fn plan(p: PlanInput<'_>) -> AppResult<(RestorePlan, Job)> {
         typed_name,
         atomic,
         encoding: d.encoding.clone(),
+        list,
+        rename,
+        as_file: jobs > 1 && d.format == DumpFormat::PgCustom,
     };
     Ok((plan, job))
+}
+
+/// The TOC entries of an archive to restore when only some tables are chosen: everything except the other tables and
+/// whatever depends on them (their data, keys, indexes, triggers, comments, grants, and views over them).
+pub fn toc_list(toc: &[dumpfile::TocEntry], keep: &[String]) -> Vec<i64> {
+    let name = |e: &dumpfile::TocEntry| {
+        if e.namespace.is_empty() {
+            e.tag.clone()
+        } else {
+            format!("{}.{}", e.namespace, e.tag)
+        }
+    };
+    let mut out: std::collections::HashSet<i64> = toc
+        .iter()
+        .filter(|e| matches!(e.desc.as_str(), "TABLE" | "TABLE DATA") && !keep.contains(&name(e)))
+        .map(|e| e.id)
+        .collect();
+    // Whatever depends on something left out is left out too, to the end of the chain.
+    loop {
+        let more: Vec<i64> = toc
+            .iter()
+            .filter(|e| !out.contains(&e.id) && e.deps.iter().any(|d| out.contains(d)))
+            .map(|e| e.id)
+            .collect();
+        if more.is_empty() {
+            break;
+        }
+        out.extend(more);
+    }
+    toc.iter()
+        .map(|e| e.id)
+        .filter(|id| !out.contains(id))
+        .collect()
+}
+
+/// `pg_restore --list` where the tool runs, with the archive on its input: the contents of an archive newer than
+/// Dalan's reader. Only for single-file archives; the output is a list of names, never row data.
+pub async fn list_archive(ssh: Option<&Connected>, dump: &Dump) -> AppResult<String> {
+    let mut r = dumpfile::open(&dump.path, dump.outer).await?;
+    let mut out = Vec::new();
+    match ssh {
+        Some(s) => {
+            let ch = s.handle.channel_open_session().await.map_err(|e| {
+                AppError::new(
+                    ErrorCode::HostUnreachable,
+                    format!("Couldn't open a channel on {}: {e}", s.label),
+                )
+            })?;
+            let (mut reader, writer) = ch.split();
+            writer
+                .exec(true, "pg_restore --list")
+                .await
+                .map_err(|e| AppError::internal(e.to_string()))?;
+            let feeder = tokio::spawn(async move {
+                let mut buf = vec![0u8; 64 * 1024];
+                while let Ok(n) = r.read(&mut buf).await {
+                    if n == 0
+                        || writer
+                            .data_bytes(bytes::Bytes::copy_from_slice(&buf[..n]))
+                            .await
+                            .is_err()
+                    {
+                        break;
+                    }
+                }
+                let _ = writer.eof().await;
+                writer
+            });
+            while let Some(m) = reader.wait().await {
+                match m {
+                    ChannelMsg::Data { data } if out.len() < 64 << 20 => {
+                        out.extend_from_slice(&data)
+                    }
+                    ChannelMsg::Close => break,
+                    _ => {}
+                }
+            }
+            feeder.abort();
+        }
+        None => {
+            let mut child = tokio::process::Command::new(backup::local_tool("pg_restore"))
+                .arg("--list")
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .kill_on_drop(true)
+                .spawn()
+                .map_err(|_| backup::missing("pg_restore", "this computer"))?;
+            let mut stdin = child
+                .stdin
+                .take()
+                .ok_or_else(|| AppError::internal("no input"))?;
+            let feeder = tokio::spawn(async move {
+                let _ = tokio::io::copy(&mut r, &mut stdin).await;
+            });
+            let mut so = child
+                .stdout
+                .take()
+                .ok_or_else(|| AppError::internal("no output"))?;
+            (&mut so)
+                .take(64 << 20)
+                .read_to_end(&mut out)
+                .await
+                .map_err(|e| AppError::internal(e.to_string()))?;
+            feeder.abort();
+            let _ = child.wait().await;
+        }
+    }
+    Ok(String::from_utf8_lossy(&out).into_owned())
 }
 
 /// The gate's class for a held job.
@@ -732,9 +982,21 @@ fn args(job: &Job, cfg: &SqlConfig, folder: Option<&str>, mongo_gzip: bool) -> V
             if o.single_transaction {
                 a.extend(["--single-transaction".into(), "--exit-on-error".into()]);
             }
+            if o.jobs > 1 {
+                a.push(format!("--jobs={}", o.jobs));
+            }
+            if o.disable_triggers {
+                a.push("--disable-triggers".into());
+            }
+            if job.list.is_some() {
+                // Replaced by the list file's path where the tool runs (see `remote_command` and `run`).
+                a.extend(["-L".into(), LIST.into()]);
+            }
             a.extend(pg_conn_args(cfg, &job.target_db));
-            if let Some(f) = folder {
-                a.extend(["-Fd".into(), f.into()]);
+            match folder {
+                Some(f) if job.as_file => a.extend(["-Fc".into(), f.into()]),
+                Some(f) => a.extend(["-Fd".into(), f.into()]),
+                None => {}
             }
         }
         Kind::PgPlain => {
@@ -783,7 +1045,10 @@ fn args(job: &Job, cfg: &SqlConfig, folder: Option<&str>, mongo_gzip: bool) -> V
                 None => a.push("--archive".into()),
             }
             if let Some(src) = &job.source_db {
-                a.push(format!("--nsInclude={src}.*"));
+                match o.objects.as_ref().filter(|x| !x.is_empty()) {
+                    Some(colls) => a.extend(colls.iter().map(|c| format!("--nsInclude={src}.{c}"))),
+                    None => a.push(format!("--nsInclude={src}.*")),
+                }
                 if *src != job.target_db {
                     a.extend([
                         format!("--nsFrom={src}.*"),
@@ -830,11 +1095,21 @@ fn password_lines(job: &Job, cfg: &SqlConfig) -> AppResult<Vec<u8>> {
 /// What `sh -c` runs on the host: first the process group's id on stderr (so Stop can end everything the command
 /// started), then the engine's wrapper from `backup.rs`.
 fn remote_command(job: &Job, a: &[String]) -> String {
-    let inner = match job.kind {
+    let mut inner = match job.kind {
         Kind::PgArchive | Kind::PgPlain => backup::wrapper(&job.tool, a),
         Kind::My => backup::wrapper_my(&job.tool, a),
         Kind::Mongo => backup::wrapper_mongo(&job.tool, a),
     };
+    if let Some(ids) = &job.list {
+        // The entry list goes in a private file that is removed when the shell ends (so no `exec` here). The ids are
+        // numbers Dalan wrote, nothing from the dump.
+        let ids: Vec<String> = ids.iter().map(i64::to_string).collect();
+        inner = format!(
+            "umask 077; L=$(mktemp) || exit 1; trap 'rm -f \"$L\"' EXIT HUP INT TERM; printf '%s\\n' {} > \"$L\"; {}",
+            ids.join(" "),
+            inner.replacen("exec ", "", 1).replace(&shq(LIST), "\"$L\"")
+        );
+    }
     format!(
         "sh -c {}",
         shq(&format!(
@@ -843,11 +1118,18 @@ fn remote_command(job: &Job, a: &[String]) -> String {
     )
 }
 
+/// Stands in for the `-L` list file's path in the arguments.
+const LIST: &str = "@DALAN_LIST@";
+
 // ---------------------------------------------------------------- the stream into the tool
 
 /// Reads the dump (counting file bytes), passes plain SQL through the scanner, and sends chunks to the tool's input.
 /// A refusal on the way (the file changed since it was checked) ends the stream with an error.
+// Each argument is one input of the stream; a struct for one caller would only rename them.
+#[allow(clippy::too_many_arguments)]
 async fn produce(
+    stdin_dump: bool,
+    tail: Option<Vec<u8>>,
     dump: Arc<Dump>,
     rewrite: Option<(Dialect, Rewrite, bool)>,
     password: Vec<u8>,
@@ -858,7 +1140,7 @@ async fn produce(
     if tx.send(Ok(password)).await.is_err() {
         return;
     }
-    if dump.info.format.is_folder() {
+    if !stdin_dump {
         return;
     }
     let mut r = match dumpfile::open_counted(&dump.path, dump.outer, Some(read)).await {
@@ -906,6 +1188,10 @@ async fn produce(
         if !out.is_empty() {
             let _ = tx.send(Ok(out)).await;
         }
+    }
+    // A schema renamed in the same transaction, after everything else.
+    if let Some(t) = tail {
+        let _ = tx.send(Ok(t)).await;
     }
 }
 
@@ -1091,6 +1377,51 @@ pub struct RunInput<'a> {
     pub progress: &'a (dyn Fn(RestoreProgress) + Sync),
 }
 
+/// A custom archive for parallel jobs, as a file on the host: uploaded (unwrapped from any compression) as
+/// `<private folder>/dump`. Returns the folder.
+async fn upload_file(
+    ssh: &Connected,
+    dump: &Dump,
+    stop: &AtomicBool,
+    progress: &(dyn Fn(RestoreProgress) + Sync),
+) -> AppResult<String> {
+    let tmp = dumpfile::TempDir::new("upload")?;
+    let file = tmp.0.join("dump");
+    // Unwrapped here first when compressed, so the host gets the archive pg_restore reads.
+    if dump.outer.is_some() {
+        let mut r = dumpfile::open(&dump.path, dump.outer).await?;
+        let mut f = tokio::fs::File::create(&file)
+            .await
+            .map_err(|e| AppError::internal(e.to_string()))?;
+        tokio::io::copy(&mut r, &mut f)
+            .await
+            .map_err(|e| AppError::internal(e.to_string()))?;
+    } else {
+        // ponytail: a local copy before the upload (twice the disk for a moment); stream it straight to SFTP if big
+        // archives make that hurt.
+        tokio::fs::copy(&dump.path, &file)
+            .await
+            .map_err(|e| AppError::internal(e.to_string()))?;
+    }
+    let size = std::fs::metadata(&file)
+        .map(|m| m.len())
+        .unwrap_or(dump.info.bytes as u64);
+    upload(ssh, &tmp.0, size, stop, progress).await
+}
+
+/// Here, with parallel jobs: a compressed custom archive is unwrapped into a private folder first.
+async fn unpack_local(dump: &Dump) -> AppResult<dumpfile::TempDir> {
+    let tmp = dumpfile::TempDir::new("restore")?;
+    let mut r = dumpfile::open(&dump.path, dump.outer).await?;
+    let mut f = tokio::fs::File::create(tmp.0.join("dump"))
+        .await
+        .map_err(|e| AppError::internal(e.to_string()))?;
+    tokio::io::copy(&mut r, &mut f)
+        .await
+        .map_err(|e| AppError::internal(e.to_string()))?;
+    Ok(tmp)
+}
+
 /// Uploads a folder to a fresh private folder on the host and returns its path.
 async fn upload(
     ssh: &Connected,
@@ -1229,6 +1560,8 @@ pub async fn run(r: RunInput<'_>) -> AppResult<(String, Option<String>, Report2)
     let ssh = r.ssh.clone();
     // Directory dumps: on the host, uploaded first; here, used where they are.
     let mut remote_dir: Option<String> = None;
+    // Holds an unpacked archive until the tool is done with it.
+    let mut _local_tmp: Option<dumpfile::TempDir> = None;
     let folder_arg: Option<String> = match (&dump.folder, ssh.as_deref()) {
         (Some(f), Some(s)) if dump.info.format.is_folder() => {
             let d = upload(s, f, dump.info.bytes as u64, &r.stop, r.progress).await?;
@@ -1236,6 +1569,20 @@ pub async fn run(r: RunInput<'_>) -> AppResult<(String, Option<String>, Report2)
             Some(d)
         }
         (Some(f), None) if dump.info.format.is_folder() => Some(f.display().to_string()),
+        _ if job.as_file => match ssh.as_deref() {
+            Some(s) => {
+                let d = upload_file(s, &dump, &r.stop, r.progress).await?;
+                remote_dir = Some(d.clone());
+                Some(format!("{d}/dump"))
+            }
+            None if dump.outer.is_none() => Some(dump.path.display().to_string()),
+            None => {
+                let t = unpack_local(&dump).await?;
+                let p = t.0.join("dump").display().to_string();
+                _local_tmp = Some(t);
+                Some(p)
+            }
+        },
         _ => None,
     };
     let a = args(job, r.cfg, folder_arg.as_deref(), dump.mongo_gzip);
@@ -1258,6 +1605,7 @@ pub async fn run(r: RunInput<'_>) -> AppResult<(String, Option<String>, Report2)
                 content: job.opts.content,
                 strip_definer: true,
                 keep_sandbox_line: job.mariadb_client,
+                tables: job.opts.objects.clone().filter(|o| !o.is_empty()),
             },
             job.server_scs,
         )),
@@ -1266,7 +1614,20 @@ pub async fn run(r: RunInput<'_>) -> AppResult<(String, Option<String>, Report2)
     let read = Arc::new(AtomicU64::new(0));
     let current = Arc::new(Mutex::new(None));
     let (tx, mut rx) = mpsc::channel::<Result<Vec<u8>, String>>(8);
+    let tail = match (&job.rename, job.kind) {
+        (Some((from, to)), Kind::PgPlain) => Some(
+            format!(
+                "\nALTER SCHEMA {} RENAME TO {};\n",
+                super::pg::quote(from),
+                super::pg::quote(to)
+            )
+            .into_bytes(),
+        ),
+        _ => None,
+    };
     let producer = tokio::spawn(produce(
+        !dump.info.format.is_folder() && !job.as_file,
+        tail,
         Arc::clone(&dump),
         rewrite,
         pw.clone(),
@@ -1379,7 +1740,20 @@ pub async fn run(r: RunInput<'_>) -> AppResult<(String, Option<String>, Report2)
                 )
             })
             .collect();
-        full.extend(a.iter().cloned());
+        // The entry list for `-L`, in a private file removed with `list_file`.
+        let list_file = match &job.list {
+            Some(ids) => Some(backup::LocalConfig::create(
+                ids.iter()
+                    .map(|i| format!("{i}\n"))
+                    .collect::<String>()
+                    .as_bytes(),
+            )?),
+            None => None,
+        };
+        full.extend(a.iter().map(|x| match (&list_file, x.as_str()) {
+            (Some(l), LIST) => l.0.display().to_string(),
+            _ => x.clone(),
+        }));
         let mut cmd = tokio::process::Command::new(backup::local_tool(&job.tool));
         cmd.args(&full).kill_on_drop(true);
         if matches!(job.kind, Kind::PgArchive | Kind::PgPlain) {
@@ -1519,6 +1893,30 @@ async fn kill_remote(ssh: &Connected, rep: &Report) {
 }
 
 /// After the tool: a new database made for a failed or stopped restore is removed again.
+/// An archive restored into this database under a renamed schema: the rename runs once pg_restore is done.
+/// Returns the server's refusal, if any, for the result's message.
+pub async fn rename_after(conn: &Conn<'_>, job: &Job) -> Option<String> {
+    let (Some((from, to)), Kind::PgArchive, false, Conn::Pg(c)) =
+        (&job.rename, job.kind, job.new_database, conn)
+    else {
+        return None;
+    };
+    c.client
+        .batch_execute(&format!(
+            "alter schema {} rename to {}",
+            super::pg::quote(from),
+            super::pg::quote(to)
+        ))
+        .await
+        .err()
+        .map(|e| {
+            format!(
+                "Restored, but the schema couldn't be renamed: {}",
+                super::pg::map_error(&e).message
+            )
+        })
+}
+
 pub async fn after(conn: &Conn<'_>, job: &Job, outcome: &str) -> bool {
     job.new_database && outcome != "done" && drop_database(conn, &job.target_db).await
 }

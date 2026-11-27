@@ -161,6 +161,8 @@ pub struct Dump {
     pub tables: Vec<(String, String)>,
     /// MongoDB folders with `.bson.gz` files need `--gzip`.
     pub mongo_gzip: bool,
+    /// PostgreSQL archives: the table of contents (for choosing objects with `-L`).
+    pub toc: Vec<TocEntry>,
 }
 
 /// A private folder on this computer, removed when dropped.
@@ -601,15 +603,22 @@ pub async fn pick(path: &Path, id: String) -> AppResult<Dump> {
         dump_major: None,
         tables: Vec::new(),
         mongo_gzip: false,
+        toc: Vec::new(),
     };
     match format {
-        DumpFormat::PgCustom => read_pg_archive(r, &mut dump).await?,
+        DumpFormat::PgCustom => {
+            let mut r = r;
+            read_pg_archive(&mut r, &mut dump, Data::Custom).await?;
+        }
         DumpFormat::PgTar => {
             let mut r = r;
             let h = read_up_to(&mut r, 512).await?;
             let size = tar_size(&h);
-            let toc = read_up_to(&mut r, size as usize).await?;
-            read_pg_archive(Box::pin(std::io::Cursor::new(toc)), &mut dump).await?;
+            let toc = read_up_to(&mut r, size.div_ceil(512) as usize * 512).await?;
+            let mut t: Reader = Box::pin(std::io::Cursor::new(
+                toc[..(size as usize).min(toc.len())].to_vec(),
+            ));
+            read_pg_archive(&mut t, &mut dump, Data::Tar(r)).await?;
         }
         DumpFormat::MongoArchive => read_mongo_archive(r, &mut dump).await?,
         DumpFormat::PgPlain | DumpFormat::MySql => read_plain(r, &mut dump).await?,
@@ -660,15 +669,16 @@ async fn read_folder(
         dump_major: None,
         tables: Vec::new(),
         mongo_gzip: false,
+        toc: Vec::new(),
     };
     match format {
         DumpFormat::PgDirectory => {
-            let r: Reader = Box::pin(BufReader::new(
+            let mut r: Reader = Box::pin(BufReader::new(
                 tokio::fs::File::open(root.join("toc.dat"))
                     .await
                     .map_err(io)?,
             ));
-            read_pg_archive(r, &mut dump).await?;
+            read_pg_archive(&mut r, &mut dump, Data::Dir(root.clone())).await?;
         }
         _ => read_mongo_folder(&root, &mut dump).await?,
     }
@@ -913,10 +923,15 @@ pub struct TocEntry {
     pub owner: String,
     pub defn: String,
     pub copy_stmt: String,
+    /// The entries it depends on (dump ids).
+    pub deps: Vec<i64>,
+    /// Tar and directory: the data file (`3436.dat`, `3436.dat.gz`).
+    pub file: Option<String>,
 }
 
 pub struct PgArchive {
     pub version: (u8, u8, u8),
+    pub int_size: usize,
     pub format: u8,
     pub compression: String,
     pub created: Option<String>,
@@ -982,14 +997,14 @@ impl Ar<'_> {
 }
 
 /// Reads a pg archive's header and table of contents (custom format, or a tar/directory dump's `toc.dat`).
-pub async fn read_pg_toc(mut r: Reader) -> AppResult<PgArchive> {
+pub async fn read_pg_toc(r: &mut Reader) -> AppResult<PgArchive> {
     let mut magic = [0u8; 5];
     r.read_exact(&mut magic).await.map_err(|_| bad_archive())?;
     if &magic != b"PGDMP" {
         return Err(bad_archive());
     }
     let mut a = Ar {
-        r: &mut r,
+        r,
         ver: (1, 0),
         int_size: 4,
         off_size: 4,
@@ -1059,6 +1074,7 @@ pub async fn read_pg_toc(mut r: Reader) -> AppResult<PgArchive> {
     }
     let mut out = PgArchive {
         version: (vmaj, vmin, vrev),
+        int_size: a.int_size,
         format,
         compression,
         created,
@@ -1112,9 +1128,15 @@ pub async fn read_pg_toc(mut r: Reader) -> AppResult<PgArchive> {
         if a.ver >= (1, 9) {
             a.str().await?; // "with oids"
         }
+        let mut deps = Vec::new();
         if a.ver >= (1, 5) {
-            while a.str().await?.is_some() {}
+            while let Some(d) = a.str().await? {
+                if let Ok(n) = d.trim().parse::<i64>() {
+                    deps.push(n);
+                }
+            }
         }
+        let mut file = None;
         match format {
             // Custom: where the data is (a flag byte, then the offset).
             1 => {
@@ -1129,7 +1151,7 @@ pub async fn read_pg_toc(mut r: Reader) -> AppResult<PgArchive> {
             }
             // Tar and directory: the data file's name.
             3 | 5 => {
-                a.str().await?;
+                file = a.str().await?;
             }
             _ => return Err(bad_archive()),
         }
@@ -1141,6 +1163,8 @@ pub async fn read_pg_toc(mut r: Reader) -> AppResult<PgArchive> {
             owner,
             defn,
             copy_stmt,
+            deps,
+            file,
         });
     }
     out.entries = Some(entries);
@@ -1168,32 +1192,13 @@ fn toc_kind(desc: &str) -> Option<&'static str> {
     })
 }
 
-async fn read_pg_archive(r: Reader, dump: &mut Dump) -> AppResult<()> {
-    let ar = read_pg_toc(r).await?;
-    let i = &mut dump.info;
-    dump.archive_version = Some((ar.version.0, ar.version.1));
-    dump.dump_major = ar.dump_version.as_deref().and_then(major);
-    i.made_by = ar.dump_version.as_ref().map(|v| format!("pg_dump {v}"));
-    i.server_version = ar
-        .server_version
-        .as_ref()
-        .map(|v| format!("PostgreSQL {v}"));
-    i.source_db = ar.dbname.clone();
-    i.created = ar.created.clone();
-    if ar.compression != "none" {
-        i.notes.push(note(
-            "inner",
-            format!("Compressed inside the archive with {}.", ar.compression),
-        ));
-    }
-    let Some(entries) = ar.entries else {
-        i.notes.push(note("toc", format!("The archive's format ({}.{}) is newer than Dalan's reader, so its contents can't be listed. pg_restore on the target still checks it.", ar.version.0, ar.version.1)));
-        return Ok(());
-    };
+/// The preview from a table of contents: objects, owners, grants, extensions, encoding, and the safety rules on the
+/// SQL each entry runs.
+fn fill_from_toc(i: &mut DumpInfo, tables: &mut Vec<(String, String)>, entries: &[TocEntry]) {
     let mut owners: Vec<String> = Vec::new();
     let mut extensions: Vec<String> = Vec::new();
     let mut grants = 0u64;
-    for e in &entries {
+    for e in entries {
         if !e.owner.is_empty()
             && !owners.contains(&e.owner)
             && owners.len() < 50
@@ -1221,7 +1226,7 @@ async fn read_pg_archive(r: Reader, dump: &mut Dump) -> AppResult<()> {
                 format!("{}.{}", e.namespace, e.tag)
             };
             if kind == "table" {
-                dump.tables.push((e.namespace.clone(), e.tag.clone()));
+                tables.push((e.namespace.clone(), e.tag.clone()));
             }
             if i.objects.len() < 5000 {
                 i.objects.push(DumpObject {
@@ -1271,8 +1276,358 @@ async fn read_pg_archive(r: Reader, dump: &mut Dump) -> AppResult<()> {
             ),
         ));
     }
-    i.notes.push(note("rows", "Row counts aren't listed for archives: the data is compressed inside and is read only by pg_restore.".to_string()));
+}
+
+/// `pg_restore --list` output (for archives newer than this reader): `3436; 0 16390 TABLE DATA public orders app`.
+pub fn parse_list(text: &str) -> Vec<TocEntry> {
+    const DESCS: &[&str] = &[
+        "MATERIALIZED VIEW DATA",
+        "FK CONSTRAINT",
+        "TABLE DATA",
+        "SEQUENCE SET",
+        "SEQUENCE OWNED BY",
+        "DEFAULT ACL",
+        "MATERIALIZED VIEW",
+        "FOREIGN TABLE",
+        "LARGE OBJECT",
+        "BLOB METADATA",
+        "BLOBS",
+        "TABLE",
+        "VIEW",
+        "FUNCTION",
+        "PROCEDURE",
+        "AGGREGATE",
+        "TRIGGER",
+        "SEQUENCE",
+        "TYPE",
+        "DOMAIN",
+        "SCHEMA",
+        "EXTENSION",
+        "INDEX",
+        "CONSTRAINT",
+        "DEFAULT",
+        "COMMENT",
+        "ACL",
+        "ENCODING",
+        "STDSTRINGS",
+        "SEARCHPATH",
+        "DATABASE",
+    ];
+    let mut out = Vec::new();
+    for l in text.lines() {
+        let Some((id, rest)) = l.split_once(';') else {
+            continue;
+        };
+        let Ok(id) = id.trim().parse::<i64>() else {
+            continue;
+        };
+        // "<tableoid> <oid> <DESC…> <schema> <tag…> <owner>"
+        let rest: Vec<&str> = rest.split_whitespace().skip(2).collect();
+        let joined = rest.join(" ");
+        let Some(desc) = DESCS.iter().find(|d| joined.starts_with(&format!("{d} "))) else {
+            continue;
+        };
+        let after: Vec<&str> = joined[desc.len()..].split_whitespace().collect();
+        if after.len() < 3 {
+            continue;
+        }
+        let ns = if after[0] == "-" {
+            String::new()
+        } else {
+            after[0].to_string()
+        };
+        out.push(TocEntry {
+            id,
+            desc: desc.to_string(),
+            tag: after[1..after.len() - 1].join(" "),
+            namespace: ns,
+            owner: after[after.len() - 1].to_string(),
+            defn: String::new(),
+            copy_stmt: String::new(),
+            deps: Vec::new(),
+            file: None,
+        });
+    }
+    out
+}
+
+/// Fills a dump's preview from `pg_restore --list` (its SQL isn't in the list, so it can't be checked here: the
+/// archive format has no client commands, and the tool runs only what the archive says).
+pub fn apply_list(dump: &mut Dump, text: &str) {
+    let entries = parse_list(text);
+    if entries.is_empty() {
+        return;
+    }
+    fill_from_toc(&mut dump.info, &mut dump.tables, &entries);
+    dump.info.notes.retain(|n| n.code != "toc");
+    dump.info.notes.push(note("toc", "Listed by pg_restore on the target, because this archive is newer than Dalan's reader. Row counts aren't known.".to_string()));
+    dump.toc = entries;
+}
+
+/// Where an archive's table data is, for counting its rows.
+enum Data {
+    /// After the table of contents in the same stream.
+    Custom,
+    /// The tar members after `toc.dat`.
+    Tar(Reader),
+    /// Files next to `toc.dat`.
+    Dir(PathBuf),
+}
+
+async fn read_pg_archive(r: &mut Reader, dump: &mut Dump, data: Data) -> AppResult<()> {
+    let mut ar = read_pg_toc(r).await?;
+    let i = &mut dump.info;
+    dump.archive_version = Some((ar.version.0, ar.version.1));
+    dump.dump_major = ar.dump_version.as_deref().and_then(major);
+    i.made_by = ar.dump_version.as_ref().map(|v| format!("pg_dump {v}"));
+    i.server_version = ar
+        .server_version
+        .as_ref()
+        .map(|v| format!("PostgreSQL {v}"));
+    i.source_db = ar.dbname.clone();
+    i.created = ar.created.clone();
+    if ar.compression != "none" {
+        i.notes.push(note(
+            "inner",
+            format!("Compressed inside the archive with {}.", ar.compression),
+        ));
+    }
+    let Some(entries) = ar.entries.take() else {
+        i.notes.push(note("toc", format!("The archive's format ({}.{}) is newer than Dalan's reader, so its contents can't be listed. pg_restore on the target still checks it.", ar.version.0, ar.version.1)));
+        return Ok(());
+    };
+    fill_from_toc(&mut dump.info, &mut dump.tables, &entries);
+    let i = &mut dump.info;
+    // Rows: the COPY lines of each table's data, read from the archive (lz4 data isn't counted).
+    let counts = archive_rows(r, &ar, &entries, data).await;
+    let mut counted = false;
+    for e in entries.iter().filter(|e| e.desc == "TABLE DATA") {
+        let name = format!("{}.{}", e.namespace, e.tag);
+        if let Some(n) = counts.get(&e.id) {
+            counted = true;
+            if let Some(o) = i
+                .objects
+                .iter_mut()
+                .find(|o| o.kind == "table" && o.name == name)
+            {
+                o.rows = Some(*n as f64);
+                o.rows_exact = true;
+            }
+        }
+    }
+    if !counted && entries.iter().any(|e| e.desc == "TABLE DATA") {
+        i.notes.push(note("rows", format!("Row counts aren't listed: the data is compressed with {} inside the archive, which Dalan doesn't read.", ar.compression)));
+    }
+    dump.toc = entries;
     Ok(())
+}
+
+/// Rows per TABLE DATA entry. Damage or an unknown compression only means fewer counts, never an error.
+async fn archive_rows(
+    r: &mut Reader,
+    ar: &PgArchive,
+    entries: &[TocEntry],
+    data: Data,
+) -> std::collections::HashMap<i64, u64> {
+    let mut out = std::collections::HashMap::new();
+    let lines = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    // A writer that ends in a shared count, so the boxed decompressor can be read after it is dropped.
+    // The count, the first bytes of the current line, and whether the `\\.` end line has passed (pg_dump writes
+    // blank lines after it).
+    struct Shared(std::sync::Arc<std::sync::atomic::AtomicU64>, Vec<u8>, bool);
+    impl std::io::Write for Shared {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            for &b in buf {
+                if self.1.len() < 3 {
+                    self.1.push(b);
+                }
+                if b == b'\n' {
+                    if self.1.starts_with(b"\\.") {
+                        self.2 = true;
+                    } else if !self.2 {
+                        self.0.fetch_add(1, Ordering::Relaxed);
+                    }
+                    self.1.clear();
+                }
+            }
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let make = |comp: &str| -> Option<Box<dyn std::io::Write + Send>> {
+        lines.store(0, Ordering::Relaxed);
+        let w = Shared(std::sync::Arc::clone(&lines), Vec::new(), false);
+        match comp {
+            "none" => Some(Box::new(w)),
+            "gzip" => Some(Box::new(flate2::write::ZlibDecoder::new(w))),
+            "zstd" => zstd::stream::write::Decoder::new(w)
+                .ok()
+                .map(|d| Box::new(d) as Box<dyn std::io::Write + Send>),
+            _ => None,
+        }
+    };
+    let data_ids: std::collections::HashSet<i64> = entries
+        .iter()
+        .filter(|e| e.desc == "TABLE DATA")
+        .map(|e| e.id)
+        .collect();
+    match data {
+        Data::Custom => {
+            let mut a = Ar {
+                r,
+                ver: (ar.version.0, ar.version.1),
+                int_size: ar.int_size,
+                off_size: 8,
+            };
+            loop {
+                let Ok(kind) = a.byte().await else { break };
+                let Ok(id) = a.int().await else { break };
+                match kind {
+                    // Table data: chunks until a zero length.
+                    1 => {
+                        let mut w = if data_ids.contains(&id) {
+                            make(&ar.compression)
+                        } else {
+                            None
+                        };
+                        let mut ok = true;
+                        loop {
+                            let Ok(len) = a.int().await else { return out };
+                            if len <= 0 {
+                                break;
+                            }
+                            if len > 1 << 30 {
+                                return out;
+                            }
+                            let mut buf = vec![0u8; len as usize];
+                            if a.r.read_exact(&mut buf).await.is_err() {
+                                return out;
+                            }
+                            if let Some(w) = w.as_mut() {
+                                ok &= w.write_all(&buf).is_ok();
+                            }
+                        }
+                        if let Some(mut w) = w.take() {
+                            ok &= w.flush().is_ok();
+                            drop(w);
+                            if ok {
+                                out.insert(id, lines.load(Ordering::Relaxed));
+                            }
+                        }
+                    }
+                    // Large objects: (oid, chunks) until oid 0.
+                    3 => loop {
+                        let Ok(oid) = a.int().await else { return out };
+                        if oid == 0 {
+                            break;
+                        }
+                        loop {
+                            let Ok(len) = a.int().await else { return out };
+                            if len <= 0 {
+                                break;
+                            }
+                            let mut skip = (&mut *a.r).take(len as u64);
+                            if tokio::io::copy(&mut skip, &mut tokio::io::sink())
+                                .await
+                                .is_err()
+                            {
+                                return out;
+                            }
+                        }
+                    },
+                    _ => break,
+                }
+            }
+        }
+        Data::Tar(mut t) => {
+            // `toc.dat` was read; data members are `<id>.dat`, plain text.
+            loop {
+                let Ok(h) = read_up_to(&mut t, 512).await else {
+                    break;
+                };
+                if h.len() < 512 || h.iter().all(|&b| b == 0) {
+                    break;
+                }
+                let size = tar_size(&h);
+                let name = tar_name(&h);
+                let id = name
+                    .strip_suffix(".dat")
+                    .and_then(|n| n.parse::<i64>().ok())
+                    .filter(|i| data_ids.contains(i));
+                let mut w = id.and_then(|_| make("none"));
+                let mut left = size.div_ceil(512) * 512;
+                let mut body_left = size;
+                while left > 0 {
+                    let Ok(chunk) = read_up_to(&mut t, left.min(64 * 1024) as usize).await else {
+                        return out;
+                    };
+                    if chunk.is_empty() {
+                        return out;
+                    }
+                    let take = (body_left as usize).min(chunk.len());
+                    if let Some(w) = w.as_mut() {
+                        let _ = w.write_all(&chunk[..take]);
+                    }
+                    body_left -= take as u64;
+                    left -= chunk.len() as u64;
+                }
+                if let (Some(id), Some(w)) = (id, w.take()) {
+                    drop(w);
+                    out.insert(id, lines.load(Ordering::Relaxed));
+                }
+            }
+        }
+        Data::Dir(dir) => {
+            for e in entries.iter().filter(|e| e.desc == "TABLE DATA") {
+                let Some(f) = e
+                    .file
+                    .as_deref()
+                    .filter(|f| !f.contains('/') && !f.contains(".."))
+                else {
+                    continue;
+                };
+                // The file is named as written, plus the compression's extension.
+                let found = [
+                    ("", "none"),
+                    (".gz", "gzip"),
+                    (".zst", "zstd"),
+                    (".lz4", "lz4"),
+                ]
+                .iter()
+                .map(|(ext, comp)| (dir.join(format!("{f}{ext}")), *comp))
+                .find(|(p, _)| p.is_file());
+                let Some((p, comp)) = found else { continue };
+                // Files in a directory dump are gzip files (with a header), not bare zlib.
+                let Ok(mut src) = (match comp {
+                    "gzip" => open(&p, Some(Outer::Gzip)).await,
+                    "none" | "zstd" => open(&p, (comp == "zstd").then_some(Outer::Zstd)).await,
+                    _ => continue,
+                }) else {
+                    continue;
+                };
+                let Some(mut w) = make("none") else { continue };
+                let mut buf = vec![0u8; 64 * 1024];
+                let mut ok = true;
+                loop {
+                    match src.read(&mut buf).await {
+                        Ok(0) => break,
+                        Ok(n) => ok &= w.write_all(&buf[..n]).is_ok(),
+                        Err(_) => {
+                            ok = false;
+                            break;
+                        }
+                    }
+                }
+                drop(w);
+                if ok {
+                    out.insert(e.id, lines.load(Ordering::Relaxed));
+                }
+            }
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------- MongoDB

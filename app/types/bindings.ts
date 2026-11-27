@@ -176,6 +176,11 @@ export const commands = {
 	restoreCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, progress: Channel<RestoreProgress_Deserialize>) => typedError<RestoreResult_Serialize, AppError>(__TAURI_INVOKE("restore_commit", { connId, pendingId, typedName, transferId, progress })),
 	/**  The dump isn't needed any more (the dialog closed): its unpacked folder, if any, goes with it. */
 	restoreForget: (connId: string, dumpId: string) => typedError<null, AppError>(__TAURI_INVOKE("restore_forget", { connId, dumpId })),
+	/**
+	 *  "Open the database" after a restore into a new database: a saved copy of this tab's database that opens the new
+	 *  one (same route, user, password and protection). The password is copied in Rust, from the vault to the vault.
+	 */
+	restoreSaveDatabase: (connId: string, database: string) => typedError<DatabaseRow_Serialize, AppError>(__TAURI_INVOKE("restore_save_database", { connId, database })),
 	/**  Stop: the running statement is cancelled by the server (a second connection), and no further statement starts. */
 	sqlCancel: (connId: string, editorId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_cancel", { connId, editorId })),
 	/**  The editor tab closed. */
@@ -2798,6 +2803,11 @@ export type RedisWriteOutcome_Serialize =
 /**  It ran. `reply` is the server's answer when it is worth showing (a new stream entry's id). */
 { status: "done"; reply: string | null } | { status: "pending"; pending: RedisPending_Serialize };
 
+export type RenameSchema = {
+	from: string,
+	to: string,
+};
+
 /**  What the person chose in "Target and options". */
 export type RestoreOptions = RestoreOptions_Serialize | RestoreOptions_Deserialize;
 
@@ -2813,6 +2823,14 @@ export type RestoreOptions_Deserialize = {
 	include_roles: boolean,
 	/**  PostgreSQL: one transaction that stops at the first error. Elsewhere: stop at the first error. */
 	single_transaction: boolean,
+	/**  Only these tables or collections (names as the preview shows them). `None`: everything. */
+	objects?: string[] | null,
+	/**  PostgreSQL: restore one schema of the dump under another name. */
+	rename_schema?: RenameSchema | null,
+	/**  PostgreSQL custom and directory archives: parallel jobs (not with one transaction). 0 or 1: one at a time. */
+	jobs?: number,
+	/**  PostgreSQL archives, data only: turn triggers off while loading (needs a superuser). */
+	disable_triggers?: boolean,
 };
 
 /**  What the person chose in "Target and options". */
@@ -2827,6 +2845,14 @@ export type RestoreOptions_Serialize = {
 	include_roles: boolean,
 	/**  PostgreSQL: one transaction that stops at the first error. Elsewhere: stop at the first error. */
 	single_transaction: boolean,
+	/**  Only these tables or collections (names as the preview shows them). `None`: everything. */
+	objects: string[] | null,
+	/**  PostgreSQL: restore one schema of the dump under another name. */
+	rename_schema: RenameSchema | null,
+	/**  PostgreSQL custom and directory archives: parallel jobs (not with one transaction). 0 or 1: one at a time. */
+	jobs: number,
+	/**  PostgreSQL archives, data only: turn triggers off while loading (needs a superuser). */
+	disable_triggers: boolean,
 };
 
 /**  The review (S48 "Review"): everything the person confirms, in plain words. */

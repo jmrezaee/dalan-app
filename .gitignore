@@ -24,3 +24,6 @@ walk-results
 
 # Package store created by the Docker test runs
 .pnpm-store/
+src-tauri/fuzz/target
+src-tauri/fuzz/corpus
+src-tauri/fuzz/artifacts

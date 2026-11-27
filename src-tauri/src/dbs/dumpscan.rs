@@ -62,6 +62,9 @@ pub struct Rewrite {
     /// MariaDB's `/*M!999999\- enable the sandbox mode */` first line: kept for the MariaDB client (it turns the
     /// sandbox on), dropped for Oracle's `mysql`, which stops at it.
     pub keep_sandbox_line: bool,
+    /// Restore only these tables (names as the preview shows them); statements that belong to another table are
+    /// left out, with their COPY data. `None`: every table.
+    pub tables: Option<Vec<String>>,
 }
 
 /// Why a file is refused: the line and what it does, in words.
@@ -208,6 +211,8 @@ struct Stmt {
     copy_dir_next: bool,
     lang_next: bool,
     is_copy_stdin: bool,
+    /// The statement names a table or view that is left out (for views over them).
+    mentions_left_out: bool,
 }
 
 pub struct Scanner {
@@ -243,6 +248,9 @@ pub struct Scanner {
     prev: [u8; 2],
     started: bool,
     header: Vec<u8>,
+    /// With chosen tables: the tables and views left out so far, full names and last parts.
+    left_out: std::collections::HashSet<String>,
+    left_out_short: std::collections::HashSet<String>,
 }
 
 fn is_ident(b: u8) -> bool {
@@ -293,6 +301,8 @@ impl Scanner {
             prev: *b"\n\n",
             started: false,
             header: Vec::new(),
+            left_out: Default::default(),
+            left_out_short: Default::default(),
         }
     }
 
@@ -998,6 +1008,25 @@ impl Scanner {
             TokKind::Word if norm == "VALUES" || norm == "VALUE" => st.after_values = true,
             _ => {}
         }
+        if matches!(kind, TokKind::Word | TokKind::QIdent | TokKind::Str)
+            && !self.left_out_short.is_empty()
+        {
+            // A string names a relation in setval('public.orders_id_seq').
+            let short = match kind {
+                TokKind::Word => raw.to_ascii_lowercase(),
+                TokKind::Str => norm
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or("")
+                    .trim_matches('"')
+                    .to_string(),
+                _ => norm.clone(),
+            };
+            if self.left_out_short.contains(&short) {
+                self.stmt.mentions_left_out = true;
+            }
+        }
+        let st = &mut self.stmt;
         st.prev_word = if kind == TokKind::Word {
             norm.clone()
         } else {
@@ -1237,7 +1266,58 @@ impl Scanner {
             self.stmt.toks = toks;
             return;
         };
-        let drop = !self.keep_now()
+        // Chosen tables: a table's own statements go with it; a view over a left-out table is left out too, and so is
+        // everything later said about either.
+        let other_table = match (&rw.tables, table_of(&toks)) {
+            (Some(keep), Some(t)) => {
+                let index_or_trigger = created
+                    .as_ref()
+                    .is_some_and(|(k, _)| k == "index" || k == "trigger");
+                let drop_table = first == "DROP" && toks.get(1).is_some_and(|x| x.norm == "TABLE");
+                let own = !index_or_trigger
+                    && (matches!(first, "COPY" | "INSERT" | "REPLACE" | "TRUNCATE" | "LOCK")
+                        || drop_table
+                        || created.as_ref().is_some_and(|(k, _)| k == "table"));
+                self.left_out.contains(&t) || (own && !keep.contains(&t))
+            }
+            _ => false,
+        };
+        // A view over a left-out table, and statements about other objects that name one (a sequence OWNED BY it, a
+        // key REFERENCES it, setval of its identity sequence) go too.
+        let view_over = rw.tables.is_some()
+            && self.stmt.mentions_left_out
+            && (created
+                .as_ref()
+                .is_some_and(|(k, _)| k == "view" || k == "materialized view")
+                || matches!(
+                    first,
+                    "ALTER" | "COMMENT" | "GRANT" | "REVOKE" | "SELECT" | "SECURITY"
+                ));
+        if other_table || view_over {
+            // An identity column's sequence is left out with its table.
+            if let Some(p) = toks
+                .windows(2)
+                .position(|w| w[0].norm == "SEQUENCE" && w[1].norm == "NAME")
+            {
+                if let Some(seq) = name_after(&toks, p + 2) {
+                    self.left_out_short
+                        .insert(seq.rsplit('.').next().unwrap_or(&seq).to_string());
+                }
+            }
+            let name = if view_over {
+                created.as_ref().map(|(_, n)| n.clone())
+            } else {
+                table_of(&toks)
+            };
+            if let Some(n) = name {
+                self.left_out_short
+                    .insert(n.rsplit('.').next().unwrap_or(&n).to_string());
+                self.left_out.insert(n);
+            }
+        }
+        let other_table = other_table || view_over;
+        let drop = other_table
+            || !self.keep_now()
             || is_db
             || (is_role && (!rw.include_roles || superuser))
             || ((is_owner || is_acl) && rw.skip_owner_acl)
@@ -1368,6 +1448,47 @@ fn object_of(toks: &[Tok]) -> Option<(String, String)> {
         return Some((kind, name_after(toks, at + 1).unwrap_or_default()));
     }
     Some((kind, name_after(toks, at + 1)?))
+}
+
+/// The table a statement belongs to, if it is about one: its CREATE, ALTER, DROP, COPY, INSERT, LOCK, COMMENT,
+/// GRANT, or an index or trigger on it.
+fn table_of(toks: &[Tok]) -> Option<String> {
+    let word = |i: usize| {
+        toks.get(i)
+            .filter(|t| t.kind == TokKind::Word)
+            .map_or("", |t| t.norm.as_str())
+    };
+    let pos = |w: &str| {
+        toks.iter()
+            .position(|t| t.kind == TokKind::Word && t.norm == w)
+    };
+    match word(0) {
+        "CREATE" => match object_of(toks) {
+            Some((k, n)) if k == "table" => Some(n),
+            Some((k, _)) if k == "index" || k == "trigger" => {
+                pos("ON").and_then(|p| name_after(toks, p + 1))
+            }
+            _ => None,
+        },
+        "ALTER" | "DROP" | "TRUNCATE" if word(1) == "TABLE" || word(1) == "VIEW" => {
+            name_after(toks, 2)
+        }
+        "ALTER" if word(1) == "MATERIALIZED" => name_after(toks, 3),
+        "COMMENT" if word(2) == "VIEW" => name_after(toks, 3),
+        "TRUNCATE" => name_after(toks, 1),
+        "COPY" => name_after(toks, 1),
+        "INSERT" | "REPLACE" => pos("INTO").and_then(|p| name_after(toks, p + 1)),
+        "LOCK" => pos("TABLES")
+            .or_else(|| pos("TABLE"))
+            .and_then(|p| name_after(toks, p + 1)),
+        "COMMENT" if word(2) == "TABLE" => name_after(toks, 3),
+        "COMMENT" if word(2) == "COLUMN" => {
+            name_after(toks, 3).and_then(|n| n.rsplit_once('.').map(|(t, _)| t.to_string()))
+        }
+        "GRANT" | "REVOKE" => pos("ON")
+            .and_then(|p| name_after(toks, if word(p + 1) == "TABLE" { p + 2 } else { p + 1 })),
+        _ => None,
+    }
 }
 
 fn name_after_kind(toks: &[Tok], kinds: &[&str]) -> Option<String> {

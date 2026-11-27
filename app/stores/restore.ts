@@ -25,9 +25,15 @@ function setup() {
   const typed = ref('')
   const transferId = ref('')
   const startedAt = ref(0)
-  const options = reactive<Omit<RestoreOptions, 'new_database'> & { target: 'this' | 'new', newName: string }>({
+  /** The tables or collections chosen in "What's inside"; `null` is all of them. */
+  const selected = ref<string[] | null>(null)
+  const options = reactive<Omit<RestoreOptions, 'new_database' | 'objects' | 'rename_schema'> & { target: 'this' | 'new', newName: string, renameFrom: string, renameTo: string }>({
     target: 'this',
     newName: '',
+    renameFrom: '',
+    renameTo: '',
+    jobs: 1,
+    disable_triggers: false,
     source_database: null,
     existing: 'stop',
     content: 'all',
@@ -38,7 +44,8 @@ function setup() {
 
   function start(id: string, production: boolean) {
     connId.value = id
-    Object.assign(options, { target: production ? 'new' : 'this', newName: '', source_database: null, existing: 'stop', content: 'all', skip_owner_acl: true, include_roles: false, single_transaction: true })
+    selected.value = null
+    Object.assign(options, { target: production ? 'new' : 'this', newName: '', renameFrom: '', renameTo: '', jobs: 1, disable_triggers: false, source_database: null, existing: 'stop', content: 'all', skip_owner_acl: true, include_roles: false, single_transaction: true })
     step.value = 'file'
     error.value = ''
     dump.value = null
@@ -71,8 +78,13 @@ function setup() {
     error.value = ''
     busy.value = true
     try {
-      const { target, newName, ...rest } = options
-      plan.value = await api.restorePrepare(connId.value, d.id, { ...rest, new_database: target === 'new' ? newName.trim() : null })
+      const { target, newName, renameFrom, renameTo, ...rest } = options
+      plan.value = await api.restorePrepare(connId.value, d.id, {
+        ...rest,
+        new_database: target === 'new' ? newName.trim() : null,
+        objects: selected.value,
+        rename_schema: renameFrom && renameTo.trim() ? { from: renameFrom, to: renameTo.trim() } : null,
+      })
       typed.value = ''
       step.value = 'review'
     }
@@ -109,7 +121,10 @@ function setup() {
     dump.value = null
   }
 
-  return { connId, open, step, busy, error, dump, plan, progress, result, typed, options, startedAt, start, pick, review, commit, stop, close }
+  /** After a restore into a new database: save it as a database (a copy of this one's connection) to open it. */
+  const saveDatabase = (name: string) => api.restoreSaveDatabase(connId.value, name)
+
+  return { connId, open, step, busy, error, dump, plan, progress, result, typed, options, selected, startedAt, start, pick, review, commit, stop, close, saveDatabase }
 }
 
 const makeStore = (key: string) => defineStore(`restore:${key}`, setup)
@@ -120,3 +135,6 @@ export function useRestoreStore(tabKey: string) {
   if (!stores.has(tabKey)) stores.set(tabKey, makeStore(tabKey))
   return stores.get(tabKey)!()
 }
+
+/** Databases whose tab should open its restore dialog once connected ("Restore a dump…" in the database list). */
+export const restoreRequests = ref(new Set<string>())

@@ -5,7 +5,7 @@
 import { fail, type Handlers } from '../types'
 import type { DumpInfo_Serialize, RestorePlan_Serialize } from '../../../app/types/bindings'
 
-type Keys = 'restorePick' | 'restorePrepare' | 'restoreCommit' | 'restoreForget'
+type Keys = 'restorePick' | 'restorePrepare' | 'restoreCommit' | 'restoreForget' | 'restoreSaveDatabase'
 
 const held = new Map<string, { connId: string, typed: string, target: string, newDb: boolean, slow: boolean }>()
 const stops = new Set<string>()
@@ -58,10 +58,11 @@ export const restore: Pick<Handlers, Keys> = {
     if (!db) fail('not_found', 'That database connection is closed.')
     return dumpFor(db.engine, m.restoreNext, a.folder)
   },
-  restorePrepare: (a, { m }) => {
+  restorePrepare: (a, { m, tag }) => {
     const db = m.dbs.find(d => d.id === m.sqlConns.get(a.connId)?.db)
     if (!db) fail('not_found', 'That database connection is closed.')
     const o = a.options
+    tag(`restore-options:${JSON.stringify({ objects: o.objects ?? null, jobs: o.jobs ?? 1, single_transaction: o.single_transaction, rename_schema: o.rename_schema ?? null })}`)
     const newDb = (o.new_database ?? '').trim()
     if (db.write_mode === 'read_only') fail('db_read_only_mode', `${db.name} is read-only in Dalan. Nothing was sent.`)
     if (!newDb && db.environment === 'production' && db.write_mode !== 'open') fail('db_read_only_mode', `${db.name} is a production database. To restore into it, switch it to Open first (that needs the master password), or restore into a new database.`)
@@ -86,8 +87,8 @@ export const restore: Pick<Handlers, Keys> = {
       clashes: clash && o.existing === 'stop' ? ['public.customers', 'public.orders'] : [],
       skipped: o.skip_owner_acl ? ['Ownership and privileges (everything belongs to the user you sign in as)'] : [],
       warnings: [],
-      objects: 4,
-      rows: 1250,
+      objects: o.objects ? o.objects.length : 4,
+      rows: o.objects ? (o.objects.includes('public.orders') || o.objects.includes('orders') ? 1200 : 50) : 1250,
       bytes: 18 * 2 ** 20,
       upload: false,
       atomic: db.engine === 'postgres' && o.single_transaction,
@@ -130,6 +131,14 @@ export const restore: Pick<Handlers, Keys> = {
     }
   },
   restoreForget: () => null,
+  restoreSaveDatabase: (a, { m, tag }) => {
+    const db = m.dbs.find(d => d.id === m.sqlConns.get(a.connId)?.db)
+    if (!db) fail('not_found', 'That database connection is closed.')
+    const copy = { ...db, id: `db-${m.dbs.length + 1}-${Date.now()}`, name: `${db.name} · ${a.database}`, default_database: a.database, last_opened_at: null }
+    m.dbs.push(copy)
+    tag(`restore-saved:${a.database}`)
+    return copy
+  },
 }
 
 /** Stop for a running fake restore (`sqlTransferStop` with its transfer id). */

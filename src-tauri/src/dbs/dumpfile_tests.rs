@@ -103,6 +103,25 @@ async fn pg_archives_list_their_contents_from_the_table_of_contents() {
             d.info.notes
         );
         assert_eq!(d.info.encoding.as_deref(), Some("UTF8"), "{name}");
+        // Rows are read from the table data inside the archive (gzip in custom and directory dumps, plain in tar).
+        let rows = |t: &str| {
+            d.info
+                .objects
+                .iter()
+                .find(|o| o.kind == "table" && o.name == t)
+                .and_then(|o| o.rows)
+        };
+        assert_eq!(
+            (rows("public.orders"), rows("public.customers")),
+            (Some(4.0), Some(3.0)),
+            "{name}"
+        );
+        assert!(
+            d.toc
+                .iter()
+                .any(|e| e.desc == "TABLE DATA" && !e.deps.is_empty()),
+            "{name}"
+        );
         assert!(
             d.tables.contains(&("public".into(), "orders".into())),
             "{name}"
@@ -334,4 +353,47 @@ async fn truncated_archives_never_panic() {
             let _ = pick(&p, "t".into()).await;
         }
     }
+}
+
+#[test]
+fn pg_restore_list_output_is_read_for_newer_archives() {
+    let text = ";\n; Archive created at 2026-11-20\n;\n3436; 0 16390 TABLE DATA public orders app\n224; 1259 16385 TABLE public orders app\n230; 2606 16400 CONSTRAINT public orders orders_pkey app\n215; 1255 16380 FUNCTION public order_count(integer) app\n3; 2615 2200 SCHEMA - public pg_database_owner\n";
+    let e = parse_list(text);
+    assert_eq!(e.len(), 5);
+    assert_eq!(
+        (
+            e[0].id,
+            e[0].desc.as_str(),
+            e[0].namespace.as_str(),
+            e[0].tag.as_str(),
+            e[0].owner.as_str()
+        ),
+        (3436, "TABLE DATA", "public", "orders", "app")
+    );
+    assert_eq!(e[2].tag, "orders orders_pkey");
+    assert_eq!(e[3].tag, "order_count(integer)");
+    assert_eq!((e[4].namespace.as_str(), e[4].tag.as_str()), ("", "public"));
+}
+
+#[test]
+fn choosing_tables_in_an_archive_leaves_out_their_data_keys_and_dependants() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let d = rt.block_on(pick(&path("pg16.custom"), "t".into())).unwrap();
+    let keep = crate::sql::restore::toc_list(&d.toc, &["public.customers".to_string()]);
+    let kept: Vec<String> = d
+        .toc
+        .iter()
+        .filter(|e| keep.contains(&e.id))
+        .map(|e| format!("{} {}", e.desc, e.tag))
+        .collect();
+    assert!(
+        kept.contains(&"TABLE customers".to_string())
+            && kept.contains(&"TABLE DATA customers".to_string()),
+        "{kept:?}"
+    );
+    assert!(!kept.iter().any(|k| k.contains("orders")), "{kept:?}");
+    assert!(
+        kept.contains(&"TYPE mood".to_string()),
+        "objects of no table stay: {kept:?}"
+    );
 }

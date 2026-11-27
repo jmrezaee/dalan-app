@@ -1,0 +1,31 @@
+# Fuzz targets for the D12 dump readers (replica/databases/restore-copy.md §7): `cargo +nightly fuzz run dumpscan`
+# and `cargo +nightly fuzz run dumpfile`, from src-tauri. CI runs each for 10 minutes every night.
+[package]
+name = "dalan-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+tokio = { version = "1", features = ["rt", "fs", "io-util"] }
+dalan-app = { path = ".." }
+
+# Its own workspace, so the app's build never sees it.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "dumpscan"
+path = "fuzz_targets/dumpscan.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "dumpfile"
+path = "fuzz_targets/dumpfile.rs"
+test = false
+doc = false

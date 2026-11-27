@@ -22,6 +22,7 @@ fn rw() -> Rewrite {
         content: Content::All,
         strip_definer: true,
         keep_sandbox_line: true,
+        tables: None,
     }
 }
 
@@ -522,4 +523,50 @@ fn line_numbers_are_grouped() {
     assert_eq!(group(18204), "18,204");
     assert_eq!(group(7), "7");
     assert_eq!(group(1_000_000), "1,000,000");
+}
+
+#[test]
+fn choosing_tables_leaves_out_everything_that_belongs_to_the_others() {
+    let keep = Some(vec!["public.customers".to_string()]);
+    let out = send(
+        Dialect::Pg,
+        &fixture("pg16.sql"),
+        Rewrite {
+            tables: keep,
+            ..rw()
+        },
+    );
+    assert!(
+        out.contains("CREATE TABLE public.customers") && out.contains("COPY public.customers"),
+        "{out}"
+    );
+    assert!(
+        !out.contains("CREATE TABLE public.orders")
+            && !out.contains("COPY public.orders")
+            && !out.contains("tab\\\\there"),
+        "{out}"
+    );
+    assert!(
+        !out.contains("ALTER TABLE ONLY public.orders") && !out.contains("orders_touch"),
+        "{out}"
+    );
+    // Objects that belong to no table stay.
+    assert!(
+        out.contains("CREATE TYPE public.mood")
+            && out.contains("CREATE FUNCTION public.order_count")
+    );
+    let my = send(
+        Dialect::My,
+        &fixture("mysql84.sql"),
+        Rewrite {
+            tables: Some(vec!["orders".into()]),
+            ..rw()
+        },
+    );
+    assert!(
+        my.contains("INSERT INTO `orders`")
+            && !my.contains("INSERT INTO `customers`")
+            && !my.contains("CREATE TABLE `customers`"),
+        "{my}"
+    );
 }

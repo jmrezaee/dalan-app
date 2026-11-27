@@ -46,6 +46,39 @@ const engineMismatch = computed(() => {
 
 // ---- Target and options
 const hasRoles = computed(() => d.value?.notes.some(n => n.code === 'roles') ?? false)
+// Choosing what to restore: tables and collections can be ticked (everything else comes with them or stays).
+const pickable = (kind: string) => ['table', 'table data', 'collection', 'time series'].includes(kind)
+const pickNames = computed(() => (d.value?.objects ?? []).filter(o => pickable(o.kind)).map(o => o.name))
+const isPicked = (name: string) => store.selected === null || store.selected.includes(name)
+function togglePick(name: string) {
+  const all = pickNames.value
+  const cur = store.selected ?? [...all]
+  const next = cur.includes(name) ? cur.filter(n => n !== name) : [...cur, name]
+  store.selected = next.length === all.length ? null : next
+}
+const pickedCount = computed(() => (store.selected === null ? pickNames.value.length : store.selected.length))
+const archive = computed(() => d.value?.format === 'pg_custom' || d.value?.format === 'pg_tar' || d.value?.format === 'pg_directory')
+const schemas = computed(() => [...new Set((d.value?.objects ?? []).filter(o => o.name.includes('.') && o.kind !== 'trigger').map(o => o.name.split('.')[0]!))])
+const jobsAllowed = computed(() => (d.value?.format === 'pg_custom' || d.value?.format === 'pg_directory') && !store.options.single_transaction)
+watch(jobsAllowed, (ok) => { if (!ok) store.options.jobs = 1 })
+watch(() => [store.options.content, store.options.existing], () => { if (store.options.content !== 'data') store.options.disable_triggers = false })
+// After a restore into a new database: save it as a database and open it in a tab.
+const sessions = useSessionsStore()
+const opening = ref(false)
+async function openNew() {
+  const res = store.result
+  if (!res) return
+  opening.value = true
+  try {
+    const row = await store.saveDatabase(res.target_db)
+    await useDatabasesStore().refresh()
+    if (row.engine === 'mongodb') sessions.openMongo(row)
+    else sessions.openSql(row)
+    store.close()
+  }
+  catch (e) { store.error = e instanceof Error ? e.message : (e as { message?: string })?.message ?? 'Couldn\'t save it.' }
+  opening.value = false
+}
 const canTargetThis = computed(() => !!props.database || pg.value)
 const newNameOk = computed(() => store.options.target !== 'new' || store.options.newName.trim().length > 0)
 watch(() => store.options.existing, (v) => { if (v === 'append') store.options.content = 'data' })
@@ -110,17 +143,23 @@ const radio = 'flex items-start gap-2 text-sm'
           <div>
             <h3 class="mb-1 text-xs font-medium text-muted">{{ kinds || 'No objects listed' }}</h3>
             <table v-if="shown.length" class="w-full table-fixed border-collapse text-xs" aria-label="Objects in the dump">
-              <colgroup><col class="w-32"><col><col class="w-28"></colgroup>
-              <thead class="sr-only"><tr><th>Kind</th><th>Name</th><th>Rows</th></tr></thead>
+              <colgroup><col class="w-8"><col class="w-28"><col><col class="w-28"></colgroup>
+              <thead class="sr-only"><tr><th>Restore</th><th>Kind</th><th>Name</th><th>Rows</th></tr></thead>
               <tbody>
                 <tr v-for="(o, i) in shown" :key="i" class="border-t border-surface-raised">
-                  <td class="h-7 w-32 text-muted">{{ o.kind }}</td>
+                  <td class="h-7"><input v-if="pickable(o.kind) && !d.refused" type="checkbox" :checked="isPicked(o.name)" :aria-label="`Restore ${o.name}`" @change="togglePick(o.name)"></td>
+                  <td class="text-muted">{{ o.kind }}</td>
                   <td class="truncate font-mono" :title="o.name"><span v-if="d.databases.length > 1 && o.database" class="text-muted">{{ o.database }} · </span>{{ o.name }}</td>
                   <td class="w-28 text-right tabular-nums text-muted">{{ o.rows === null ? '' : `${o.rows_exact ? '' : 'about '}${fmt(o.rows)} ${mongo ? 'docs' : 'rows'}` }}</td>
                 </tr>
               </tbody>
             </table>
             <p v-if="hiddenCount > 0" class="mt-1 text-xs text-muted">and {{ fmt(hiddenCount) }} more</p>
+            <div v-if="pickNames.length > 1 && !d.refused" class="mt-2 flex items-center gap-2 text-xs text-muted" data-part="picked">
+              <span>{{ store.selected === null ? `All ${fmt(pickNames.length)} ${mongo ? 'collections' : 'tables'}` : `${fmt(pickedCount)} of ${fmt(pickNames.length)} ${mongo ? 'collections' : 'tables'}` }} will be restored{{ store.selected === null || mongo ? '' : ', with what belongs to them' }}.</span>
+              <Button size="sm" variant="ghost" @click="store.selected = null">All</Button>
+              <Button size="sm" variant="ghost" @click="store.selected = []">None</Button>
+            </div>
           </div>
           <div v-if="d.notes.length">
             <h3 class="mb-1 text-xs font-medium text-muted">Things that will need attention</h3>
@@ -162,6 +201,21 @@ const radio = 'flex items-start gap-2 text-sm'
           <div v-if="!mongo" class="flex flex-col gap-2">
             <label :class="radio"><input v-model="store.options.skip_owner_acl" type="checkbox">Skip ownership and privileges (everything belongs to the user you sign in as)</label>
             <label v-if="hasRoles" :class="radio"><input v-model="store.options.include_roles" type="checkbox">Include roles (never superusers)</label>
+          </div>
+          <fieldset v-if="pg && schemas.length" class="flex flex-col gap-2">
+            <legend class="mb-1 text-xs font-medium text-muted">Rename a schema on the way (optional)</legend>
+            <div class="flex flex-wrap items-center gap-2 text-xs">
+              <select v-model="store.options.renameFrom" class="h-7 rounded-md border border-border-input bg-bg px-2 font-mono text-text" aria-label="Schema in the dump"><option value="">none</option><option v-for="x in schemas" :key="x" :value="x">{{ x }}</option></select>
+              <span class="text-muted">becomes</span>
+              <Input v-model="store.options.renameTo" :disabled="!store.options.renameFrom" class="h-7 w-40 font-mono text-xs" aria-label="New schema name" autocomplete="off" spellcheck="false" />
+            </div>
+          </fieldset>
+          <div v-if="pg && archive" class="flex flex-col gap-2">
+            <label class="flex items-center gap-2 text-sm">Parallel jobs
+              <input v-model.number="store.options.jobs" type="number" min="1" max="16" :disabled="!jobsAllowed" class="h-7 w-16 rounded-md border border-border-input bg-bg px-2 text-xs" aria-label="Parallel jobs">
+              <span class="text-xs text-muted">{{ jobsAllowed ? 'faster on big dumps; the archive goes to the host as a file first' : 'for custom and directory archives that keep going on errors' }}</span>
+            </label>
+            <label :class="radio"><input v-model="store.options.disable_triggers" type="checkbox" :disabled="store.options.content !== 'data'">Turn triggers off while loading (data only; needs a superuser)</label>
           </div>
         </section>
 
@@ -219,11 +273,12 @@ const radio = 'flex items-start gap-2 text-sm'
           <Button variant="secondary" :data-testid="tid('restore-stop')" @click="store.stop()">Stop</Button>
         </template>
         <template v-else-if="store.step === 'result'">
+          <Button v-if="r?.outcome === 'done' && p?.new_database" variant="secondary" :loading="opening" :data-testid="tid('restore-open-new')" @click="openNew">Open {{ r.target_db }}</Button>
           <Button @click="store.close()">Close</Button>
         </template>
         <template v-else>
           <Button ref="cancelBtn" variant="secondary" @click="store.close()">Cancel</Button>
-          <Button v-if="store.step === 'inside'" :disabled="!!d?.refused || !!engineMismatch" @click="store.step = 'target'">Next</Button>
+          <Button v-if="store.step === 'inside'" :disabled="!!d?.refused || !!engineMismatch || store.selected?.length === 0" @click="store.step = 'target'">Next</Button>
           <Button v-if="store.step === 'target'" :disabled="!newNameOk" :loading="store.busy" :data-testid="tid('restore-next')" @click="store.review()">Review</Button>
           <Button v-if="store.step === 'review'" :class="p?.level === 'typed' ? buttonVariants({ variant: 'destructive' }) : ''" :disabled="!p?.pending_id || !typedOk" :data-testid="tid('restore-confirm')" @click="store.commit()">Restore</Button>
         </template>
