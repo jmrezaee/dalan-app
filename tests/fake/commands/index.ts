@@ -1,4 +1,5 @@
 import type { Handlers } from '../types'
+import { bulkFake } from './bulk'
 import { checksFake } from './checks'
 import { compareFake } from './compare'
 import { copy } from './copy'
@@ -22,4 +23,4 @@ import { vault } from './vault'
  * Every Rust command, keyed by its generated name. The type is `Handlers`, so a command added to the Rust side makes
  * `pnpm typecheck` fail here until it has a fake.
  */
-export const handlers: Handlers = { ...vault, ...hosts, ...keychain, ...data, ...sessions, ...sftp, ...redis, ...redisWrite, ...redisConsole, ...redisPubSub, ...databases, ...sql, ...mongo, ...restore, ...copy, ...jobsFake, ...compareFake, ...checksFake }
+export const handlers: Handlers = { ...vault, ...hosts, ...keychain, ...data, ...sessions, ...sftp, ...redis, ...redisWrite, ...redisConsole, ...redisPubSub, ...databases, ...sql, ...mongo, ...restore, ...copy, ...jobsFake, ...compareFake, ...checksFake, ...bulkFake }

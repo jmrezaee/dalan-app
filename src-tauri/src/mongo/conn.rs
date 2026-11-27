@@ -400,8 +400,9 @@ impl MongoConn {
         Ok(())
     }
 
-    /// One command on `db`. The reply is returned when `ok` is 1; otherwise the server's own error.
-    pub async fn command(&self, db: &str, mut cmd: Document) -> AppResult<Document> {
+    /// One command on `db`, its reply as it is when `ok` is 1 (a write's `writeErrors` included: an unordered
+    /// batch writes the rest and lists what it refused).
+    pub async fn command_raw(&self, db: &str, mut cmd: Document) -> AppResult<Document> {
         if self.closed.load(Ordering::SeqCst) {
             return Err(closed());
         }
@@ -442,6 +443,12 @@ impl MongoConn {
         if !ok {
             return Err(server_error(&reply));
         }
+        Ok(reply)
+    }
+
+    /// One command on `db`. The reply is returned when `ok` is 1; otherwise the server's own error.
+    pub async fn command(&self, db: &str, cmd: Document) -> AppResult<Document> {
+        let reply = self.command_raw(db, cmd).await?;
         // Writes answer ok:1 and list what failed beside it.
         if let Some(Bson::Document(w)) = reply.get_array("writeErrors").ok().and_then(|a| a.first())
         {

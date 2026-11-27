@@ -99,7 +99,7 @@ pub(crate) async fn my(port: u16, pw: &str, db: Option<&str>) -> RawConn {
     )
 }
 
-async fn mongo() -> RawConn {
+pub(crate) async fn mongo() -> RawConn {
     let login = crate::mongo::conn::MongoLogin {
         user: "app".into(),
         password: Some(Zeroizing::new("test-mongo".into())),

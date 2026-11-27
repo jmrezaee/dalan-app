@@ -47,6 +47,11 @@ fn family(c: &RawConn) -> AppResult<Family> {
     }
 }
 
+/// A query's rows as text (either SQL engine).
+pub async fn text_rows_pub(c: &RawConn, sql: &str) -> AppResult<Vec<Vec<Option<String>>>> {
+    text_rows(c, sql).await
+}
+
 async fn text_rows(c: &RawConn, sql: &str) -> AppResult<Vec<Vec<Option<String>>>> {
     match c {
         RawConn::Pg(p) => Ok(p

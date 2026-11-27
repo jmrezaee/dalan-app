@@ -5,5 +5,6 @@
 pub mod aggregate;
 pub mod conn;
 pub mod docs;
+pub mod import;
 pub mod schema;
 pub mod shell;

@@ -214,8 +214,13 @@ const panel = 'flex flex-col gap-3 rounded-lg border border-border bg-surface p-
                 <div v-if="job.naming" class="flex items-center gap-2"><Input v-model="job.name" class="h-7 text-xs" placeholder="Nightly backup" aria-label="Job name" /><Button size="sm" :disabled="!job.name.trim()" :data-testid="tid('backup-save-job')" @click="saveBackupJob()">Choose folder and save</Button><Button size="sm" variant="secondary" :disabled="!job.name.trim()" :data-testid="tid('backup-save-job-host')" @click="hostPick = true">On a host…</Button></div>
         <HostFolderPicker v-model:open="hostPick" mode="folder" title="Folder for the backups" :on-pick="(p) => saveBackupJob({ host_id: p.hostId, dir: p.path })" />
         <p v-if="job.saved" role="status" class="text-xs text-success">{{ job.saved }}</p>
-<div class="mt-auto flex justify-end gap-2"><Button v-if="bk.running" variant="secondary" @click="store.stopTransfer(bk.id)">Stop</Button><Button variant="ghost" :disabled="bk.running || !!bk.info?.problem" @click="job.naming = !job.naming">Save as a job…</Button><Button variant="ghost" :disabled="bk.running" :data-testid="tid('backup-check')" @click="checkOpen = true">Check a backup…</Button><Button variant="secondary" :disabled="bk.running" :data-testid="tid('sql-restore')" @click="restore.start(store.connId, db?.environment === 'production')">Restore…</Button><Button :disabled="bk.running || !!bk.info?.problem" @click="backup">Back up…</Button></div>
+<div class="mt-auto flex flex-wrap justify-end gap-2"><Button v-if="bk.running" variant="secondary" @click="store.stopTransfer(bk.id)">Stop</Button><Button variant="ghost" :disabled="bk.running || !!bk.info?.problem" @click="job.naming = !job.naming">Save as a job…</Button><Button variant="ghost" :disabled="bk.running" :data-testid="tid('backup-check')" @click="checkOpen = true">Check a backup…</Button><Button variant="secondary" :disabled="bk.running" :data-testid="tid('sql-restore')" @click="restore.start(store.connId, db?.environment === 'production')">Restore…</Button><Button :disabled="bk.running || !!bk.info?.problem" @click="backup">Back up…</Button></div>
       </section>
+    </div>
+    <!-- D17 (E6): many tables at once. -->
+    <div class="mt-4 grid gap-4 lg:grid-cols-2">
+      <BulkExportPanel :tab-key="tabKey" :conn-id="store.connId" :objects="tables.filter(t => t.id).map(t => ({ schema: t.schema, name: t.name }))" :mongo="false" />
+      <BulkImportPanel :tab-key="tabKey" :conn-id="store.connId" :tables="tables.map(t => ({ schema: t.schema, name: t.name }))" />
     </div>
 
     <AlertDialog v-model:open="importOpen">

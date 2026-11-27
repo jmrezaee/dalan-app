@@ -2,6 +2,7 @@
 //! `redis/`; the store, gate types and history follow as the SQL and MongoDB phases need them.
 
 pub mod backupcheck;
+pub mod bulkfiles;
 pub mod datadiff;
 pub mod dumpfile;
 pub mod dumpscan;

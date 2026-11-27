@@ -785,6 +785,12 @@ pub struct SqlManager {
     /// Files chosen for import, by id: the window only ever holds the id and the name, never the path.
     pub import_files: Mutex<HashMap<String, (String, std::path::PathBuf)>>,
     pub import_pending: crate::dbs::gate::PendingStore<transfer::ImportPlan>,
+    /// Bulk import (D17): the files picked per connection (a private folder for unzipped and converted files, and
+    /// the export's manifest when there is one), and the runs held for their confirmation.
+    pub bulk_picked: Mutex<HashMap<String, crate::commands::bulk::BulkPicked>>,
+    pub bulk_pending: crate::dbs::gate::PendingStore<Vec<crate::commands::bulk::BulkHeld>>,
+    /// MongoDB imports held for their confirmation (D17).
+    pub mg_import_pending: crate::dbs::gate::PendingStore<crate::commands::bulk::MgImportJob>,
     /// Dumps picked for a restore (D12), by id, bound to their connection: the window holds the id, never the path.
     dumps: Mutex<HashMap<String, (String, Arc<crate::dbs::dumpfile::Dump>)>>,
     /// Restores held for their confirmation.
@@ -959,7 +965,7 @@ impl SqlManager {
     pub fn put_file(&self, conn_id: &str, path: std::path::PathBuf) -> String {
         let id = uuid::Uuid::now_v7().to_string();
         if let Ok(mut f) = self.import_files.lock() {
-            if f.len() >= 8 {
+            if f.len() >= 256 {
                 f.clear();
             }
             f.insert(id.clone(), (conn_id.to_string(), path));
@@ -1112,6 +1118,13 @@ impl SqlManager {
         self.mongo_pending.drop_conn(conn_id);
         self.session_pending.drop_conn(conn_id);
         self.import_pending.drop_conn(conn_id);
+        self.bulk_pending.drop_conn(conn_id);
+        self.mg_import_pending.drop_conn(conn_id);
+        self.compare_pending.drop_conn(conn_id);
+        self.data_pending.drop_conn(conn_id);
+        if let Ok(mut b) = self.bulk_picked.lock() {
+            b.remove(conn_id);
+        }
         if let Ok(mut f) = self.import_files.lock() {
             f.retain(|_, (c, _)| c != conn_id);
         }

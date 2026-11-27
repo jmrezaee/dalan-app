@@ -98,10 +98,10 @@ test.describe('Import, export and backup (S43, F26)', () => {
     const tab = await openShop(page)
     await tab.getByTestId('sql-open-transfer').click()
     const t = tab.getByTestId('sql-transfer')
-    await t.getByLabel('Table').selectOption('public.customers')
+    await t.getByLabel('Table', { exact: true }).selectOption('public.customers')
     await t.getByRole('button', { name: 'JSON' }).click()
     await t.getByRole('button', { name: 'Save as…' }).click()
-    await expect(t.getByRole('region', { name: 'Export' }).locator('[data-part=done]')).toContainText('Saved /tmp/customers.json · 50 rows')
+    await expect(t.getByRole('region', { name: 'Export', exact: true }).locator('[data-part=done]')).toContainText('Saved /tmp/customers.json · 50 rows')
     expect((await fake.calls()).includes('export:customers.json')).toBe(true)
   })
 
@@ -110,7 +110,7 @@ test.describe('Import, export and backup (S43, F26)', () => {
     const tab = await openShop(page)
     await tab.getByTestId('sql-open-transfer').click()
     const t = tab.getByTestId('sql-transfer')
-    await t.getByLabel('Table').selectOption('public.customers')
+    await t.getByLabel('Table', { exact: true }).selectOption('public.customers')
     await t.getByRole('button', { name: 'Choose file…' }).click()
     const map = t.getByRole('table', { name: 'Column mapping' })
     await expect(map).toContainText('who')
@@ -124,7 +124,7 @@ test.describe('Import, export and backup (S43, F26)', () => {
     await expect(d).toContainText('Load 3 rows into public.customers on app-prod?')
     await expect(d.getByLabel('Statement')).toHaveText('COPY "public"."customers" ("id", "name") FROM STDIN WITH (FORMAT csv)')
     await d.getByRole('button', { name: 'Load rows' }).click()
-    await expect(t.getByRole('region', { name: 'Import' }).locator('[data-part=done]')).toContainText('Loaded 3 rows into public.customers.')
+    await expect(t.getByRole('region', { name: 'Import', exact: true }).locator('[data-part=done]')).toContainText('Loaded 3 rows into public.customers.')
   })
 
   test('S43: a Read-only database refuses an import before any dialog', async ({ page }) => {
@@ -134,7 +134,7 @@ test.describe('Import, export and backup (S43, F26)', () => {
     const t = tab.getByTestId('sql-transfer')
     await t.getByRole('button', { name: 'Choose file…' }).click()
     await t.getByRole('button', { name: 'Review import' }).click()
-    await expect(t.getByRole('region', { name: 'Import' }).locator('[data-part=error]')).toContainText('app-prod is read-only in Dalan')
+    await expect(t.getByRole('region', { name: 'Import', exact: true }).locator('[data-part=error]')).toContainText('app-prod is read-only in Dalan')
     await expect(page.getByTestId('import-confirm')).toHaveCount(0)
   })
 

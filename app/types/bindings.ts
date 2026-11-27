@@ -211,6 +211,32 @@ export const commands = {
 	 *  applies the job's retention. Recorded as a run.
 	 */
 	jobBackupRun: (connId: string, jobId: string, transferId: string, progress: Channel<TransferProgress>) => typedError<TransferDone_Serialize, AppError>(__TAURI_INVOKE("job_backup_run", { connId, jobId, transferId, progress })),
+	bulkExport: (connId: string, transferId: string, request: BulkExport_Deserialize, progress: Channel<BulkProgress>) => typedError<BulkDone | null, AppError>(__TAURI_INVOKE("bulk_export", { connId, transferId, request, progress })),
+	/**  The folder (or zip) dialog, then every CSV, TSV and JSON file in it, each matched to a table by its name. */
+	bulkImportPick: (connId: string, zip: boolean) => typedError<BulkFiles_Serialize | null, AppError>(__TAURI_INVOKE("bulk_import_pick", { connId, zip })),
+	/**
+	 *  A CREATE TABLE for a file whose table isn't there: the export's own types when its manifest has them (same
+	 *  engine), else types read from the values.
+	 */
+	bulkInfer: (connId: string, fileId: string, delimiterName: string, header: boolean, schema: string, table: string) => typedError<InferredTable, AppError>(__TAURI_INVOKE("bulk_infer", { connId, fileId, delimiterName, header, schema, table })),
+	/**  Checks every file (mappings against their tables, the CREATE TABLEs) and holds the run for the confirmation. */
+	bulkImportPrepare: (connId: string, items: BulkItem_Deserialize[]) => typedError<BulkImportPending, AppError>(__TAURI_INVOKE("bulk_import_prepare", { connId, items })),
+	/**
+	 *  Runs the held import: each CREATE TABLE, then each file in its own transaction (one failing doesn't stop the
+	 *  others; the report says which). Progress per file on `progress`.
+	 */
+	bulkImportCommit: (connId: string, pendingId: string, progress: Channel<BulkProgress>) => typedError<BulkFileReport_Serialize[], AppError>(__TAURI_INVOKE("bulk_import_commit", { connId, pendingId, progress })),
+	bulkImportDiscard: (connId: string, pendingId: string) => __TAURI_INVOKE<void>("bulk_import_discard", { connId, pendingId }),
+	/**  The open-file dialog for a MongoDB import (JSON lines, a JSON array, or CSV). */
+	mgImportPick: (connId: string) => typedError<CsvFile | null, AppError>(__TAURI_INVOKE("mg_import_pick", { connId })),
+	mgImportPreview: (connId: string, fileId: string) => typedError<MgImportPreview, AppError>(__TAURI_INVOKE("mg_import_preview", { connId, fileId })),
+	/**
+	 *  Reads the file (any error is said now) and holds the import: insert and upsert are writes, replace removes every
+	 *  document first, so it asks for the typed name.
+	 */
+	mgImportPrepare: (connId: string, db: string, coll: string, fileId: string, mode: MgImportMode) => typedError<MgImportPending, AppError>(__TAURI_INVOKE("mg_import_prepare", { connId, db, coll, fileId, mode })),
+	mgImportCommit: (connId: string, pendingId: string, typedName: string | null, progress: Channel<BulkProgress>) => typedError<MgImportReport, AppError>(__TAURI_INVOKE("mg_import_commit", { connId, pendingId, typedName, progress })),
+	mgImportDiscard: (connId: string, pendingId: string) => __TAURI_INVOKE<void>("mg_import_discard", { connId, pendingId }),
 	/**  The system dialog for a backup file to check. The window gets an id; the path stays here. */
 	backupCheckPick: (connId: string) => typedError<CsvFile | null, AppError>(__TAURI_INVOKE("backup_check_pick", { connId })),
 	backupVerify: (sourceConnId: string, checkConnId: string, file: CheckFile) => typedError<VerifyReport_Serialize, AppError>(__TAURI_INVOKE("backup_verify", { sourceConnId, checkConnId, file })),
@@ -666,6 +692,139 @@ export type BackupInfo_Serialize = {
 export type BlockingChain = {
 	root: ChainLink,
 	waiting: ChainLink[],
+};
+
+export type BulkDone = {
+	/**  The folder or the zip (its name only is shown). */
+	name: string,
+	files: number | null,
+	rows: number | null,
+	warnings: string[],
+};
+
+export type BulkExport = BulkExport_Serialize | BulkExport_Deserialize;
+
+export type BulkExport_Deserialize = {
+	objects: BulkObject[],
+	/**  SQL tables only (collections are always JSON lines). */
+	format: ExportFormat,
+	header: boolean,
+	masks: MaskRule_Deserialize[],
+	/**  `schema.sql` with the tables' CREATE statements (SQL engines). */
+	ddl: boolean,
+	zip: boolean,
+};
+
+export type BulkExport_Serialize = {
+	objects: BulkObject[],
+	/**  SQL tables only (collections are always JSON lines). */
+	format: ExportFormat,
+	header: boolean,
+	masks: MaskRule_Serialize[],
+	/**  `schema.sql` with the tables' CREATE statements (SQL engines). */
+	ddl: boolean,
+	zip: boolean,
+};
+
+export type BulkFile = {
+	/**  For `sql_import_preview` and the import (the path stays in Rust). */
+	id: string,
+	name: string,
+	/**  `,` or `tab`. */
+	delimiter: string,
+	/**  JSON turned into CSV with a header. */
+	json: boolean,
+	/**  The table it goes into, matched by name (the window can change it). */
+	schema: string,
+	table: string,
+	exists: boolean,
+};
+
+export type BulkFileReport = BulkFileReport_Serialize | BulkFileReport_Deserialize;
+
+export type BulkFileReport_Deserialize = {
+	name: string,
+	table: string,
+	rows: number | null,
+	created: boolean,
+	error?: string | null,
+};
+
+export type BulkFileReport_Serialize = {
+	name: string,
+	table: string,
+	rows: number | null,
+	created: boolean,
+	error: string | null,
+};
+
+export type BulkFiles = BulkFiles_Serialize | BulkFiles_Deserialize;
+
+export type BulkFiles_Deserialize = {
+	source: string,
+	files: BulkFile[],
+	/**  Files that aren't CSV, TSV or JSON. */
+	skipped: string[],
+	/**  The folder or zip came from a Dalan export (its manifest names the source). */
+	from?: string | null,
+};
+
+export type BulkFiles_Serialize = {
+	source: string,
+	files: BulkFile[],
+	/**  Files that aren't CSV, TSV or JSON. */
+	skipped: string[],
+	/**  The folder or zip came from a Dalan export (its manifest names the source). */
+	from: string | null,
+};
+
+export type BulkImportPending = {
+	id: string,
+	db_name: string,
+	environment: string,
+	files: number | null,
+	creates: number | null,
+	rows: number | null,
+};
+
+export type BulkItem = BulkItem_Serialize | BulkItem_Deserialize;
+
+export type BulkItem_Deserialize = {
+	file_id: string,
+	name: string,
+	schema: string,
+	table: string,
+	delimiter_name: string,
+	header: boolean,
+	/**  For each file column, the table column it goes into (`None`: skipped). */
+	mapping: (string | null)[],
+	/**  The reviewed CREATE TABLE, for a table that isn't there yet. */
+	create?: string | null,
+};
+
+export type BulkItem_Serialize = {
+	file_id: string,
+	name: string,
+	schema: string,
+	table: string,
+	delimiter_name: string,
+	header: boolean,
+	/**  For each file column, the table column it goes into (`None`: skipped). */
+	mapping: (string | null)[],
+	/**  The reviewed CREATE TABLE, for a table that isn't there yet. */
+	create: string | null,
+};
+
+export type BulkObject = {
+	schema: string,
+	name: string,
+};
+
+export type BulkProgress = {
+	index: number | null,
+	total: number | null,
+	table: string,
+	rows: number | null,
 };
 
 export type CatalogTable = {
@@ -2128,6 +2287,18 @@ export type ImportRow_Serialize = {
 	warnings: string[],
 };
 
+export type InferredColumn = {
+	name: string,
+	type_name: string,
+};
+
+export type InferredTable = {
+	ddl: string,
+	columns: InferredColumn[],
+	/**  The types came from the export's manifest (same engine), not from the values. */
+	from_manifest: boolean,
+};
+
 /**  What this item would get if it set nothing itself. Drives the "from Production" hints. */
 export type Inherited = Inherited_Serialize | Inherited_Deserialize;
 
@@ -2554,6 +2725,42 @@ export type MgFindRequest = {
 	limit: number,
 	/**  A collation document, e.g. `{"locale":"en","strength":2}`; empty for none. */
 	collation: string,
+};
+
+export type MgFormat = "json_lines" | "json_array" | "csv";
+
+export type MgImportMode = { mode: "insert" } | 
+/**  Replace the document whose `field` has the same value, or insert it. */
+{ mode: "upsert"; field: string } | 
+/**  Remove every document of the collection first. */
+{ mode: "replace" };
+
+export type MgImportPending = {
+	id: string,
+	/**  `confirm`, or `typed` for a replace. */
+	level: string,
+	typed_name: string,
+	environment: string,
+	docs: number | null,
+};
+
+export type MgImportPreview = {
+	format: MgFormat,
+	docs: number | null,
+	/**  The first five documents as relaxed extended JSON. */
+	sample: string[],
+	/**  Top-level fields of those documents (for "upsert by"). */
+	fields: string[],
+};
+
+export type MgImportReport = {
+	inserted: number | null,
+	upserted: number | null,
+	updated: number | null,
+	removed: number | null,
+	/**  The server's words for documents it refused (the first 20). */
+	failed: string[],
+	failed_count: number | null,
 };
 
 export type MgIndex = MgIndex_Serialize | MgIndex_Deserialize;

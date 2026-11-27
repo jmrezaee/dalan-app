@@ -2,7 +2,7 @@
 import { Channel } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { commands } from '~/types/bindings'
-import type { CheckFile, Side_Deserialize as Side, DataSide, DataProgress, Every, HostFolder, Retention_Deserialize as Retention, Schedule, CodeLanguage, MgAggRequest, MgDocOp, MgFindRequest, MgIndexOp, MgStage, AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, SqlRunEvent_Serialize, RunMode, TxnAction, GridEdits_Deserialize, StructureOp_Deserialize, TableRef, ActivityView, SessionAction, ExportFormat, TransferProgress, RestoreOptions_Deserialize as RestoreOptions, CopyRequest_Deserialize as CopyRequest, CopyObject_Deserialize as CopyObject, MaskRule_Deserialize as MaskRule, CopyProgress_Serialize as CopyProgress, RestoreProgress_Serialize as RestoreProgress, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
+import type { BulkItem_Deserialize as BulkItem, MgImportMode, BulkExport_Deserialize as BulkExport, BulkProgress, CheckFile, Side_Deserialize as Side, DataSide, DataProgress, Every, HostFolder, Retention_Deserialize as Retention, Schedule, CodeLanguage, MgAggRequest, MgDocOp, MgFindRequest, MgIndexOp, MgStage, AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, SqlRunEvent_Serialize, RunMode, TxnAction, GridEdits_Deserialize, StructureOp_Deserialize, TableRef, ActivityView, SessionAction, ExportFormat, TransferProgress, RestoreOptions_Deserialize as RestoreOptions, CopyRequest_Deserialize as CopyRequest, CopyObject_Deserialize as CopyObject, MaskRule_Deserialize as MaskRule, CopyProgress_Serialize as CopyProgress, RestoreProgress_Serialize as RestoreProgress, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -134,6 +134,31 @@ export function useTauri() {
     jobSaveCopy: (connId: string, name: string, request: CopyRequest) => unwrap(commands.jobSaveCopy(connId, name, request)),
     jobSaveRestore: (connId: string, dumpId: string, name: string, options: RestoreOptions) => unwrap(commands.jobSaveRestore(connId, dumpId, name, options)),
     jobSaveBackup: (connId: string, name: string, host: HostFolder | null = null) => unwrap(commands.jobSaveBackup(connId, name, host)),
+    // D17 (E6): bulk export.
+    bulkExport: (connId: string, transferId: string, request: BulkExport, onProgress: (p: BulkProgress) => void) => {
+      const progress = new Channel<BulkProgress>()
+      progress.onmessage = onProgress
+      return unwrap(commands.bulkExport(connId, transferId, request, progress as never))
+    },
+    // D17 (E6): bulk import and MongoDB import.
+    bulkImportPick: (connId: string, zip: boolean) => unwrap(commands.bulkImportPick(connId, zip)),
+    bulkInfer: (connId: string, fileId: string, delimiterName: string, header: boolean, schema: string, table: string) => unwrap(commands.bulkInfer(connId, fileId, delimiterName, header, schema, table)),
+    bulkImportPrepare: (connId: string, items: BulkItem[]) => unwrap(commands.bulkImportPrepare(connId, items)),
+    bulkImportCommit: (connId: string, pendingId: string, onProgress: (p: BulkProgress) => void) => {
+      const progress = new Channel<BulkProgress>()
+      progress.onmessage = onProgress
+      return unwrap(commands.bulkImportCommit(connId, pendingId, progress as never))
+    },
+    bulkImportDiscard: (connId: string, pendingId: string) => commands.bulkImportDiscard(connId, pendingId),
+    mgImportPick: (connId: string) => unwrap(commands.mgImportPick(connId)),
+    mgImportPreview: (connId: string, fileId: string) => unwrap(commands.mgImportPreview(connId, fileId)),
+    mgImportPrepare: (connId: string, db: string, coll: string, fileId: string, mode: MgImportMode) => unwrap(commands.mgImportPrepare(connId, db, coll, fileId, mode)),
+    mgImportCommit: (connId: string, pendingId: string, typedName: string | null, onProgress: (p: BulkProgress) => void) => {
+      const progress = new Channel<BulkProgress>()
+      progress.onmessage = onProgress
+      return unwrap(commands.mgImportCommit(connId, pendingId, typedName, progress as never))
+    },
+    mgImportDiscard: (connId: string, pendingId: string) => commands.mgImportDiscard(connId, pendingId),
     // D17 (E7): the backup check's restore.
     backupCheckPick: (connId: string) => unwrap(commands.backupCheckPick(connId)),
     backupVerify: (sourceConnId: string, checkConnId: string, file: CheckFile) => unwrap(commands.backupVerify(sourceConnId, checkConnId, file)),

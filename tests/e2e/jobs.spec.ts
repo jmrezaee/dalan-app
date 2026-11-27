@@ -119,7 +119,7 @@ test.describe('Saved jobs and masking (E1, E5)', () => {
     const fake = await openApp(page, { scenario: 'team', unlocked: true })
     const tab = await addDb(page, 'app-prod')
     await tab.getByTestId('sql-open-transfer').click()
-    const exp = tab.getByTestId('sql-transfer').getByRole('region', { name: 'Export' })
+    const exp = tab.getByTestId('sql-transfer').getByRole('region', { name: 'Export', exact: true })
     await exp.getByTestId('export-masks').locator('summary').click()
     await exp.getByRole('button', { name: 'Add a rule' }).click()
     await exp.getByRole('textbox', { name: 'Masked column 1' }).fill('name')

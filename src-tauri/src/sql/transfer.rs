@@ -170,11 +170,19 @@ impl PgConn {
                     .await
                     .map_err(|e| map_error(&e))?;
                 futures_util::pin_mut!(sink);
+                // Rows end at a line break outside quotes (a quoted value can hold line breaks of its own).
+                let mut quoted = false;
                 while let Some(chunk) = sink.next().await {
                     let chunk = chunk.map_err(|e| map_error(&e))?;
                     out.write_all(&chunk).map_err(io)?;
                     bytes += chunk.len() as f64;
-                    rows += chunk.iter().filter(|b| **b == b'\n').count() as f64;
+                    for b in chunk.iter() {
+                        match b {
+                            b'"' => quoted = !quoted,
+                            b'\n' if !quoted => rows += 1.0,
+                            _ => {}
+                        }
+                    }
                     progress(rows, bytes);
                     if stop.load(Ordering::SeqCst) {
                         return Err(AppError::new(ErrorCode::Internal, "Stopped."));
