@@ -127,6 +127,8 @@ fn obj(schema: &str, name: &str, kind: &str) -> CopyObject {
         filter: None,
         limit: None,
         rename: None,
+        types: None,
+        ddl: None,
     }
 }
 
@@ -139,6 +141,7 @@ fn job(engine: Engine, target_db: &str, objects: Vec<CopyObject>, mode: CopyMode
             mode,
             content: CopyContent::All,
             stop_on_error: true,
+            routines: false,
         },
         source_engine: engine,
         target_db: target_db.into(),
@@ -374,5 +377,219 @@ async fn l3_copy_same_engine_postgres_mysql_to_mariadb_and_mongo_with_keys_views
     assert_eq!(
         crate::mongo::docs::names(idx.get_document("cursor").unwrap(), "firstBatch").len(),
         2
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_copy_across_engines_types_keys_related_and_routines() {
+    // The sources: the D12 fixtures.
+    for db in ["d13x_src", "d13x_from_my", "d13x_routines"] {
+        psql("shop", &format!("drop database if exists {db}"));
+        psql("shop", &format!("create database {db}"));
+    }
+    docker_in(
+        "dalan-test-pg",
+        &["psql", "-q", "-U", "app", "-d", "d13x_src"],
+        &fixture("pg16.sql"),
+    );
+    psql("d13x_src", "create table public.kinds (id serial primary key, flag boolean, at timestamptz, tags text[], blob bytea, span interval, j jsonb, price numeric)");
+    psql("d13x_src", "insert into public.kinds (flag, at, tags, blob, span, j, price) values (true, '2026-01-02 03:04:05+02', '{a,b}', '\\xdeadbeef', '1 day 2 hours', '{\"k\": [1, 2]}', 12.345), (null, null, null, null, null, null, null)");
+    docker_in("dalan-test-mysql", &["mysql", "-uroot", "-ptest-mysql", "-e", "drop database if exists d13x; create database d13x; drop database if exists d13x_back; create database d13x_back"], b"");
+    docker_in(
+        "dalan-test-mysql",
+        &["mysql", "-uroot", "-ptest-mysql", "d13x_back"],
+        &fixture("mysql84.sql"),
+    );
+
+    // "Select related": orders references customers.
+    let rel = related(&pg("d13x_src").await, &[obj("public", "orders", "table")])
+        .await
+        .unwrap();
+    assert_eq!(
+        rel.iter().map(|o| o.name.as_str()).collect::<Vec<_>>(),
+        vec!["customers"]
+    );
+
+    // PostgreSQL → MySQL: types mapped, keys and the foreign key after the data, the view listed with its DDL.
+    let objs = vec![
+        obj("public", "customers", "table"),
+        obj("public", "orders", "table"),
+        obj("public", "kinds", "table"),
+        obj("public", "big_orders", "view"),
+    ];
+    let r = go(
+        &job(Engine::Postgres, "d13x", objs, CopyMode::Create),
+        pg("d13x_src").await,
+        my(13306, "test-mysql", Some("d13x")).await,
+        &AtomicBool::new(false),
+    )
+    .await;
+    assert_eq!(r.outcome, "done", "{r:?}");
+    assert!(
+        r.tables
+            .iter()
+            .filter(|t| t.status == "done")
+            .all(|t| t.source_rows == t.target_rows),
+        "{r:?}"
+    );
+    assert_eq!(r.not_copied.len(), 1);
+    assert!(r.not_copied[0].ddl.contains("orders"), "{:?}", r.not_copied);
+    assert!(
+        r.warnings.iter().any(|w| w.contains("time zone")),
+        "{:?}",
+        r.warnings
+    );
+    let got = docker_in("dalan-test-mysql", &["mysql", "-uroot", "-ptest-mysql", "-N", "-e", "select flag, at, tags, hex(`blob`), span, j, note from d13x.kinds, d13x.orders where kinds.id = 1 and orders.id = 2; select count(*) from information_schema.referential_constraints where constraint_schema = 'd13x'; select mood from d13x.customers where id = 1"], b"");
+    let lines: Vec<&str> = got.lines().collect();
+    assert_eq!(
+        lines[0].split('\t').collect::<Vec<_>>(),
+        vec![
+            "1",
+            "2026-01-02 01:04:05.000000",
+            "[\"a\", \"b\"]",
+            "DEADBEEF",
+            "P1DT2H",
+            "{\"k\": [1, 2]}",
+            "line\\nbreak"
+        ],
+        "{got}"
+    );
+    assert_eq!(lines[1], "1", "the foreign key arrived: {got}");
+    assert_eq!(lines[2], "happy", "{got}");
+    // A column type chosen in the review, and edited DDL that isn't one CREATE TABLE refused.
+    let mut o = obj("public", "customers", "table");
+    o.rename = Some("c2".into());
+    o.types = Some(vec![CopyColumnType {
+        name: "name".into(),
+        target_type: "varchar(20)".into(),
+    }]);
+    let r = go(
+        &job(Engine::Postgres, "d13x", vec![o.clone()], CopyMode::Create),
+        pg("d13x_src").await,
+        my(13306, "test-mysql", Some("d13x")).await,
+        &AtomicBool::new(false),
+    )
+    .await;
+    assert_eq!(r.outcome, "done", "{r:?}");
+    assert_eq!(docker_in("dalan-test-mysql", &["mysql", "-uroot", "-ptest-mysql", "-N", "-e", "select column_type from information_schema.columns where table_schema = 'd13x' and table_name = 'c2' and column_name = 'name'"], b""), "varchar(20)");
+    o.rename = Some("c3".into());
+    o.ddl = Some("create table c3 (id int); drop table customers".into());
+    let r = go(
+        &job(Engine::Postgres, "d13x", vec![o], CopyMode::Create),
+        pg("d13x_src").await,
+        my(13306, "test-mysql", Some("d13x")).await,
+        &AtomicBool::new(false),
+    )
+    .await;
+    assert_eq!(r.outcome, "failed");
+    assert_eq!(
+        docker_in(
+            "dalan-test-mysql",
+            &[
+                "mysql",
+                "-uroot",
+                "-ptest-mysql",
+                "-N",
+                "-e",
+                "select count(*) from d13x.customers"
+            ],
+            b""
+        ),
+        "3"
+    );
+
+    // MySQL → PostgreSQL: auto_increment becomes identity (moved on), tinyint(1)… the rows and the key arrive.
+    let objs = vec![
+        obj("d13x_back", "customers", "table"),
+        obj("d13x_back", "orders", "table"),
+    ];
+    let r = go(
+        &job(Engine::Mysql, "d13x_from_my", objs, CopyMode::Create),
+        my(13306, "test-mysql", Some("d13x_back")).await,
+        pg("d13x_from_my").await,
+        &AtomicBool::new(false),
+    )
+    .await;
+    assert_eq!(r.outcome, "done", "{r:?}");
+    assert_eq!(
+        psql(
+            "d13x_from_my",
+            "select note from public.orders where id = 2"
+        ),
+        "quote's"
+    );
+    assert_eq!(psql("d13x_from_my", "select count(*) from pg_constraint where conrelid = 'public.orders'::regclass and contype = 'f'"), "1");
+    assert!(psql(
+        "d13x_from_my",
+        "insert into public.customers (name) values ('Di') returning id"
+    )
+    .starts_with('4'));
+
+    // Same engine with functions and triggers asked for.
+    let mut j = job(
+        Engine::Postgres,
+        "d13x_routines",
+        vec![
+            obj("public", "customers", "table"),
+            obj("public", "orders", "table"),
+        ],
+        CopyMode::Create,
+    );
+    j.req.routines = true;
+    let r = go(
+        &j,
+        pg("d13x_src").await,
+        pg("d13x_routines").await,
+        &AtomicBool::new(false),
+    )
+    .await;
+    assert_eq!(r.outcome, "done", "{r:?}");
+    assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+    assert_eq!(psql("d13x_routines", "select public.order_count(1)"), "2");
+    assert!(
+        psql(
+            "d13x_routines",
+            "insert into public.orders (customer_id, total) values (1, 1) returning note"
+        )
+        .starts_with("n/a"),
+        "the trigger runs"
+    );
+    // MySQL → MariaDB with the procedure and the trigger.
+    docker_in(
+        "dalan-test-mariadb",
+        &[
+            "mariadb",
+            "-uroot",
+            "-ptest-mariadb",
+            "-e",
+            "drop database if exists d13r; create database d13r",
+        ],
+        b"",
+    );
+    let mut j = job(
+        Engine::Mysql,
+        "d13r",
+        vec![
+            obj("d13x_back", "customers", "table"),
+            obj("d13x_back", "orders", "table"),
+        ],
+        CopyMode::Create,
+    );
+    j.req.routines = true;
+    let r = go(
+        &j,
+        my(13306, "test-mysql", Some("d13x_back")).await,
+        my(13307, "test-mariadb", Some("d13r")).await,
+        &AtomicBool::new(false),
+    )
+    .await;
+    assert_eq!(r.outcome, "done", "{r:?}");
+    assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+    let got = docker_in("dalan-test-mariadb", &["mariadb", "-uroot", "-ptest-mariadb", "-N", "-e", "select count(*) from information_schema.routines where routine_schema = 'd13r'; select count(*) from information_schema.triggers where trigger_schema = 'd13r'"], b"");
+    assert_eq!(
+        got.split_whitespace().collect::<Vec<_>>(),
+        vec!["1", "1"],
+        "{got}"
     );
 }

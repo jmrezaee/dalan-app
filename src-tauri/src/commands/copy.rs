@@ -31,12 +31,16 @@ pub async fn copy_prepare(
     let dst_cfg = sql::load(&state.store(), &dst_id).await?;
     let source = sql::gate_target(&state.store(), &src_id).await?;
     let target = sql::gate_target(&state.store(), &dst_id).await?;
-    if copy::family(src_cfg.engine) != copy::family(dst_cfg.engine) {
+    if !copy::compatible(src_cfg.engine, dst_cfg.engine) {
         return Err(AppError::validation(format!(
-            "Copying from {} to {} arrives with the next update. This one copies between databases of the same engine.",
+            "{} and {} don't copy to each other: MongoDB copies go to MongoDB, and SQL copies between PostgreSQL, MySQL and MariaDB.",
             src_cfg.engine.label(),
             dst_cfg.engine.label()
         )));
+    }
+    let cross = copy::family(src_cfg.engine) != copy::family(dst_cfg.engine);
+    if request.routines && cross {
+        return Err(AppError::validation("Functions, procedures and triggers copy between databases of the same engine only. Between engines they are listed with their DDL in the report."));
     }
     if request.objects.is_empty() {
         return Err(AppError::validation("Choose at least one table to copy."));
@@ -79,11 +83,57 @@ pub async fn copy_prepare(
     for (o, rows) in request.objects.iter().zip(est) {
         let to = copy::target_name(o);
         let key = if dst_cfg.engine == crate::dbs::Engine::Postgres {
-            format!("{}.{to}", o.schema)
+            // Between engines a table lands in `public`.
+            format!("{}.{to}", if cross { "public" } else { o.schema.as_str() })
         } else {
             to.clone()
         };
         let exists = have.contains(&key.to_ascii_lowercase());
+        // Between engines: each column's mapping (with the person's choices), and the DDL that will run.
+        let (columns, ddl) = if cross && o.kind == "table" {
+            let t = match &src_raw {
+                crate::sql::RawConn::Pg(c) => {
+                    crate::sql::copycross::describe_pg(c, &o.schema, &o.name).await?
+                }
+                crate::sql::RawConn::My(c) => {
+                    crate::sql::copycross::describe_my(c, &o.schema, &o.name).await?
+                }
+                crate::sql::RawConn::Mongo(_) => unreachable!("checked above"),
+            };
+            let to_my = copy::family(dst_cfg.engine) == "mysql";
+            let cols = t
+                .cols
+                .iter()
+                .map(|c| {
+                    let chosen = o
+                        .types
+                        .as_ref()
+                        .and_then(|v| v.iter().find(|x| x.name == c.name))
+                        .map(|x| x.target_type.clone())
+                        .filter(|x| !x.trim().is_empty());
+                    copy::CopyColumn {
+                        name: c.name.clone(),
+                        source_type: c.source_type.clone(),
+                        lossy: if chosen.is_some() {
+                            None
+                        } else {
+                            c.mapped.lossy.clone()
+                        },
+                        target_type: chosen.unwrap_or_else(|| c.mapped.target.clone()),
+                    }
+                })
+                .collect();
+            let ddl = match o.ddl.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+                Some(d) => {
+                    crate::sql::copycross::check_ddl(d, to_my)?;
+                    d.to_string()
+                }
+                None => crate::sql::copycross::create_sql(&t, o, &to, "public", to_my).1,
+            };
+            (cols, Some(ddl))
+        } else {
+            (Vec::new(), None)
+        };
         if same_place
             && to == o.name
             && (dst_cfg.engine == crate::dbs::Engine::Postgres || o.schema == target_db)
@@ -113,6 +163,8 @@ pub async fn copy_prepare(
             exists,
             action: copy::action(request.mode, exists).into(),
             rows_estimate: rows,
+            columns,
+            ddl,
         });
     }
     let blocked = if !there.is_empty() {
@@ -150,7 +202,9 @@ pub async fn copy_prepare(
     if src_cfg.engine == crate::dbs::Engine::Mongodb {
         warnings.push("MongoDB copies aren't one point in time: documents written during the copy may or may not be in it.".to_string());
     }
-    if src_cfg.engine != dst_cfg.engine {
+    if cross {
+        warnings.push(format!("{} to {}: views, functions and triggers aren't translated; the report lists them with their DDL. Columns marked lossy change on the way.", src_cfg.engine.label(), dst_cfg.engine.label()));
+    } else if src_cfg.engine != dst_cfg.engine {
         warnings.push(format!("{} to {}: most tables copy as they are; features only one of them has will fail and be reported.", src_cfg.engine.label(), dst_cfg.engine.label()));
     }
     if source.environment == "production" && target.environment != "production" {
@@ -245,4 +299,18 @@ pub async fn copy_commit(
         .with_db_session(move |c, s| crate::dbs::history::remember(c, s, &dst_id, "copy", &text))
         .await;
     Ok(rep)
+}
+
+/// "Select related": the tables the chosen ones reference by foreign key, all the way down, so a copy doesn't break
+/// its keys. Returns them (the chosen ones not repeated).
+#[tauri::command]
+#[specta::specta]
+pub async fn copy_related(
+    state: State<'_, AppState>,
+    conn_id: String,
+    objects: Vec<copy::CopyObject>,
+) -> AppResult<Vec<copy::CopyObject>> {
+    state.require_unlocked()?;
+    let raw = state.sql.connect_to(&conn_id, None).await?;
+    copy::related(&raw, &objects).await
 }

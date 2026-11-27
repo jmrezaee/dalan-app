@@ -185,6 +185,11 @@ export const commands = {
 	copyPrepare: (connId: string, request: CopyRequest_Deserialize) => typedError<CopyPlan_Serialize, AppError>(__TAURI_INVOKE("copy_prepare", { connId, request })),
 	/**  Runs the held copy once confirmed (typed when the review asked), with the target's mode asked again. */
 	copyCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, progress: Channel<CopyProgress_Deserialize>) => typedError<CopyReport_Serialize, AppError>(__TAURI_INVOKE("copy_commit", { connId, pendingId, typedName, transferId, progress })),
+	/**
+	 *  "Select related": the tables the chosen ones reference by foreign key, all the way down, so a copy doesn't break
+	 *  its keys. Returns them (the chosen ones not repeated).
+	 */
+	copyRelated: (connId: string, objects: CopyObject_Deserialize[]) => typedError<CopyObject_Serialize[], AppError>(__TAURI_INVOKE("copy_related", { connId, objects })),
 	/**  Stop: the running statement is cancelled by the server (a second connection), and no further statement starts. */
 	sqlCancel: (connId: string, editorId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_cancel", { connId, editorId })),
 	/**  The editor tab closed. */
@@ -646,6 +651,32 @@ export type CodeLanguage = "mongosh" | "node" | "python" | "json";
 
 export type Content = "all" | "schema" | "data";
 
+/**  One column of a table copied between PostgreSQL and MySQL/MariaDB, for the mapping step. */
+export type CopyColumn = CopyColumn_Serialize | CopyColumn_Deserialize;
+
+export type CopyColumnType = {
+	name: string,
+	target_type: string,
+};
+
+/**  One column of a table copied between PostgreSQL and MySQL/MariaDB, for the mapping step. */
+export type CopyColumn_Deserialize = {
+	name: string,
+	source_type: string,
+	target_type: string,
+	/**  What is lost, in words (`None`: nothing). */
+	lossy?: string | null,
+};
+
+/**  One column of a table copied between PostgreSQL and MySQL/MariaDB, for the mapping step. */
+export type CopyColumn_Serialize = {
+	name: string,
+	source_type: string,
+	target_type: string,
+	/**  What is lost, in words (`None`: nothing). */
+	lossy: string | null,
+};
+
 export type CopyContent = "all" | "schema" | "data";
 
 /**  What happens to a table that already exists at the target (§3 "Existing tables at the target"). */
@@ -682,6 +713,10 @@ export type CopyObject_Deserialize = {
 	limit?: number | null,
 	/**  Another name at the target. */
 	rename?: string | null,
+	/**  Between PostgreSQL and MySQL/MariaDB: target types the person chose in place of the mapping's. */
+	types?: CopyColumnType[] | null,
+	/**  Between PostgreSQL and MySQL/MariaDB: the `create table` the person edited (checked again before it runs). */
+	ddl?: string | null,
 };
 
 /**
@@ -699,6 +734,10 @@ export type CopyObject_Serialize = {
 	limit: number | null,
 	/**  Another name at the target. */
 	rename: string | null,
+	/**  Between PostgreSQL and MySQL/MariaDB: target types the person chose in place of the mapping's. */
+	types: CopyColumnType[] | null,
+	/**  Between PostgreSQL and MySQL/MariaDB: the `create table` the person edited (checked again before it runs). */
+	ddl: string | null,
 };
 
 export type CopyPlan = CopyPlan_Serialize | CopyPlan_Deserialize;
@@ -766,6 +805,8 @@ export type CopyReport_Deserialize = {
 	tables: CopyTableReport_Deserialize[],
 	warnings: string[],
 	seconds: number | null,
+	/**  Views, functions and triggers a copy between engines leaves out, with their DDL. */
+	not_copied: NotCopied[],
 };
 
 export type CopyReport_Serialize = {
@@ -775,6 +816,8 @@ export type CopyReport_Serialize = {
 	tables: CopyTableReport_Serialize[],
 	warnings: string[],
 	seconds: number | null,
+	/**  Views, functions and triggers a copy between engines leaves out, with their DDL. */
+	not_copied: NotCopied[],
 };
 
 export type CopyRequest = CopyRequest_Serialize | CopyRequest_Deserialize;
@@ -789,6 +832,11 @@ export type CopyRequest_Deserialize = {
 	content: CopyContent,
 	/**  Stop at the first failing table (default); otherwise skip it and go on. */
 	stop_on_error: boolean,
+	/**
+	 *  Same engine: also copy the functions and procedures of the chosen tables' schemas (or database) and the
+	 *  triggers of the chosen tables.
+	 */
+	routines?: boolean,
 };
 
 export type CopyRequest_Serialize = {
@@ -801,6 +849,11 @@ export type CopyRequest_Serialize = {
 	content: CopyContent,
 	/**  Stop at the first failing table (default); otherwise skip it and go on. */
 	stop_on_error: boolean,
+	/**
+	 *  Same engine: also copy the functions and procedures of the chosen tables' schemas (or database) and the
+	 *  triggers of the chosen tables.
+	 */
+	routines: boolean,
 };
 
 export type CopyTablePlan = CopyTablePlan_Serialize | CopyTablePlan_Deserialize;
@@ -813,6 +866,9 @@ export type CopyTablePlan_Deserialize = {
 	/**  What happens, in words: "create", "drop and create", "empty and load", "add rows", "insert or replace". */
 	action: string,
 	rows_estimate?: number | null,
+	/**  Between PostgreSQL and MySQL/MariaDB: each column's mapping, and the `create table` that will run. */
+	columns: CopyColumn_Deserialize[],
+	ddl?: string | null,
 };
 
 export type CopyTablePlan_Serialize = {
@@ -823,6 +879,9 @@ export type CopyTablePlan_Serialize = {
 	/**  What happens, in words: "create", "drop and create", "empty and load", "add rows", "insert or replace". */
 	action: string,
 	rows_estimate: number | null,
+	/**  Between PostgreSQL and MySQL/MariaDB: each column's mapping, and the `create table` that will run. */
+	columns: CopyColumn_Serialize[],
+	ddl: string | null,
 };
 
 export type CopyTableReport = CopyTableReport_Serialize | CopyTableReport_Deserialize;
@@ -2223,6 +2282,13 @@ export type MgValidationCheck = {
 	/**  How many documents the rules would reject. */
 	failing: number | null,
 	sample: MgDoc[],
+};
+
+/**  Something the copy leaves out, with its source DDL to copy by hand. */
+export type NotCopied = {
+	name: string,
+	kind: string,
+	ddl: string,
 };
 
 export type ObjectKind = "schema" | "table" | "view" | "matview" | "foreign";

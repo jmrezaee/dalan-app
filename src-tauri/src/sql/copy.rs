@@ -63,6 +63,36 @@ pub struct CopyObject {
     /// Another name at the target.
     #[serde(default)]
     pub rename: Option<String>,
+    /// Between PostgreSQL and MySQL/MariaDB: target types the person chose in place of the mapping's.
+    #[serde(default)]
+    pub types: Option<Vec<CopyColumnType>>,
+    /// Between PostgreSQL and MySQL/MariaDB: the `create table` the person edited (checked again before it runs).
+    #[serde(default)]
+    pub ddl: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct CopyColumnType {
+    pub name: String,
+    pub target_type: String,
+}
+
+/// One column of a table copied between PostgreSQL and MySQL/MariaDB, for the mapping step.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct CopyColumn {
+    pub name: String,
+    pub source_type: String,
+    pub target_type: String,
+    /// What is lost, in words (`None`: nothing).
+    pub lossy: Option<String>,
+}
+
+/// Something the copy leaves out, with its source DDL to copy by hand.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct NotCopied {
+    pub name: String,
+    pub kind: String,
+    pub ddl: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Type)]
@@ -77,6 +107,10 @@ pub struct CopyRequest {
     pub content: CopyContent,
     /// Stop at the first failing table (default); otherwise skip it and go on.
     pub stop_on_error: bool,
+    /// Same engine: also copy the functions and procedures of the chosen tables' schemas (or database) and the
+    /// triggers of the chosen tables.
+    #[serde(default)]
+    pub routines: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -88,6 +122,9 @@ pub struct CopyTablePlan {
     /// What happens, in words: "create", "drop and create", "empty and load", "add rows", "insert or replace".
     pub action: String,
     pub rows_estimate: Option<f64>,
+    /// Between PostgreSQL and MySQL/MariaDB: each column's mapping, and the `create table` that will run.
+    pub columns: Vec<CopyColumn>,
+    pub ddl: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -140,9 +177,124 @@ pub struct CopyReport {
     pub tables: Vec<CopyTableReport>,
     pub warnings: Vec<String>,
     pub seconds: f64,
+    /// Views, functions and triggers a copy between engines leaves out, with their DDL.
+    pub not_copied: Vec<NotCopied>,
 }
 
 /// Engines that can copy to each other in this version.
+/// Engines that can copy to each other: the same family, or PostgreSQL ↔ MySQL/MariaDB.
+pub fn compatible(a: Engine, b: Engine) -> bool {
+    let sql = |e: &str| e == "postgres" || e == "mysql";
+    family(a) == family(b) || (sql(family(a)) && sql(family(b)))
+}
+
+/// Pages of a MySQL table by its primary key inside the source's snapshot (a keyless table in one page).
+pub struct MyPager {
+    rel: String,
+    list: String,
+    names: Vec<String>,
+    pk: Vec<String>,
+    filter: Option<String>,
+    limit: Option<u64>,
+    after: Option<Vec<Option<String>>>,
+    done: u64,
+    finished: bool,
+}
+
+impl MyPager {
+    pub fn new(
+        db: &str,
+        name: &str,
+        names: Vec<String>,
+        pk: Vec<String>,
+        filter: Option<String>,
+        limit: Option<u64>,
+    ) -> MyPager {
+        MyPager {
+            rel: format!("{}.{}", q(db), q(name)),
+            list: names.iter().map(|c| q(c)).collect::<Vec<_>>().join(", "),
+            names,
+            pk,
+            filter,
+            limit,
+            after: None,
+            done: 0,
+            finished: false,
+        }
+    }
+
+    pub async fn next(
+        &mut self,
+        s: &crate::sql::mysql::MyConn,
+    ) -> AppResult<Option<Vec<Vec<Option<String>>>>> {
+        const PAGE: usize = 1000;
+        const NO_KEY_CAP: usize = 200_000;
+        if self.finished {
+            return Ok(None);
+        }
+        let mut cond: Vec<String> = self.filter.iter().map(|f| format!("({f})")).collect();
+        if let (false, Some(a)) = (self.pk.is_empty(), &self.after) {
+            let keys = self.pk.iter().map(|c| q(c)).collect::<Vec<_>>().join(", ");
+            let vals = a
+                .iter()
+                .map(|v| v.as_ref().map_or("NULL".into(), |x| lit(x)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            cond.push(format!("({keys}) > ({vals})"));
+        }
+        let page = if self.pk.is_empty() { NO_KEY_CAP } else { PAGE };
+        let take = self.limit.map_or(page as u64, |l| {
+            l.saturating_sub(self.done).min(page as u64)
+        });
+        if take == 0 {
+            self.finished = true;
+            return Ok(None);
+        }
+        let order = if self.pk.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " order by {}",
+                self.pk.iter().map(|c| q(c)).collect::<Vec<_>>().join(", ")
+            )
+        };
+        let wh = if cond.is_empty() {
+            String::new()
+        } else {
+            format!(" where {}", cond.join(" and "))
+        };
+        let res = s
+            .query(
+                &format!(
+                    "select {} from {}{wh}{order} limit {take}",
+                    self.list, self.rel
+                ),
+                page + 1,
+            )
+            .await?;
+        if res.rows.is_empty() {
+            self.finished = true;
+            return Ok(None);
+        }
+        let got = res.rows.len();
+        if self.pk.is_empty() && got >= NO_KEY_CAP {
+            return Err(AppError::new(ErrorCode::SqlNoKey, format!("{} has no primary key and more than {NO_KEY_CAP} rows: Dalan copies a keyless table of up to that many.", self.rel)));
+        }
+        let at: Vec<usize> = self
+            .pk
+            .iter()
+            .filter_map(|k| self.names.iter().position(|c| c == k))
+            .collect();
+        self.after = res
+            .rows
+            .last()
+            .map(|r| at.iter().map(|j| r[*j].clone()).collect());
+        self.done += got as u64;
+        self.finished = self.pk.is_empty() || got < take as usize;
+        Ok(Some(res.rows))
+    }
+}
+
 pub fn family(e: Engine) -> &'static str {
     match e {
         Engine::Postgres => "postgres",
@@ -241,6 +393,57 @@ pub async fn estimates(conn: &RawConn, objs: &[CopyObject]) -> Vec<Option<f64>> 
     out
 }
 
+/// The tables `objects` reference by foreign key, followed to the end (those already chosen are left out).
+pub async fn related(conn: &RawConn, objects: &[CopyObject]) -> AppResult<Vec<CopyObject>> {
+    let mut seen: Vec<(String, String)> = objects
+        .iter()
+        .map(|o| (o.schema.clone(), o.name.clone()))
+        .collect();
+    let mut todo = seen.clone();
+    let mut out = Vec::new();
+    while let Some((schema, name)) = todo.pop() {
+        let refs: Vec<(String, String)> = match conn {
+            RawConn::Pg(c) => c
+                .client
+                .query(
+                    "select n.nspname::text, r.relname::text from pg_constraint c join pg_class r on r.oid = c.confrelid join pg_namespace n on n.oid = r.relnamespace
+                     where c.contype = 'f' and c.conrelid = $1::text::regclass",
+                    &[&format!("{}.{}", quote(&schema), quote(&name))],
+                )
+                .await
+                .map_err(|e| map_error(&e))?
+                .iter()
+                .map(|r| (r.get(0), r.get(1)))
+                .collect(),
+            RawConn::My(c) => c
+                .query(&format!("select referenced_table_schema, referenced_table_name from information_schema.key_column_usage where table_schema = {} and table_name = {} and referenced_table_name is not null", lit(&schema), lit(&name)), 0)
+                .await?
+                .rows
+                .into_iter()
+                .filter_map(|r| Some((r.first().cloned().flatten()?, r.get(1).cloned().flatten()?)))
+                .collect(),
+            RawConn::Mongo(_) => vec![],
+        };
+        for r in refs {
+            if !seen.contains(&r) {
+                seen.push(r.clone());
+                todo.push(r.clone());
+                out.push(CopyObject {
+                    schema: r.0,
+                    name: r.1,
+                    kind: "table".into(),
+                    filter: None,
+                    limit: None,
+                    rename: None,
+                    types: None,
+                    ddl: None,
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Everything a run needs (held by the gate between the review and the confirmation).
 pub struct CopyJob {
     pub req: CopyRequest,
@@ -267,20 +470,31 @@ pub async fn run(r: Run<'_>) -> AppResult<CopyReport> {
         tables: Vec::new(),
         warnings: Vec::new(),
         seconds: 0.0,
+        not_copied: Vec::new(),
     };
-    match (r.src, r.dst) {
-        (RawConn::Pg(s), RawConn::Pg(d)) => {
-            pg::run(r.job, &s, &d, r.stop, r.progress, &mut rep).await?
+    let cross = matches!(
+        (&r.src, &r.dst),
+        (RawConn::Pg(_), RawConn::My(_)) | (RawConn::My(_), RawConn::Pg(_))
+    );
+    if cross {
+        super::copycross::run(r.job, &r.src, &r.dst, r.stop, r.progress, &mut rep).await?;
+    } else {
+        match (r.src, r.dst) {
+            (RawConn::Pg(s), RawConn::Pg(d)) => {
+                pg::run(r.job, &s, &d, r.stop, r.progress, &mut rep).await?
+            }
+            (RawConn::My(s), RawConn::My(d)) => {
+                my::run(r.job, &s, &d, r.stop, r.progress, &mut rep).await?
+            }
+            (RawConn::Mongo(s), RawConn::Mongo(d)) => {
+                mongo::run(r.job, &s, &d, r.stop, r.progress, &mut rep).await?
+            }
+            _ => {
+                return Err(AppError::validation(
+                    "MongoDB copies go to MongoDB, and SQL copies to SQL.",
+                ))
+            }
         }
-        (RawConn::My(s), RawConn::My(d)) => {
-            my::run(r.job, &s, &d, r.stop, r.progress, &mut rep).await?
-        }
-        (RawConn::Mongo(s), RawConn::Mongo(d)) => {
-            mongo::run(r.job, &s, &d, r.stop, r.progress, &mut rep).await?
-        }
-        _ => return Err(AppError::validation(
-            "Copies between these two engines arrive with the next update (PostgreSQL ↔ MySQL).",
-        )),
     }
     let failed = rep.tables.iter().filter(|t| t.status == "failed").count();
     rep.outcome = if rep.tables.iter().any(|t| t.status == "stopped") {
@@ -452,6 +666,46 @@ mod pg {
             .batch_execute("begin isolation level repeatable read read only")
             .await
             .map_err(|e| map_error(&e))?;
+        // Functions and procedures first (defaults and checks may call them), when asked for.
+        if req.routines && req.content != CopyContent::Data {
+            let schemas: Vec<String> = req
+                .objects
+                .iter()
+                .map(|o| o.schema.clone())
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            let defs = s
+                .client
+                .query(
+                    "select n.nspname::text, pg_get_functiondef(p.oid) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                     where n.nspname = any($1) and p.prokind in ('f', 'p')
+                       and not exists (select 1 from pg_depend d where d.objid = p.oid and d.deptype = 'e') order by p.oid",
+                    &[&schemas],
+                )
+                .await
+                .map_err(|e| map_error(&e))?;
+            for r in &defs {
+                let (schema, def): (String, String) = (r.get(0), r.get(1));
+                let res = async {
+                    // Bodies may name tables that come later (as pg_dump does).
+                    d.client
+                        .batch_execute(&format!(
+                            "set check_function_bodies = false; create schema if not exists {}",
+                            quote(&schema)
+                        ))
+                        .await?;
+                    d.client.batch_execute(&def).await
+                }
+                .await;
+                if let Err(e) = res {
+                    rep.warnings.push(format!(
+                        "A function in {schema} wasn't copied: {}",
+                        map_error(&e).message
+                    ));
+                }
+            }
+        }
         let n = req.objects.len() as f64;
         let mut described: Vec<Option<(Table, String)>> = Vec::new();
         for (i, o) in req.objects.iter().enumerate() {
@@ -567,6 +821,35 @@ mod pg {
                     {
                         rep.warnings.push(format!(
                             "{target}: foreign key {name} wasn't added: {}",
+                            map_error(&e).message
+                        ));
+                    }
+                }
+            }
+        }
+        // Triggers of the copied tables, once their rows are in (so they don't fire on the copy).
+        if req.routines
+            && req.content != CopyContent::Data
+            && matches!(req.mode, CopyMode::Create | CopyMode::Recreate)
+        {
+            for (o, (_, target)) in req
+                .objects
+                .iter()
+                .zip(described.iter())
+                .filter_map(|(o, x)| x.as_ref().map(|x| (o, x)))
+            {
+                let rel = format!("{}.{}", quote(&o.schema), quote(&o.name));
+                let trig = s.client.query("select pg_get_triggerdef(oid) from pg_trigger where tgrelid = $1::text::regclass and not tgisinternal", &[&rel]).await.map_err(|e| map_error(&e))?;
+                for r in &trig {
+                    let def: String = r.get(0);
+                    let def = if target_name(o) == o.name {
+                        def
+                    } else {
+                        def.replace(&format!(" ON {rel} "), &format!(" ON {target} "))
+                    };
+                    if let Err(e) = d.client.batch_execute(&def).await {
+                        rep.warnings.push(format!(
+                            "{target}: a trigger wasn't copied: {}",
                             map_error(&e).message
                         ));
                     }
@@ -922,6 +1205,83 @@ mod my {
                 }
             }
             rep.tables.push(tr);
+        }
+        // Routines of the source databases, and triggers of the copied tables, when asked for (no DEFINER).
+        if req.routines && req.content != CopyContent::Data {
+            let dbs: std::collections::BTreeSet<&str> =
+                req.objects.iter().map(|o| o.schema.as_str()).collect();
+            for db in dbs {
+                let rows = s.query(&format!("select routine_name, routine_type from information_schema.routines where routine_schema = {}", lit(db)), 0).await?.rows;
+                for r in rows {
+                    let (name, kind) = (
+                        r.first().cloned().flatten().unwrap_or_default(),
+                        r.get(1).cloned().flatten().unwrap_or_default(),
+                    );
+                    let def = s
+                        .query(
+                            &format!(
+                                "show create {} {}.{}",
+                                kind.to_ascii_lowercase(),
+                                q(db),
+                                q(&name)
+                            ),
+                            1,
+                        )
+                        .await
+                        .ok()
+                        .and_then(|x| x.rows.into_iter().next())
+                        .and_then(|x| x.into_iter().nth(2).flatten());
+                    let res = match def {
+                        Some(def) => d
+                            .query(
+                                &String::from_utf8_lossy(&crate::dbs::dumpscan::strip_definer(
+                                    def.as_bytes(),
+                                )),
+                                0,
+                            )
+                            .await
+                            .map(|_| ()),
+                        None => Err(AppError::validation(
+                            "its definition couldn't be read (it needs the right to see it)",
+                        )),
+                    };
+                    if let Err(e) = res {
+                        rep.warnings
+                            .push(format!("{kind} {name} wasn't copied: {}", e.message));
+                    }
+                }
+            }
+            if matches!(req.mode, CopyMode::Create | CopyMode::Recreate) {
+                for o in req.objects.iter().filter(|o| o.kind == "table") {
+                    let rows = s.query(&format!("select trigger_name from information_schema.triggers where event_object_schema = {} and event_object_table = {}", lit(&o.schema), lit(&o.name)), 0).await?.rows;
+                    for r in rows {
+                        let name = r.first().cloned().flatten().unwrap_or_default();
+                        let def = s
+                            .query(
+                                &format!("show create trigger {}.{}", q(&o.schema), q(&name)),
+                                1,
+                            )
+                            .await
+                            .ok()
+                            .and_then(|x| x.rows.into_iter().next())
+                            .and_then(|x| x.into_iter().nth(2).flatten());
+                        if let Some(def) = def {
+                            if let Err(e) = d
+                                .query(
+                                    &String::from_utf8_lossy(&crate::dbs::dumpscan::strip_definer(
+                                        def.as_bytes(),
+                                    )),
+                                    0,
+                                )
+                                .await
+                            {
+                                rep.warnings
+                                    .push(format!("trigger {name} wasn't copied: {}", e.message));
+                            }
+                        }
+                    }
+                }
+            }
         }
         let _ = d.query("set foreign_key_checks = 1", 0).await;
         let _ = s.query("rollback", 0).await;
@@ -1508,7 +1868,13 @@ mod tests {
             filter: None,
             limit: None,
             rename: Some(" ".into()),
+            types: None,
+            ddl: None,
         };
+        assert!(
+            compatible(Engine::Postgres, Engine::Mariadb)
+                && !compatible(Engine::Postgres, Engine::Mongodb)
+        );
         assert_eq!(target_name(&o), "t");
     }
 }

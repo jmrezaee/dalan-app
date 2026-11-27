@@ -124,6 +124,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::restore::restore_save_database,
             commands::copy::copy_prepare,
             commands::copy::copy_commit,
+            commands::copy::copy_related,
             commands::sql::sql_cancel,
             commands::sql::sql_editor_close,
             commands::sql::sql_catalog,

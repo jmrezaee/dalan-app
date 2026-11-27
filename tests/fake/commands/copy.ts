@@ -3,7 +3,7 @@
 import { fail, type Handlers } from '../types'
 import type { CopyObject_Deserialize, CopyPlan_Serialize, CopyReport_Serialize, CopyRequest_Deserialize, CopyTablePlan_Serialize } from '../../../app/types/bindings'
 
-type Keys = 'copyPrepare' | 'copyCommit'
+type Keys = 'copyPrepare' | 'copyCommit' | 'copyRelated'
 
 const held = new Map<string, { connId: string, typed: string, plan: CopyPlan_Serialize, slow: boolean }>()
 const stops = new Set<string>()
@@ -22,18 +22,27 @@ export const copy: Pick<Handlers, Keys> = {
     const src = db(a.connId)
     const dst = db(a.request.target_conn_id)
     const r = a.request as CopyRequest_Deserialize
-    if (family(src.engine) !== family(dst.engine)) fail('validation', `Copying from ${src.engine} to ${dst.engine} arrives with the next update. This one copies between databases of the same engine.`)
+    const cross = family(src.engine) !== family(dst.engine)
+    if (cross && (src.engine === 'mongodb' || dst.engine === 'mongodb')) fail('validation', `${src.engine} and ${dst.engine} don't copy to each other.`)
+    if (cross && r.routines) fail('validation', 'Functions, procedures and triggers copy between databases of the same engine only. Between engines they are listed with their DDL in the report.')
     if (!r.objects.length) fail('validation', 'Choose at least one table to copy.')
     if (dst.write_mode === 'read_only') fail('db_read_only_mode', `${dst.name} is read-only in Dalan. Nothing was sent.`)
     if (dst.environment === 'production' && dst.write_mode !== 'open') fail('db_read_only_mode', `${dst.name} is a production database. To copy into it, switch it to Open first (that needs the master password).`)
     const newDb = (r.new_database ?? '').trim()
     const targetDb = newDb || dst.default_database || 'app'
-    tag(`copy-request:${JSON.stringify({ objects: r.objects.map((o: CopyObject_Deserialize) => o.rename ? `${o.name}>${o.rename}` : o.name), mode: r.mode, content: r.content, newDb })}`)
+    tag(`copy-request:${JSON.stringify({ objects: r.objects.map((o: CopyObject_Deserialize) => o.rename ? `${o.name}>${o.rename}` : o.name), mode: r.mode, content: r.content, newDb, routines: r.routines ?? false, types: r.objects.flatMap((o: CopyObject_Deserialize) => (o.types ?? []).map(t => `${o.name}.${t.name}=${t.target_type}`)), ddl: r.objects.some((o: CopyObject_Deserialize) => !!o.ddl) })}`)
     const tables: CopyTablePlan_Serialize[] = r.objects.map((o: CopyObject_Deserialize) => {
       const to = o.rename || o.name
       const exists = !newDb && EXISTING.includes(to)
       const action = r.mode === 'create' ? 'create' : r.mode === 'recreate' ? (exists ? 'drop and create' : 'create') : r.mode === 'empty' ? 'empty and load' : r.mode === 'append' ? 'add rows' : 'insert or replace'
-      return { source: `${o.schema}.${o.name}`, target: `${o.schema}.${to}`, kind: o.kind, exists, action, rows_estimate: o.limit ?? ROWS[o.name] ?? null }
+      // Between engines: a made-up mapping of the fake's tables (PostgreSQL to MySQL).
+      const chosen = (c: string) => o.types?.find(t => t.name === c)?.target_type
+      const columns = cross && o.kind === 'table'
+        ? [['id', 'bigint', 'bigint', null], ['name', 'text', 'longtext', null], ['created', 'timestamp with time zone', 'datetime(6)', 'the time zone is dropped, values are stored in UTC']].map(([name, source_type, target_type, lossy]) => ({ name: name!, source_type: source_type!, target_type: chosen(name!) ?? target_type!, lossy: chosen(name!) ? null : (lossy ?? null) }))
+        : []
+      const ddl = columns.length ? (o.ddl ?? `create table ${to} (\n${columns.map(c => `  ${c.name} ${c.target_type}`).join(',\n')},\n  primary key (id)\n) engine=InnoDB default charset=utf8mb4`) : null
+      if (o.ddl && !/^\s*create\s+table\b/i.test(o.ddl)) fail('validation', 'The edited DDL must be one CREATE TABLE statement and nothing else.')
+      return { source: `${o.schema}.${o.name}`, target: cross && dst.engine === 'postgres' ? `public.${to}` : (cross ? to : `${o.schema}.${to}`), kind: o.kind, exists: cross ? false : exists, action, rows_estimate: o.limit ?? ROWS[o.name] ?? null, columns, ddl }
     })
     const there = tables.filter(t => t.exists && r.mode === 'create' && r.content !== 'data').map(t => t.target)
     const missing = tables.filter(t => !t.exists && ['empty', 'append', 'upsert'].includes(r.mode)).map(t => t.target)
@@ -59,13 +68,21 @@ export const copy: Pick<Handlers, Keys> = {
     }
     return plan
   },
+  copyRelated: (a) => {
+    // The fake's keys: orders → customers, order_items → orders → customers.
+    const refs: Record<string, string[]> = { orders: ['customers'], order_items: ['orders', 'customers'] }
+    const have = new Set(a.objects.map((o: CopyObject_Deserialize) => o.name))
+    const out = new Set<string>()
+    for (const o of a.objects as CopyObject_Deserialize[]) for (const r of refs[o.name] ?? []) if (!have.has(r)) out.add(r)
+    return [...out].map(name => ({ schema: 'public', name, kind: 'table', filter: null, limit: null, rename: null, types: null, ddl: null }))
+  },
   copyCommit: async (a, { channel, send, tag }) => {
     const h = held.get(a.pendingId)
     if (!h || h.connId !== a.connId) fail('db_confirm_needed', 'That confirmation was already used or isn\'t for this tab. Nothing was sent.')
     if (h.plan.level === 'typed' && a.typedName !== h.typed) fail('db_confirm_needed', 'The name doesn\'t match the database\'s name. Nothing was sent.')
     held.delete(a.pendingId)
     const ch = channel(a.progress)
-    const report: CopyReport_Serialize = { outcome: 'done', target_db: h.plan.target_db, tables: [], warnings: [], seconds: 3 }
+    const report: CopyReport_Serialize = { outcome: 'done', target_db: h.plan.target_db, tables: [], warnings: [], seconds: 3, not_copied: h.plan.tables.filter(t => t.kind === 'view' && h.plan.tables.some(x => x.columns.length)).map(t => ({ name: t.source, kind: 'view', ddl: `create view ${t.source} as\n select * from public.orders where status = 'open';` })) }
     for (const [i, t] of h.plan.tables.entries()) {
       for (let k = 1; k <= (h.slow ? 30 : 2); k++) {
         if (stops.has(a.transferId)) {

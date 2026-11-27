@@ -6,6 +6,7 @@ pub mod activity;
 pub mod backup;
 pub mod classify;
 pub mod copy;
+pub mod copycross;
 pub mod diagram;
 pub mod explain;
 pub mod grid;
@@ -20,6 +21,7 @@ pub mod structure;
 #[cfg(test)]
 mod tests;
 pub mod transfer;
+pub mod typemap;
 pub mod values;
 
 use std::collections::HashMap;

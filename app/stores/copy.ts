@@ -6,7 +6,7 @@ import { useTauri } from '~/composables/useTauri'
 export type CopyStep = 'choose' | 'review' | 'progress' | 'report'
 
 /** One object of the source as the Copy tab shows it, with what the person set for it. */
-export interface CopyPick { schema: string, name: string, kind: string, checked: boolean, rename: string, filter: string, limit: string }
+export interface CopyPick { schema: string, name: string, kind: string, checked: boolean, rename: string, filter: string, limit: string, /** Between engines: target types chosen in the review, by column. */ types: Record<string, string>, /** Between engines: the edited DDL (`null`: the generated one). */ ddl: string | null }
 
 const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : (e as { message?: string })?.message ?? fallback)
 export const pickKey = (p: { schema: string, name: string }) => `${p.schema}\u0000${p.name}`
@@ -25,6 +25,8 @@ function setup() {
   const mode = ref<CopyMode>('create')
   const content = ref<CopyContent>('all')
   const stopOnError = ref(true)
+  const routines = ref(false)
+  const lastTarget = ref('')
   const busy = ref(false)
   const error = ref('')
   const plan = ref<CopyPlan | null>(null)
@@ -38,13 +40,13 @@ function setup() {
   function offer(objects: { schema: string, name: string, kind: string }[]) {
     for (const o of objects) {
       const k = pickKey(o)
-      if (!picks.value[k]) picks.value[k] = { ...o, checked: false, rename: '', filter: '', limit: '' }
+      if (!picks.value[k]) picks.value[k] = { ...o, checked: false, rename: '', filter: '', limit: '', types: {}, ddl: null }
     }
   }
 
   const chosen = computed(() => Object.values(picks.value).filter(p => p.checked))
 
-  function request(targetConnId: string): { target_conn_id: string, new_database: string | null, objects: CopyObject[], mode: CopyMode, content: CopyContent, stop_on_error: boolean } {
+  function request(targetConnId: string): { target_conn_id: string, new_database: string | null, objects: CopyObject[], mode: CopyMode, content: CopyContent, stop_on_error: boolean, routines: boolean } {
     return {
       target_conn_id: targetConnId,
       new_database: targetNew.value ? newName.value.trim() : null,
@@ -55,14 +57,18 @@ function setup() {
         filter: p.filter.trim() || null,
         limit: p.limit.trim() === '' ? null : Number(p.limit),
         rename: p.rename.trim() || null,
+        types: Object.keys(p.types).length ? Object.entries(p.types).map(([name, target_type]) => ({ name, target_type })) : null,
+        ddl: p.ddl?.trim() || null,
       })),
       mode: mode.value,
       content: content.value,
       stop_on_error: stopOnError.value,
+      routines: routines.value,
     }
   }
 
   async function review(sourceConnId: string, targetConnId: string) {
+    lastTarget.value = targetConnId
     error.value = ''
     busy.value = true
     try {
@@ -93,6 +99,17 @@ function setup() {
     }
   }
 
+  /** "Select related": ticks the tables the chosen ones reference by foreign key. */
+  async function selectRelated(sourceConnId: string) {
+    error.value = ''
+    try {
+      const more = await api.copyRelated(sourceConnId, request('').objects)
+      offer(more)
+      for (const o of more) picks.value[pickKey(o)]!.checked = true
+    }
+    catch (e) { error.value = message(e, 'Couldn\'t follow the foreign keys.') }
+  }
+
   const stop = () => api.sqlTransferStop(transferId.value).catch(() => {})
 
   /** "Run again from the failed table": that table and the ones after it, the same options. */
@@ -116,7 +133,7 @@ function setup() {
     error.value = ''
   }
 
-  return { step, targetKey, targetNew, newName, picks, mode, content, stopOnError, busy, error, plan, typed, progress, report, startedAt, chosen, offer, review, commit, stop, again, reset }
+  return { routines, lastTarget, selectRelated, step, targetKey, targetNew, newName, picks, mode, content, stopOnError, busy, error, plan, typed, progress, report, startedAt, chosen, offer, review, commit, stop, again, reset }
 }
 
 const makeStore = (key: string) => defineStore(`copy:${key}`, setup)

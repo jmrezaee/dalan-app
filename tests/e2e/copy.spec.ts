@@ -6,10 +6,11 @@ import { openApp } from './harness'
 // made-up schema (every PostgreSQL database has the same tables) and keeps the gate's rules.
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Vault' })
 
-async function addDb(page: Page, name: string, opts: { production?: boolean } = {}) {
+async function addDb(page: Page, name: string, opts: { production?: boolean, engine?: RegExp } = {}) {
   if (await page.getByRole('tab', { name: 'Vault' }).isVisible()) await page.getByRole('tab', { name: 'Vault' }).click()
   await nav(page).getByRole('link', { name: /Databases/ }).click()
   await page.getByRole('button', { name: 'New database' }).click()
+  if (opts.engine) await page.getByRole('radio', { name: opts.engine }).click()
   await page.getByTestId('new-database-dialog').getByRole('button', { name: 'Continue' }).click()
   const s = page.getByTestId('db-form-sheet')
   await s.getByLabel('Name', { exact: true }).fill(name)
@@ -103,9 +104,44 @@ test.describe('Copy between databases (S49, F32)', () => {
   test('a production target must be Open first', async ({ page }) => {
     await openApp(page, { scenario: 'team', unlocked: true })
     const copy = await twoDbs(page, { targetProduction: true })
-    await copy.getByRole('combobox', { name: 'Target database' }).selectOption({ label: 'copy-target' })
+    await copy.getByRole('combobox', { name: 'Target database' }).selectOption({ label: 'copy-target · PostgreSQL' })
     await copy.getByRole('checkbox', { name: 'Copy public.customers' }).check()
     await copy.getByTestId('copy-review').click()
     await expect(copy.locator('[data-part=error]')).toContainText('copy-target is a production database. To copy into it, switch it to Open first')
+  })
+
+  test('part 2: between PostgreSQL and MySQL the review maps each column; a chosen type and edited DDL go to Rust', async ({ page }) => {
+    const fake = await openApp(page, { scenario: 'team', unlocked: true })
+    await addDb(page, 'my-target', { engine: /MySQL/ })
+    const src = await addDb(page, 'app-prod')
+    await src.getByTestId('sql-open-copy').click()
+    const copy = src.getByTestId('copy-tab')
+    await copy.getByRole('combobox', { name: 'Target database' }).selectOption({ label: 'my-target · MySQL' })
+    await expect(copy.getByRole('checkbox', { name: /Also copy functions/ })).toBeDisabled()
+    await copy.getByRole('checkbox', { name: 'Copy public.customers' }).check()
+    await copy.getByRole('checkbox', { name: 'Copy public.open_orders' }).check()
+    await copy.getByTestId('copy-review').click()
+    const map = copy.getByTestId('copy-mapping')
+    await expect(map).toContainText('1 lossy')
+    await map.locator('summary').click()
+    await expect(map).toContainText('Lossy: the time zone is dropped, values are stored in UTC.')
+    await map.getByRole('textbox', { name: 'Target type for created' }).fill('varchar(40)')
+    await map.getByRole('button', { name: 'Apply changes' }).click()
+    await expect(copy.getByTestId('copy-mapping')).not.toContainText('lossy')
+    const sent = JSON.parse((await fake.calls('copy-request')).at(-1)!.slice('copy-request:'.length))
+    expect(sent.types).toEqual(['customers.created=varchar(40)'])
+    await copy.getByTestId('copy-run').click()
+    const report = copy.getByTestId('copy-report')
+    await expect(report.locator('[data-part=not-copied]')).toContainText('view public.open_orders')
+  })
+
+  test('“Select related” ticks what the chosen tables reference', async ({ page }) => {
+    await openApp(page, { scenario: 'team', unlocked: true })
+    const copy = await twoDbs(page)
+    await copy.getByRole('checkbox', { name: 'Copy public.order_items' }).check()
+    await copy.getByTestId('copy-related').click()
+    await expect(copy.getByRole('checkbox', { name: 'Copy public.orders' })).toBeChecked()
+    await expect(copy.getByRole('checkbox', { name: 'Copy public.customers' })).toBeChecked()
+    await expect(copy.getByRole('checkbox', { name: 'Copy public.no_key' })).not.toBeChecked()
   })
 })
