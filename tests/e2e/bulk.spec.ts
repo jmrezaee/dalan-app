@@ -70,7 +70,7 @@ test.describe('Bulk export and import (E6)', () => {
     await im.getByRole('checkbox', { name: 'Import public.orders.jsonl' }).click()
     await im.getByTestId('bulk-import-review').click()
     const plan = im.getByTestId('bulk-import-plan')
-    await expect(plan).toContainText('Load 2 files (50 rows) into app-prod, creating 1 tables first?')
+    await expect(plan).toContainText('Load 2 files (50 rows) into app-prod, creating 1 table first?')
     expect((await fake.calls('bulk-import'))[0]).toBe('bulk-import:public.customers.csv>public.customers,loyalty.csv>public.loyalty+create')
     await plan.getByTestId('bulk-import-commit').click()
     await expect(im.getByRole('table', { name: 'Import report' })).toContainText('public.loyalty (new)')

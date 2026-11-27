@@ -41,7 +41,7 @@ async function toggle(r: Row) {
       <li v-for="r in bulk.rows" :key="r.file.id" class="rounded-md border border-border p-2 text-xs" :data-testid="tid(`bulk-file-${r.file.name}`)">
         <div class="flex flex-wrap items-center gap-2">
           <Checkbox v-model="r.include" :aria-label="`Import ${r.file.name}`" />
-          <span class="min-w-0 flex-1 truncate font-mono" :title="r.file.name">{{ r.file.name }}</span>
+          <span class="min-w-[12rem] flex-1 truncate font-mono" :title="r.file.name">{{ r.file.name }}</span>
           <span class="text-muted">into</span>
           <Input v-model="r.schema" class="h-7 w-24 font-mono text-xs" :aria-label="`Schema for ${r.file.name}`" @change="changed(r)" />
           <Input v-model="r.table" class="h-7 w-36 font-mono text-xs" :aria-label="`Table for ${r.file.name}`" @change="changed(r)" />
@@ -70,7 +70,7 @@ async function toggle(r: Row) {
     </ul>
     <p v-if="bulk.error" role="alert" class="text-xs text-danger">{{ bulk.error }}</p>
     <section v-if="bulk.pending" class="flex flex-col gap-2 rounded-md border border-border bg-bg p-3 text-xs" aria-label="Review the import" :data-testid="tid('bulk-import-plan')">
-      <p class="font-medium">Load {{ fmt(bulk.pending.files) }} files ({{ fmt(bulk.pending.rows) }} rows) into {{ bulk.pending.db_name }}<template v-if="bulk.pending.creates">, creating {{ fmt(bulk.pending.creates) }} tables first</template>?</p>
+      <p class="font-medium">Load {{ fmt(bulk.pending.files) }} files ({{ fmt(bulk.pending.rows) }} rows) into {{ bulk.pending.db_name }}<template v-if="bulk.pending.creates">, creating {{ fmt(bulk.pending.creates) }} {{ bulk.pending.creates === 1 ? 'table' : 'tables' }} first</template>?</p>
       <p class="text-muted">Each file loads in one transaction: a file the server refuses changes nothing, and the others still load.</p>
       <p v-if="bulk.pending.environment === 'production'" class="text-warning">{{ bulk.pending.db_name }} is a production database.</p>
       <div class="flex justify-end gap-2"><Button size="sm" variant="secondary" @click="bulk.cancelImport(connId)">Cancel</Button><Button size="sm" :loading="bulk.running" :data-testid="tid('bulk-import-commit')" @click="bulk.commitImport(connId)">Import</Button></div>
