@@ -1,5 +1,6 @@
 # Fuzz targets for the D12 dump readers (replica/databases/restore-copy.md §7): `cargo +nightly fuzz run dumpscan`
-# and `cargo +nightly fuzz run dumpfile`, from src-tauri. CI runs each for 10 minutes every night.
+# and `cargo +nightly fuzz run dumpfile`, from src-tauri; D17 adds `imports` (the MongoDB and bulk importers). CI runs
+# each for 10 minutes every night.
 [package]
 name = "dalan-fuzz"
 version = "0.0.0"
@@ -27,5 +28,11 @@ doc = false
 [[bin]]
 name = "dumpfile"
 path = "fuzz_targets/dumpfile.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "imports"
+path = "fuzz_targets/imports.rs"
 test = false
 doc = false

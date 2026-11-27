@@ -254,7 +254,7 @@ jobs:
           name: long-run
           path: test-results/app
 
-  # D12: each dump reader on random input for 10 minutes (replica/databases/restore-copy.md §7).
+  # D12: each dump reader on random input for 10 minutes (replica/databases/restore-copy.md §7); D17 adds the importers.
   fuzz:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -262,7 +262,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [dumpscan, dumpfile]
+        target: [dumpscan, dumpfile, imports]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly

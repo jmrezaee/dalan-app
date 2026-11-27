@@ -88,7 +88,7 @@ impl Sink {
 async fn columns(raw: &crate::sql::RawConn, schema: &str, table: &str) -> serde_json::Value {
     match crate::sql::datacmp::columns(raw, schema, table).await {
         Ok((cols, pk)) => serde_json::json!({
-            "columns": cols.iter().map(|c| serde_json::json!({ "name": c.name, "type": c.data_type })).collect::<Vec<_>>(),
+            "columns": cols.iter().map(|c| serde_json::json!({ "name": c.name, "type": c.full_type })).collect::<Vec<_>>(),
             "primary_key": pk,
         }),
         Err(_) => serde_json::json!({}),
@@ -424,6 +424,143 @@ pub(crate) mod docker_tests {
         state
     }
 
+    /// D18 Docker: an export read back by the bulk import into another schema: every table created from the
+    /// manifest's types, a JSON lines file beside them with types read from its values, and the same rows.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "needs the Docker test servers"]
+    async fn l3_an_export_imports_into_new_tables_with_the_same_rows() {
+        let psql = crate::sql::copy::docker_tests::psql;
+        psql("shop", "drop schema if exists d18a cascade; drop schema if exists d18b cascade; create schema d18a; create schema d18b;
+            create table d18a.people (id int primary key, name text, born date, score numeric(6,2));
+            insert into d18a.people select g, 'p' || g, date '2000-01-01' + g, g / 4.0 from generate_series(1, 300) g;
+            create table d18a.tags (id bigint primary key, label varchar(40));
+            insert into d18a.tags values (1, 'a, quoted'), (2, 'line
+            break');");
+        let state = state().await;
+        let conn = open_db(
+            &state,
+            crate::dbs::Engine::Postgres,
+            15432,
+            "shop",
+            "app",
+            "test-pg",
+        )
+        .await;
+        let dir = std::env::temp_dir().join(format!("dalan-bulk-in-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let req = BulkExport {
+            objects: vec![
+                BulkObject {
+                    schema: "d18a".into(),
+                    name: "people".into(),
+                },
+                BulkObject {
+                    schema: "d18a".into(),
+                    name: "tags".into(),
+                },
+            ],
+            format: ExportFormat::Csv,
+            header: true,
+            masks: vec![],
+            ddl: false,
+            zip: false,
+        };
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        export_into(&state, &conn, &req, Sink::Dir(dir.clone()), &stop, &|_| {})
+            .await
+            .unwrap();
+        std::fs::write(dir.join("events.jsonl"), "{\"id\": 1, \"at\": \"2026-01-02T10:00:00\", \"ok\": true}\n{\"id\": 2, \"at\": \"2026-01-03T11:00:00\", \"ok\": false}\n").unwrap();
+        let (tables, default_schema, my) = tables_here(&state, &conn).await.unwrap();
+        let listed = bulk_import_list(
+            &state,
+            &conn,
+            dir.clone(),
+            false,
+            tables,
+            default_schema,
+            my,
+        )
+        .await
+        .unwrap();
+        assert!(listed.from.is_some(), "the manifest names the source");
+        let mut items = Vec::new();
+        for f in &listed.files {
+            let table = f.table.clone();
+            let inferred = bulk_infer_in(
+                &state,
+                conn.clone(),
+                f.id.clone(),
+                f.delimiter.clone(),
+                true,
+                "d18b".into(),
+                table.clone(),
+            )
+            .await
+            .unwrap();
+            if table == "people" {
+                assert!(inferred.from_manifest, "the export's own types");
+                assert!(
+                    inferred.ddl.contains("score numeric(6,2)")
+                        && inferred.ddl.contains("PRIMARY KEY (id)"),
+                    "{}",
+                    inferred.ddl
+                );
+            }
+            if table == "events" {
+                assert!(!inferred.from_manifest);
+                assert!(
+                    inferred.ddl.contains("at timestamp") && inferred.ddl.contains("ok boolean"),
+                    "{}",
+                    inferred.ddl
+                );
+            }
+            items.push(BulkItem {
+                file_id: f.id.clone(),
+                name: f.name.clone(),
+                schema: "d18b".into(),
+                table,
+                delimiter_name: f.delimiter.clone(),
+                header: true,
+                mapping: inferred
+                    .columns
+                    .iter()
+                    .map(|c| Some(c.name.clone()))
+                    .collect(),
+                create: Some(inferred.ddl),
+            });
+        }
+        assert_eq!(
+            items.len(),
+            3,
+            "{:?}",
+            listed.files.iter().map(|f| &f.name).collect::<Vec<_>>()
+        );
+        let pending = bulk_import_prepare_in(&state, conn.clone(), items)
+            .await
+            .unwrap();
+        assert_eq!(pending.creates, 3.0);
+        let report = bulk_import_commit_in(&state, conn.clone(), pending.id, &|_| {})
+            .await
+            .unwrap();
+        assert!(report.iter().all(|r| r.error.is_none()), "{report:?}");
+        assert_eq!(psql("shop", "select count(*) from d18b.people"), "300");
+        assert_eq!(psql("shop", "select count(*) from d18a.people a join d18b.people b using (id, name, born, score)"), "300", "the values came through");
+        assert_eq!(
+            psql("shop", "select label from d18b.tags where id = 2"),
+            "line\n            break"
+        );
+        assert_eq!(
+            psql("shop", "select count(*) from d18b.events where ok"),
+            "1"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        psql(
+            "shop",
+            "drop schema d18a cascade; drop schema d18b cascade;",
+        );
+    }
+
     /// D17 Docker: two tables of the test PostgreSQL into a folder (masked emails, DDL, manifest), and into a zip.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[ignore = "needs the Docker test servers"]
@@ -648,6 +785,24 @@ pub async fn bulk_import_pick(
     let chosen = p
         .into_path()
         .map_err(|_| AppError::validation("That location can't be used."))?;
+    bulk_import_list(&state, &conn_id, chosen, zip, tables, default_schema, my)
+        .await
+        .map(Some)
+}
+
+/// Lists a folder (or a zip, unpacked into a private folder) for the import: every CSV, TSV and JSON file, JSON
+/// turned into CSV, each matched to a table by its name.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn bulk_import_list(
+    state: &AppState,
+    conn_id: &str,
+    chosen: std::path::PathBuf,
+    zip: bool,
+    tables: Vec<(String, String)>,
+    default_schema: String,
+    my: bool,
+) -> AppResult<BulkFiles> {
+    let conn_id = conn_id.to_string();
     let tmp = crate::dbs::dumpfile::TempDir::new("bulk")?;
     // The files: those of the folder, or those unpacked from the zip (top level only, safe names).
     let dir = if zip {
@@ -754,7 +909,7 @@ pub async fn bulk_import_pick(
         );
     }
     let _ = my;
-    Ok(Some(BulkFiles {
+    Ok(BulkFiles {
         source: chosen
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -762,7 +917,7 @@ pub async fn bulk_import_pick(
         files,
         skipped,
         from,
-    }))
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -787,6 +942,27 @@ fn delimiter_char(d: &str) -> char {
 #[specta::specta]
 pub async fn bulk_infer(
     state: State<'_, AppState>,
+    conn_id: String,
+    file_id: String,
+    delimiter_name: String,
+    header: bool,
+    schema: String,
+    table: String,
+) -> AppResult<InferredTable> {
+    bulk_infer_in(
+        &state,
+        conn_id,
+        file_id,
+        delimiter_name,
+        header,
+        schema,
+        table,
+    )
+    .await
+}
+
+pub(crate) async fn bulk_infer_in(
+    state: &AppState,
     conn_id: String,
     file_id: String,
     delimiter_name: String,
@@ -922,6 +1098,14 @@ pub async fn bulk_import_prepare(
     conn_id: String,
     items: Vec<BulkItem>,
 ) -> AppResult<BulkImportPending> {
+    bulk_import_prepare_in(&state, conn_id, items).await
+}
+
+pub(crate) async fn bulk_import_prepare_in(
+    state: &AppState,
+    conn_id: String,
+    items: Vec<BulkItem>,
+) -> AppResult<BulkImportPending> {
     state.require_unlocked()?;
     if items.is_empty() {
         return Err(AppError::validation("Choose at least one file."));
@@ -953,7 +1137,7 @@ pub async fn bulk_import_prepare(
                 None
             }
             None => {
-                let p = plan_for(&state, &conn_id, &it)
+                let p = plan_for(state, &conn_id, &it)
                     .await
                     .map_err(|e| AppError::new(e.code, format!("{}: {}", it.name, e.message)))?;
                 rows += p.rows;
@@ -993,6 +1177,18 @@ pub async fn bulk_import_commit(
     pending_id: String,
     progress: Channel<BulkProgress>,
 ) -> AppResult<Vec<BulkFileReport>> {
+    bulk_import_commit_in(&state, conn_id, pending_id, &|p| {
+        let _ = progress.send(p);
+    })
+    .await
+}
+
+pub(crate) async fn bulk_import_commit_in(
+    state: &AppState,
+    conn_id: String,
+    pending_id: String,
+    progress: &(dyn Fn(BulkProgress) + Sync),
+) -> AppResult<Vec<BulkFileReport>> {
     state.require_unlocked()?;
     let class = state.sql.bulk_pending.peek_class(&conn_id, &pending_id)?;
     let db = crate::sql::gate_target(&state.store(), &state.sql.db_id(&conn_id)?).await?;
@@ -1002,7 +1198,7 @@ pub async fn bulk_import_commit(
     let mut out = Vec::new();
     for (i, h) in held.into_iter().enumerate() {
         let table = format!("{}.{}", h.item.schema, h.item.table);
-        let _ = progress.send(BulkProgress {
+        progress(BulkProgress {
             index: i as f64,
             total,
             table: table.clone(),
@@ -1023,7 +1219,7 @@ pub async fn bulk_import_commit(
                             .structure_commit(&stmts)
                             .await?;
                     }
-                    plan_for(&state, &conn_id, &h.item).await?
+                    plan_for(state, &conn_id, &h.item).await?
                 }
                 (None, Some(p)) => p,
                 (None, None) => return Err(AppError::internal("no plan")),

@@ -698,3 +698,127 @@ async fn l3_copy_masks_values_in_the_stream_on_every_path() {
     );
     assert_eq!(my_emails, emails, "keyed: the same input, the same fake");
 }
+
+/// The resident memory of this process now, in MB (`ps`, which works on macOS and Linux alike).
+pub(crate) fn rss_mb() -> f64 {
+    let out = std::process::Command::new("ps")
+        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+        .output()
+        .expect("ps");
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse::<f64>()
+        .unwrap_or(0.0)
+        / 1024.0
+}
+
+/// Samples `rss_mb` every 100 ms until dropped, and keeps the highest.
+pub(crate) struct PeakRss {
+    peak: std::sync::Arc<std::sync::Mutex<f64>>,
+    stop: std::sync::Arc<AtomicBool>,
+}
+
+impl PeakRss {
+    pub(crate) fn start() -> PeakRss {
+        let peak = std::sync::Arc::new(std::sync::Mutex::new(rss_mb()));
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let (p, s) = (std::sync::Arc::clone(&peak), std::sync::Arc::clone(&stop));
+        std::thread::spawn(move || {
+            while !s.load(std::sync::atomic::Ordering::SeqCst) {
+                let now = rss_mb();
+                if let Ok(mut m) = p.lock() {
+                    *m = m.max(now);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        });
+        PeakRss { peak, stop }
+    }
+    pub(crate) fn peak(&self) -> f64 {
+        *self.peak.lock().unwrap()
+    }
+}
+
+impl Drop for PeakRss {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// The memory budget for a copy, a compare or a restore of any size (replica/testing/test-plan.md §9.4): the
+/// process grows by less than this while it runs.
+pub(crate) const BUDGET_MB: f64 = 150.0;
+
+/// D18 performance (replica/databases/restore-copy.md §9): a big table copied into another database and compared
+/// with its copy, both streamed, inside the memory budget. `DALAN_PERF_ROWS` sets the size (default 1,000,000;
+/// the 10M-row run of the spec is `DALAN_PERF_ROWS=10000000`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs the Docker test servers; slow"]
+async fn l3_perf_a_large_copy_and_compare_stay_inside_the_memory_budget() {
+    let n: u64 = std::env::var("DALAN_PERF_ROWS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1_000_000);
+    for db in ["d18_src", "d18_dst"] {
+        psql("shop", &format!("drop database if exists {db}"));
+        psql("shop", &format!("create database {db}"));
+    }
+    psql("d18_src", &format!("create table public.big (id bigint primary key, name text, amount numeric(12,2), at timestamptz, doc jsonb);
+        insert into public.big select g, md5(g::text), g / 3.0, timestamptz '2026-01-01 00:00:00+00' + g * interval '1 second', jsonb_build_object('g', g) from generate_series(1, {n}) g;"));
+    let before = rss_mb();
+    let peak = PeakRss::start();
+    let started = std::time::Instant::now();
+    let r = go(
+        &job(
+            Engine::Postgres,
+            "d18_dst",
+            vec![obj("public", "big", "table")],
+            CopyMode::Create,
+        ),
+        pg("d18_src").await,
+        pg("d18_dst").await,
+        &AtomicBool::new(false),
+    )
+    .await;
+    let copy_s = started.elapsed().as_secs_f64();
+    assert_eq!(r.outcome, "done", "{r:?}");
+    assert_eq!(r.tables[0].target_rows, Some(n as f64));
+    let copy_peak = peak.peak() - before;
+    // The compare of the source with its copy: every row read on both sides and merged.
+    let (src, dst) = (pg("d18_src").await, pg("d18_dst").await);
+    let side = |_db: &str| crate::sql::datacmp::DataSide {
+        conn_id: String::new(),
+        schema: "public".into(),
+        table: "big".into(),
+    };
+    let (sr, tr, _) = crate::sql::datacmp::readers(&src, &side("a"), &dst, &side("b"), &[])
+        .await
+        .unwrap();
+    let started = std::time::Instant::now();
+    let c = crate::sql::datacmp::compare(
+        &src,
+        &sr,
+        &dst,
+        &tr,
+        false,
+        &AtomicBool::new(false),
+        &|_| {},
+    )
+    .await
+    .unwrap();
+    let compare_s = started.elapsed().as_secs_f64();
+    assert_eq!(
+        (c.identical, c.different, c.only_source, c.only_target),
+        (n as f64, 0.0, 0.0, 0.0),
+        "{c:?}"
+    );
+    let all_peak = peak.peak() - before;
+    eprintln!("D18 perf: {n} rows; copy {copy_s:.1} s ({:.0} rows/s), compare {compare_s:.1} s; memory grew {copy_peak:.0} MB in the copy, {all_peak:.0} MB at most", n as f64 / copy_s);
+    assert!(
+        all_peak < BUDGET_MB,
+        "memory grew {all_peak:.0} MB (budget {BUDGET_MB} MB)"
+    );
+    for db in ["d18_src", "d18_dst"] {
+        psql("shop", &format!("drop database {db}"));
+    }
+}

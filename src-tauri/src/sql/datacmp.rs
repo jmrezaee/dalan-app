@@ -34,6 +34,8 @@ pub struct DataSide {
 pub struct Col {
     pub name: String,
     pub data_type: String,
+    /// The type as the table declares it (`numeric(6,2)`, `varchar(40)`), for a manifest.
+    pub full_type: String,
     pub kind: ValueKind,
 }
 
@@ -90,7 +92,7 @@ pub async fn columns(c: &RawConn, schema: &str, table: &str) -> AppResult<(Vec<C
     let f = family(c)?;
     let (cols_sql, pk_sql) = match f {
         Family::Pg => (
-            format!("select column_name::text, data_type::text, udt_name::text from information_schema.columns where table_schema = {} and table_name = {} order by ordinal_position", lit_for(f, schema), lit_for(f, table)),
+            format!("select c.column_name::text, c.data_type::text, format_type(a.atttypid, a.atttypmod) from information_schema.columns c join pg_attribute a on a.attrelid = (quote_ident(c.table_schema) || '.' || quote_ident(c.table_name))::regclass and a.attname = c.column_name where c.table_schema = {} and c.table_name = {} order by c.ordinal_position", lit_for(f, schema), lit_for(f, table)),
             format!("select a.attname::text from pg_index x join pg_attribute a on a.attrelid = x.indrelid and a.attnum = any(x.indkey) where x.indisprimary and x.indrelid = (quote_ident({})||'.'||quote_ident({}))::regclass order by array_position(x.indkey, a.attnum)", lit_for(f, schema), lit_for(f, table)),
         ),
         Family::My => (
@@ -109,6 +111,7 @@ pub async fn columns(c: &RawConn, schema: &str, table: &str) -> AppResult<(Vec<C
                 kind: datadiff::kind_of(&dt, &ct),
                 name,
                 data_type: dt,
+                full_type: ct,
             })
         })
         .collect();

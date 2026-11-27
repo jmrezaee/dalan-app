@@ -420,6 +420,7 @@ tests/app/
 - **Flood:** `flood` (5 MB) through the fake and the real app. The UI stays responsive (a click on another tab responds in under 200 ms during the flood). Rust shows reading paused at 1 MB behind (exists; keep).
 - **Big lists:** 2,000 hosts in the scenario; the Hosts grid and palette search take under 100 ms per keystroke (performance marks in the test). A 5,000-entry SFTP folder scrolls (virtualised).
 - **Long run** (nightly, real app): 30 minutes with 10 sessions printing every second. Memory (`/proc/<pid>/status` RSS) grows by less than 150 MB.
+- **Databases (D18):** the same 150 MB is the budget for moving data of any size. `l3_perf_a_large_copy_and_compare_stay_inside_the_memory_budget` copies a table of `DALAN_PERF_ROWS` rows (default 1,000,000; the spec's run is 10,000,000) and compares it with its copy; `l3_perf_a_big_dump_restores_streaming_inside_the_memory_budget` restores a `DALAN_PERF_DUMP_MB` plain dump (default 300 MB). Both sample the test's own RSS. Measured on the Mac (2026-11-27): 1M rows copied in 14 s and compared in 18 s, memory +16 MB; 300 MB restored in 5 s, +10 MB.
 
 ### 9.5 Migrations
 

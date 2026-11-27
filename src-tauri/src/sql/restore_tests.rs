@@ -899,3 +899,63 @@ async fn l3_a_backup_check_restores_into_scratch_counts_rows_and_drops_it() {
     );
     psql("shop", "drop database d17_src");
 }
+
+/// D18 performance: a big plain dump (made here, `DALAN_PERF_DUMP_MB`, default 300 MB) restored into a new
+/// database: the file streams through the scanner to the tool and is never read into memory.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs the Docker test servers; slow"]
+async fn l3_perf_a_big_dump_restores_streaming_inside_the_memory_budget() {
+    use std::io::Write;
+    let _tools = stand_ins();
+    let mb: u64 = std::env::var("DALAN_PERF_DUMP_MB")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(300);
+    let path = std::env::temp_dir().join(format!("dalan-perf-{}.sql", std::process::id()));
+    let mut rows = 0u64;
+    {
+        let mut f = std::io::BufWriter::new(std::fs::File::create(&path).unwrap());
+        writeln!(f, "--\n-- PostgreSQL database dump\n--\n\nSET statement_timeout = 0;\nCREATE TABLE public.events (id bigint NOT NULL, body text);\n\nCOPY public.events (id, body) FROM stdin;").unwrap();
+        let line = "x".repeat(90);
+        let mut written = 0u64;
+        while written < mb << 20 {
+            rows += 1;
+            let l = format!("{rows}\t{line}\n");
+            written += l.len() as u64;
+            f.write_all(l.as_bytes()).unwrap();
+        }
+        writeln!(f, "\\.\n\n--\n-- PostgreSQL database dump complete\n--").unwrap();
+    }
+    psql("shop", "drop database if exists d18_big");
+    let shop = pg("shop").await;
+    let before = crate::sql::copy::docker_tests::rss_mb();
+    let peak = crate::sql::copy::docker_tests::PeakRss::start();
+    let started = std::time::Instant::now();
+    let (_, r) = restore(
+        Conn::Pg(&shop),
+        &cfg(Engine::Postgres, 5432, "shop", "app", "test-pg"),
+        None,
+        &path,
+        opts(Some("d18_big")),
+        None,
+    )
+    .await
+    .unwrap();
+    let secs = started.elapsed().as_secs_f64();
+    let r = r.unwrap();
+    assert_eq!(r.outcome, "done", "{:?}", r.warnings);
+    assert_eq!(
+        psql("d18_big", "select count(*) from public.events"),
+        rows.to_string()
+    );
+    let grew = peak.peak() - before;
+    eprintln!(
+        "D18 perf: a {mb} MB dump ({rows} rows) restored in {secs:.1} s; memory grew {grew:.0} MB"
+    );
+    assert!(
+        grew < crate::sql::copy::docker_tests::BUDGET_MB,
+        "memory grew {grew:.0} MB"
+    );
+    let _ = std::fs::remove_file(&path);
+    psql("shop", "drop database d18_big");
+}

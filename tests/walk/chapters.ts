@@ -22,6 +22,10 @@ export const CHAPTERS: ChapterInfo[] = [
   { n: 18, title: 'Databases', flows: ['F13', 'F14', 'F15', 'F16', 'F17', 'F18', 'F19', 'S26', 'S27', 'S28', 'S29', 'S30', 'S31', 'S32', 'S33'] },
   { n: 19, title: 'SQL databases', flows: ['F20', 'F21', 'F22', 'F23', 'F24', 'F25', 'F26', 'S34', 'S35', 'S36', 'S37', 'S38', 'S39', 'S40', 'S41', 'S42', 'S43'] },
   { n: 20, title: 'MongoDB', flows: ['F27', 'F28', 'F29', 'F30', 'S44', 'S45', 'S46', 'S47'] },
+  { n: 21, title: 'Restore and copy', flows: ['F31', 'F32', 'S48', 'S49'] },
+  { n: 22, title: 'Jobs and schedules', flows: ['E1', 'E2', 'E8'] },
+  { n: 23, title: 'Compare', flows: ['E3', 'E4'] },
+  { n: 24, title: 'Bulk and backup check', flows: ['E5', 'E6', 'E7'] },
 ]
 
 /** Which chapters to run, from the WALK_FROM and WALK_ONLY the run script sets. */
