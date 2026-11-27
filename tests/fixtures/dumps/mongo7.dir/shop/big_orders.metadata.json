@@ -1,0 +1,1 @@
+{"options":{"viewOn":"orders","pipeline":[{"$match":{"total":{"$gt":{"$numberInt":"100"}}}}]},"indexes":[],"collectionName":"big_orders","type":"view"}

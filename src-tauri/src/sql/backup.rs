@@ -102,7 +102,7 @@ pub fn args_mongo(cfg: &SqlConfig, tool: Tool) -> Vec<String> {
 
 /// The first line of the tool's input: a one-line YAML config with the password (read by the wrapper into a private
 /// temporary file, removed when the tool ends), so the password is never on a command line.
-fn config_mongo(cfg: &SqlConfig) -> AppResult<Vec<u8>> {
+pub fn config_mongo(cfg: &SqlConfig) -> AppResult<Vec<u8>> {
     let p = cfg.password.as_ref().map(|p| p.as_str()).unwrap_or("");
     // Control characters and the Unicode line separators are not valid inside a YAML string: refuse, don't alter.
     if p.chars()
@@ -172,7 +172,7 @@ pub fn args_my(cfg: &SqlConfig, tool: Tool) -> Vec<String> {
 
 /// The first two lines of the tool's input: a MySQL option file with the password (read by the wrapper into a
 /// private temporary file, removed when the tool ends). Quotes and backslashes are escaped as option files want.
-fn config_lines(cfg: &SqlConfig) -> AppResult<Vec<u8>> {
+pub fn config_lines(cfg: &SqlConfig) -> AppResult<Vec<u8>> {
     let p = cfg.password.as_ref().map(|p| p.as_str()).unwrap_or("");
     if p.contains('\n') || p.contains('\r') {
         return Err(AppError::validation("This password has a line break in it, so it can't be handed to the dump tool. Use a different one for backups."));
@@ -194,9 +194,9 @@ pub fn wrapper_my(tool: &str, args: &[String]) -> String {
 }
 
 /// A private option file on this computer for a local run; deleted when dropped.
-struct LocalConfig(std::path::PathBuf);
+pub struct LocalConfig(pub std::path::PathBuf);
 impl LocalConfig {
-    fn create(contents: &[u8]) -> AppResult<LocalConfig> {
+    pub fn create(contents: &[u8]) -> AppResult<LocalConfig> {
         use std::io::Write as _;
         let path = std::env::temp_dir().join(format!("dalan-{}.cnf", uuid::Uuid::now_v7()));
         let mut o = std::fs::OpenOptions::new();
@@ -259,7 +259,7 @@ pub fn wrapper(tool: &str, args: &[String]) -> String {
     )
 }
 
-fn password_line(cfg: &SqlConfig) -> AppResult<Vec<u8>> {
+pub fn password_line(cfg: &SqlConfig) -> AppResult<Vec<u8>> {
     let p = cfg.password.as_ref().map(|p| p.as_str()).unwrap_or("");
     if p.contains('\n') || p.contains('\r') {
         return Err(AppError::validation("This password has a line break in it, so it can't be handed to the dump tool. Use a different one for backups."));
@@ -268,7 +268,7 @@ fn password_line(cfg: &SqlConfig) -> AppResult<Vec<u8>> {
 }
 
 #[cfg(test)]
-fn local_tool(name: &str) -> std::path::PathBuf {
+pub fn local_tool(name: &str) -> std::path::PathBuf {
     match std::env::var("DALAN_TEST_TOOL_DIR") {
         Ok(d) => std::path::Path::new(&d).join(name),
         Err(_) => name.into(),
@@ -276,7 +276,7 @@ fn local_tool(name: &str) -> std::path::PathBuf {
 }
 /// The tool by name; a desktop app's PATH often misses where PostgreSQL's tools live, so the usual places are tried.
 #[cfg(not(test))]
-fn local_tool(name: &str) -> std::path::PathBuf {
+pub fn local_tool(name: &str) -> std::path::PathBuf {
     let on_path = std::env::var_os("PATH")
         .is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(name).is_file()));
     if on_path {
@@ -306,7 +306,7 @@ pub fn runs_on(ssh: Option<&Connected>) -> String {
     ssh.map_or_else(|| "this computer".to_string(), |s| s.label.clone())
 }
 
-fn missing(tool: &str, on: &str) -> AppError {
+pub fn missing(tool: &str, on: &str) -> AppError {
     let what = if tool.starts_with("mongo") {
         "the MongoDB Database Tools"
     } else if tool.starts_with("my") || tool.starts_with("maria") {
@@ -342,7 +342,7 @@ pub async fn tool_version(ssh: Option<&Connected>, tool: &str) -> AppResult<Stri
     }
 }
 
-async fn exec_collect(ssh: &Connected, cmd: &str) -> AppResult<(Option<u32>, String)> {
+pub async fn exec_collect(ssh: &Connected, cmd: &str) -> AppResult<(Option<u32>, String)> {
     let mut ch = ssh.handle.channel_open_session().await.map_err(|e| {
         AppError::new(
             ErrorCode::HostUnreachable,

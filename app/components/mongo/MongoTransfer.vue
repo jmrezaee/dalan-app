@@ -2,9 +2,9 @@
 // S43 for MongoDB: export a collection (one extended JSON document per line), and back up or restore the database
 // with mongodump and mongorestore on the host. Rust writes and reads the files; the window shows progress. A restore
 // is always typed.
-import { Button, buttonVariants } from '@/components/ui/button'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import type { BackupInfo_Serialize as BackupInfo, RestorePending, TransferProgress } from '~/types/bindings'
+import type { BackupInfo_Serialize as BackupInfo, TransferProgress } from '~/types/bindings'
 
 const props = defineProps<{ tabKey: string }>()
 const store = useMongoStore(props.tabKey)
@@ -35,18 +35,17 @@ async function doExport() {
 }
 
 // ---- Backup and restore
-const bk = reactive({ info: null as BackupInfo | null, running: false, id: '', bytes: 0, done: '', error: '', restoring: null as RestorePending | null, typed: '', kind: '' as '' | 'backup' | 'restore' })
+const bk = reactive({ info: null as BackupInfo | null, running: false, id: '', bytes: 0, done: '', error: '' })
+const restore = useRestoreStore(props.tabKey)
 // Closing the tab ends what it started: nothing keeps running unseen.
 onBeforeUnmount(() => { if (exp.running) void store.stopTransfer(exp.id); if (bk.running) void store.stopTransfer(bk.id) })
-/** What a restore replaces: this database, or (when the saved database names none) everything in the archive. */
-const scope = computed(() => (db.value?.default_database ? `the collections of ${db.value.default_database} (other databases in the archive are skipped)` : 'every database in the archive'))
 onMounted(async () => {
   try { bk.info = await store.backupCheck() }
   catch (e) { bk.error = message(e, 'Couldn\'t check the tool.') }
 })
 async function backup() {
   if (bk.running) return
-  Object.assign(bk, { running: true, kind: 'backup', id: store.newTransferId(), bytes: 0, done: '', error: '' })
+  Object.assign(bk, { running: true, id: store.newTransferId(), bytes: 0, done: '', error: '' })
   try {
     const r = await store.backupStart(bk.id, (p: TransferProgress) => { bk.bytes = p.bytes ?? 0 })
     bk.done = r ? `Saved ${r.path} · ${mb(r.bytes ?? 0)}` : ''
@@ -54,26 +53,6 @@ async function backup() {
   catch (e) { bk.error = message(e, 'The backup failed.') }
   bk.running = false
 }
-async function startRestore() {
-  bk.error = ''
-  bk.done = ''
-  try { bk.restoring = await store.restorePrepare(); bk.typed = '' }
-  catch (e) { bk.error = message(e, 'Couldn\'t prepare the restore.') }
-}
-async function doRestore() {
-  const r = bk.restoring
-  if (!r) return
-  const typed = bk.typed
-  bk.restoring = null
-  Object.assign(bk, { running: true, kind: 'restore', id: store.newTransferId(), bytes: 0, done: '', error: '' })
-  try {
-    await store.restoreCommit(r.id, typed, bk.id, (p: TransferProgress) => { bk.bytes = p.bytes ?? 0 })
-    bk.done = `Restored ${r.file_name} into ${r.db_name}.`
-  }
-  catch (e) { bk.error = message(e, 'The restore failed.') }
-  bk.running = false
-}
-const restoreOpen = computed({ get: () => bk.restoring !== null, set: (v: boolean) => { if (!v && bk.restoring) { void store.restoreDiscard(bk.restoring.id); bk.restoring = null } } })
 </script>
 
 <template>
@@ -103,23 +82,14 @@ const restoreOpen = computed({ get: () => bk.restoring !== null, set: (v: boolea
           <dt class="text-muted">Format</dt><dd>Archive, compressed (restorable with mongorestore)</dd>
         </dl>
         <p v-if="bk.info?.problem" role="alert" class="text-xs text-danger" data-part="problem">{{ bk.info.problem }}</p>
-        <p v-if="bk.running" role="status" class="text-xs text-muted" data-part="progress">{{ bk.kind === 'restore' ? 'Restoring' : 'Dumping' }}… {{ mb(bk.bytes) }} {{ bk.kind === 'restore' ? 'sent' : 'copied to this computer as it goes' }}</p>
+        <p v-if="bk.running" role="status" class="text-xs text-muted" data-part="progress">Dumping… {{ mb(bk.bytes) }} copied to this computer as it goes</p>
         <p v-if="bk.done" role="status" class="text-xs text-success" data-part="done">{{ bk.done }}</p>
         <p v-if="bk.error" role="alert" class="text-xs text-danger" data-part="error">{{ bk.error }}</p>
-        <p class="text-xs text-muted">Restore works the other way (mongorestore) and always asks for the database's name first. It replaces the collections the archive holds.</p>
-        <div class="mt-auto flex justify-end gap-2"><Button v-if="bk.running" variant="secondary" @click="store.stopTransfer(bk.id)">Stop</Button><Button variant="secondary" :disabled="bk.running || !!bk.info?.problem" :data-testid="tid('mongo-restore')" @click="startRestore">Restore from file…</Button><Button :disabled="bk.running || !!bk.info?.problem" :data-testid="tid('mongo-backup')" @click="backup">Back up…</Button></div>
+        <p class="text-xs text-muted">Restore takes any mongodump archive or folder, from Dalan or made elsewhere, into this database or a new one. You see what is inside before anything runs.</p>
+        <div class="mt-auto flex justify-end gap-2"><Button v-if="bk.running" variant="secondary" @click="store.stopTransfer(bk.id)">Stop</Button><Button variant="secondary" :disabled="bk.running" :data-testid="tid('mongo-restore')" @click="restore.start(store.connId, db?.environment === 'production')">Restore…</Button><Button :disabled="bk.running || !!bk.info?.problem" :data-testid="tid('mongo-backup')" @click="backup">Back up…</Button></div>
       </section>
     </div>
 
-    <AlertDialog v-model:open="restoreOpen">
-      <AlertDialogContent v-if="bk.restoring" class="gap-3 border-danger sm:max-w-[520px]" :data-testid="tid('restore-confirm')">
-        <AlertDialogHeader>
-          <AlertDialogTitle>Restore {{ bk.restoring.file_name }} into {{ bk.restoring.db_name }}?</AlertDialogTitle>
-          <AlertDialogDescription>This replaces {{ scope }} on <b>{{ bk.restoring.db_name }}</b> ({{ bk.restoring.environment === 'none' ? 'no environment set' : bk.restoring.environment }}) with the archive's. {{ mb(bk.restoring.file_bytes) }} are sent to {{ bk.restoring.runs_on }}.</AlertDialogDescription>
-        </AlertDialogHeader>
-        <label class="flex flex-col gap-1 text-xs text-muted">Type {{ bk.restoring.db_name }} to confirm<Input v-model="bk.typed" class="font-mono text-xs text-text" autocomplete="off" spellcheck="false" :data-testid="tid('mongo-restore-typed')" /></label>
-        <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><Button :class="buttonVariants({ variant: 'destructive' })" :disabled="bk.typed !== bk.restoring.db_name" :data-testid="tid('mongo-restore-confirm')" @click="doRestore">Restore</Button></AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <RestoreDialog v-if="db" :tab-key="tabKey" :db-name="db.name" :database="db.default_database" :environment="db.environment" :engine="db.engine" />
   </div>
 </template>

@@ -599,9 +599,6 @@ function setup() {
   const importDiscard = (id: string) => api.sqlImportDiscard(connId.value, id).catch(() => {})
   const backupCheck = () => api.sqlBackupCheck(connId.value)
   const backupStart = (id: string, onProgress: (p: TransferProgress) => void) => api.sqlBackupStart(connId.value, id, onProgress)
-  const restorePrepare = () => api.sqlRestorePrepare(connId.value)
-  const restoreCommit = (pending: string, typed: string | null, id: string, onProgress: (p: TransferProgress) => void) => api.sqlRestoreCommit(connId.value, pending, typed, id, onProgress)
-  const restoreDiscard = (id: string) => api.sqlRestoreDiscard(connId.value, id).catch(() => {})
 
   // ---- Diagram (S40)
   async function openDiagram(schema?: string, table?: string) {
@@ -854,7 +851,7 @@ function setup() {
     q.title = row.name
   }
 
-  return { dbId, connId, status, steps, prompt, info, error, schemas, treeFilter, tabs, activeTab, current, engine, isMy, special, openSpecial, closeSpecial, activityState, refreshActivity, prepareSession, confirmSession, discardSession, newTransferId, stopTransfer, exportTable, importPick, importPreview, importPrepare, importCommit, importDiscard, backupCheck, backupStart, restorePrepare, restoreCommit, restoreDiscard, setView, loadStructure, addOp, removeOp, reviewStructure, applyStructure, cancelStructure, migrationText, explain, diagrams, openDiagram, loadDiagram, closeDiagram, saveExport, changeCount, setCell, toggleDelete, discardEdits, review, commitReview, cancelReview, queries, catalog, history, newQuery, closeQuery, requestCloseQuery, finishAndClose, openTransactions, confirmRun, discardRun, txn, setManual, loadCatalog, run, stop, format, loadHistory, clearHistory, save, open, retry, respond, close, toggleSchema, openTable, closeTable, loadPage, apply, refresh, nextPage, prevPage, sortBy, countExactly, select, keyOf, jump }
+  return { dbId, connId, status, steps, prompt, info, error, schemas, treeFilter, tabs, activeTab, current, engine, isMy, special, openSpecial, closeSpecial, activityState, refreshActivity, prepareSession, confirmSession, discardSession, newTransferId, stopTransfer, exportTable, importPick, importPreview, importPrepare, importCommit, importDiscard, backupCheck, backupStart, setView, loadStructure, addOp, removeOp, reviewStructure, applyStructure, cancelStructure, migrationText, explain, diagrams, openDiagram, loadDiagram, closeDiagram, saveExport, changeCount, setCell, toggleDelete, discardEdits, review, commitReview, cancelReview, queries, catalog, history, newQuery, closeQuery, requestCloseQuery, finishAndClose, openTransactions, confirmRun, discardRun, txn, setManual, loadCatalog, run, stop, format, loadHistory, clearHistory, save, open, retry, respond, close, toggleSchema, openTable, closeTable, loadPage, apply, refresh, nextPage, prevPage, sortBy, countExactly, select, keyOf, jump }
 }
 
 // One store per SQL tab, like the Redis tabs: each has its own connection, tree and open tables.

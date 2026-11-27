@@ -14,6 +14,7 @@ pub mod mongo;
 pub mod proxy;
 pub mod redis;
 pub mod release;
+pub mod restore;
 pub mod serial;
 pub mod session;
 pub mod settings;

@@ -284,7 +284,7 @@ test.describe('A MongoDB tab (D8)', () => {
     await expect(tab.getByTestId('mongo-shell-entry').last()).toContainText('orders')
   })
 
-  test('Transfer (S43): a collection exports, the dump tool is named, and a restore asks for the database name', async ({ page }) => {
+  test('Transfer (S43): a collection exports, the dump tool is named, and a restore opens S48 with what the archive holds', async ({ page }) => {
     await openApp(page, { scenario: 'team', unlocked: true })
     const tab = await openMongo(page)
     await tab.getByTestId('mongo-coll-customers').click()
@@ -297,11 +297,18 @@ test.describe('A MongoDB tab (D8)', () => {
     await tr.getByTestId('mongo-backup').click()
     await expect(tr.locator('[data-part="done"]').last()).toContainText('Saved')
     await tr.getByTestId('mongo-restore').click()
-    const dlg = page.getByTestId('restore-confirm')
-    await expect(dlg).toContainText('Restore app-2026-11-22.dump into docs-prod?')
-    await expect(page.getByTestId('mongo-restore-confirm')).toBeDisabled()
-    await page.getByTestId('mongo-restore-typed').fill('docs-prod')
-    await page.getByTestId('mongo-restore-confirm').click()
-    await expect(dlg).toHaveCount(0)
+    const dlg = page.getByTestId('restore-dialog')
+    await dlg.getByTestId('restore-pick-file').click()
+    await expect(dlg.getByRole('table', { name: 'Objects in the dump' })).toContainText('1,200 docs')
+    await expect(dlg).toContainText('MongoDB archive')
+    await dlg.getByRole('button', { name: 'Next' }).click()
+    // MongoDB has no schema-only or owner options.
+    await expect(dlg.getByText('Schema only')).toHaveCount(0)
+    await dlg.getByRole('radio', { name: 'A new database on the same server' }).check()
+    await dlg.getByTestId('restore-new-name').fill('shop_copy')
+    await dlg.getByTestId('restore-next').click()
+    await expect(dlg.getByTestId('restore-review')).toContainText('mongorestore')
+    await dlg.getByTestId('restore-confirm').click()
+    await expect(dlg.getByTestId('restore-result')).toContainText('Restored into shop_copy')
   })
 })

@@ -166,13 +166,16 @@ export const commands = {
 	/**  Runs the dump tool and streams its output to a file the person picks. `None` when the dialog was cancelled. */
 	sqlBackupStart: (connId: string, transferId: string, progress: Channel<TransferProgress>) => typedError<TransferDone | null, AppError>(__TAURI_INVOKE("sql_backup_start", { connId, transferId, progress })),
 	/**
-	 *  Picks a dump file and holds the restore. Always typed; refused in Read-only, and on a production database unless it
-	 *  has been switched to Open (which needs the master password).
+	 *  The system dialog for a dump file (or a dump folder), then the dump is read: what it is and what is inside.
+	 *  `None` when the dialog was cancelled.
 	 */
-	sqlRestorePrepare: (connId: string) => typedError<RestorePending | null, AppError>(__TAURI_INVOKE("sql_restore_prepare", { connId })),
-	/**  Runs the restore tool on the held file after the database's exact name is typed and the mode asked again. */
-	sqlRestoreCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, progress: Channel<TransferProgress>) => typedError<null, AppError>(__TAURI_INVOKE("sql_restore_commit", { connId, pendingId, typedName, transferId, progress })),
-	sqlRestoreDiscard: (connId: string, pendingId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_restore_discard", { connId, pendingId })),
+	restorePick: (connId: string, folder: boolean) => typedError<DumpInfo_Serialize | null, AppError>(__TAURI_INVOKE("restore_pick", { connId, folder })),
+	/**  Plans the restore and, unless something blocks it, holds it for the confirmation. */
+	restorePrepare: (connId: string, dumpId: string, options: RestoreOptions_Deserialize) => typedError<RestorePlan_Serialize, AppError>(__TAURI_INVOKE("restore_prepare", { connId, dumpId, options })),
+	/**  Runs the held restore once the confirmation (typed when the review asked for it) arrives and the mode is asked again. */
+	restoreCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, progress: Channel<RestoreProgress_Deserialize>) => typedError<RestoreResult_Serialize, AppError>(__TAURI_INVOKE("restore_commit", { connId, pendingId, typedName, transferId, progress })),
+	/**  The dump isn't needed any more (the dialog closed): its unpacked folder, if any, goes with it. */
+	restoreForget: (connId: string, dumpId: string) => typedError<null, AppError>(__TAURI_INVOKE("restore_forget", { connId, dumpId })),
 	/**  Stop: the running statement is cancelled by the server (a second connection), and no further statement starts. */
 	sqlCancel: (connId: string, editorId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_cancel", { connId, editorId })),
 	/**  The editor tab closed. */
@@ -632,6 +635,8 @@ export type Class = "read" | "write" | "schema" | "dangerous";
 
 export type CodeLanguage = "mongosh" | "node" | "python" | "json";
 
+export type Content = "all" | "schema" | "data";
+
 export type CsvColumn = {
 	name: string,
 	type_name: string,
@@ -878,6 +883,112 @@ export type DiagramTable = {
 	columns: DiagramColumn[],
 };
 
+export type DumpFormat = 
+/**  `pg_dump -Fc` */
+"pg_custom" | 
+/**  `pg_dump -Ft` */
+"pg_tar" | 
+/**  `pg_dump -Fd` */
+"pg_directory" | 
+/**  `pg_dump -Fp`, `pg_dumpall`, or SQL that reads as PostgreSQL's */
+"pg_plain" | 
+/**  `mysqldump`, `mariadb-dump`, or SQL that reads as MySQL's */
+"my_sql" | 
+/**  `mongodump --archive` */
+"mongo_archive" | 
+/**  `mongodump --out` */
+"mongo_folder";
+
+/**  What the window shows about a dump (the path stays in Rust; the window holds the id). */
+export type DumpInfo = DumpInfo_Serialize | DumpInfo_Deserialize;
+
+/**  What the window shows about a dump (the path stays in Rust; the window holds the id). */
+export type DumpInfo_Deserialize = {
+	id: string,
+	file_name: string,
+	bytes: number | null,
+	format: DumpFormat,
+	format_label: string,
+	engine: Engine,
+	/**  A MariaDB dump (restorable into MySQL or MariaDB, with a note). */
+	mariadb: boolean,
+	/**  The format was guessed from the statements (no tool header). */
+	guessed: boolean,
+	compression?: string | null,
+	made_by?: string | null,
+	server_version?: string | null,
+	source_db?: string | null,
+	created?: string | null,
+	encoding?: string | null,
+	/**  Databases in the file (multi-database dumps; Mongo archives). */
+	databases: string[],
+	objects: DumpObject_Deserialize[],
+	objects_more: number | null,
+	notes: DumpNote[],
+	/**  Why the file will not be restored (the safety scan), in words. Nothing can be planned while this is set. */
+	refused?: string | null,
+	/**  Directory formats go to the host over SFTP first. */
+	needs_upload: boolean,
+};
+
+/**  What the window shows about a dump (the path stays in Rust; the window holds the id). */
+export type DumpInfo_Serialize = {
+	id: string,
+	file_name: string,
+	bytes: number | null,
+	format: DumpFormat,
+	format_label: string,
+	engine: Engine,
+	/**  A MariaDB dump (restorable into MySQL or MariaDB, with a note). */
+	mariadb: boolean,
+	/**  The format was guessed from the statements (no tool header). */
+	guessed: boolean,
+	compression: string | null,
+	made_by: string | null,
+	server_version: string | null,
+	source_db: string | null,
+	created: string | null,
+	encoding: string | null,
+	/**  Databases in the file (multi-database dumps; Mongo archives). */
+	databases: string[],
+	objects: DumpObject_Serialize[],
+	objects_more: number | null,
+	notes: DumpNote[],
+	/**  Why the file will not be restored (the safety scan), in words. Nothing can be planned while this is set. */
+	refused: string | null,
+	/**  Directory formats go to the host over SFTP first. */
+	needs_upload: boolean,
+};
+
+/**  "Things that will need attention", each saying what Dalan will do about it. */
+export type DumpNote = {
+	code: string,
+	text: string,
+};
+
+/**  One thing the dump makes, for the preview. */
+export type DumpObject = DumpObject_Serialize | DumpObject_Deserialize;
+
+/**  One thing the dump makes, for the preview. */
+export type DumpObject_Deserialize = {
+	kind: string,
+	database?: string | null,
+	name: string,
+	rows?: number | null,
+	/**  `rows` is an exact count (COPY lines, archive documents); otherwise it is counted from INSERT tuples. */
+	rows_exact: boolean,
+};
+
+/**  One thing the dump makes, for the preview. */
+export type DumpObject_Serialize = {
+	kind: string,
+	database: string | null,
+	name: string,
+	rows: number | null,
+	/**  `rows` is an exact count (COPY lines, archive documents); otherwise it is counted from INSERT tuples. */
+	rows_exact: boolean,
+};
+
 /**  Which app opens the downloaded copy. */
 export type EditApp = 
 /**  The system's default app for the file type. */
@@ -967,7 +1078,24 @@ export type ErrorCode = "locked" | "wrong_password" | "too_many_attempts" |
 /**  A manual transaction is open on this editor. */
 "sql_in_transaction" | 
 /**  The dump or restore tool isn't installed where it would run (the host, or this computer). */
-"db_tool_missing" | "internal";
+"db_tool_missing" | 
+/**  D12: the picked file isn't a dump Dalan can read (named by its first bytes). */
+"db_dump_unknown" | 
+/**  D12: the dump came from a newer tool than the one that would restore it. */
+"db_dump_too_new" | 
+/**  D12: the dump runs client commands or statements that reach outside the database (names the line). */
+"db_dump_unsafe" | 
+/**  D12: the host has less free space than the dump needs. */
+"db_host_no_space" | "internal";
+
+/**  What to do with objects that already exist at the target (§2 "Existing objects"). */
+export type Existing = 
+/**  Clashes are found before anything runs (the plan lists them); nothing is dropped. */
+"stop" | 
+/**  Drop and replace what the dump contains. */
+"replace" | 
+/**  Data only, into the tables that are there. */
+"append";
 
 export type ExplainPlan = ExplainPlan_Serialize | ExplainPlan_Deserialize;
 
@@ -2670,13 +2798,163 @@ export type RedisWriteOutcome_Serialize =
 /**  It ran. `reply` is the server's answer when it is worth showing (a new stream entry's id). */
 { status: "done"; reply: string | null } | { status: "pending"; pending: RedisPending_Serialize };
 
-export type RestorePending = {
-	id: string,
-	db_name: string,
+/**  What the person chose in "Target and options". */
+export type RestoreOptions = RestoreOptions_Serialize | RestoreOptions_Deserialize;
+
+/**  What the person chose in "Target and options". */
+export type RestoreOptions_Deserialize = {
+	/**  `Some(name)`: create this database on the same server and restore into it. `None`: the tab's database. */
+	new_database?: string | null,
+	/**  Multi-database dumps: which one to restore. */
+	source_database?: string | null,
+	existing: Existing,
+	content: Content,
+	skip_owner_acl: boolean,
+	include_roles: boolean,
+	/**  PostgreSQL: one transaction that stops at the first error. Elsewhere: stop at the first error. */
+	single_transaction: boolean,
+};
+
+/**  What the person chose in "Target and options". */
+export type RestoreOptions_Serialize = {
+	/**  `Some(name)`: create this database on the same server and restore into it. `None`: the tab's database. */
+	new_database: string | null,
+	/**  Multi-database dumps: which one to restore. */
+	source_database: string | null,
+	existing: Existing,
+	content: Content,
+	skip_owner_acl: boolean,
+	include_roles: boolean,
+	/**  PostgreSQL: one transaction that stops at the first error. Elsewhere: stop at the first error. */
+	single_transaction: boolean,
+};
+
+/**  The review (S48 "Review"): everything the person confirms, in plain words. */
+export type RestorePlan = RestorePlan_Serialize | RestorePlan_Deserialize;
+
+/**  The review (S48 "Review"): everything the person confirms, in plain words. */
+export type RestorePlan_Deserialize = {
+	/**  The held restore, or `None` when something blocks it (`blocked` says what). */
+	pending_id?: string | null,
+	blocked?: string | null,
+	/**  `confirm` or `typed`. */
+	level: string,
+	/**  The name to type for a typed confirmation. */
+	typed_name: string,
+	saved_name: string,
 	environment: string,
-	file_name: string,
-	file_bytes: number | null,
+	/**  The database the dump goes into. */
+	target_db: string,
+	new_database: boolean,
+	engine: Engine,
+	tool: string,
+	tool_version: string,
 	runs_on: string,
+	/**  What exists at the target and will be dropped and replaced. */
+	replaces: string[],
+	/**  What exists at the target and stops a "stop if anything exists" restore. */
+	clashes: string[],
+	skipped: string[],
+	warnings: string[],
+	objects: number | null,
+	rows: number | null,
+	bytes: number | null,
+	/**  Uploaded to the host first (directory dumps over a host route). */
+	upload: boolean,
+	/**  The restore can be undone as a whole (one transaction). */
+	atomic: boolean,
+};
+
+/**  The review (S48 "Review"): everything the person confirms, in plain words. */
+export type RestorePlan_Serialize = {
+	/**  The held restore, or `None` when something blocks it (`blocked` says what). */
+	pending_id: string | null,
+	blocked: string | null,
+	/**  `confirm` or `typed`. */
+	level: string,
+	/**  The name to type for a typed confirmation. */
+	typed_name: string,
+	saved_name: string,
+	environment: string,
+	/**  The database the dump goes into. */
+	target_db: string,
+	new_database: boolean,
+	engine: Engine,
+	tool: string,
+	tool_version: string,
+	runs_on: string,
+	/**  What exists at the target and will be dropped and replaced. */
+	replaces: string[],
+	/**  What exists at the target and stops a "stop if anything exists" restore. */
+	clashes: string[],
+	skipped: string[],
+	warnings: string[],
+	objects: number | null,
+	rows: number | null,
+	bytes: number | null,
+	/**  Uploaded to the host first (directory dumps over a host route). */
+	upload: boolean,
+	/**  The restore can be undone as a whole (one transaction). */
+	atomic: boolean,
+};
+
+export type RestoreProgress = RestoreProgress_Serialize | RestoreProgress_Deserialize;
+
+export type RestoreProgress_Deserialize = {
+	/**  `upload` while a folder is copied to the host, then `restore`. */
+	phase: string,
+	bytes: number | null,
+	total: number | null,
+	current?: string | null,
+	objects: number | null,
+};
+
+export type RestoreProgress_Serialize = {
+	/**  `upload` while a folder is copied to the host, then `restore`. */
+	phase: string,
+	bytes: number | null,
+	total: number | null,
+	current: string | null,
+	objects: number | null,
+};
+
+export type RestoreResult = RestoreResult_Serialize | RestoreResult_Deserialize;
+
+export type RestoreResult_Deserialize = {
+	/**  `done`, `stopped` or `failed`. */
+	outcome: string,
+	message?: string | null,
+	target_db: string,
+	objects: number | null,
+	/**  Objects the tool reported as created, in order (at most 200). */
+	done: string[],
+	warnings: RestoreWarning[],
+	seconds: number | null,
+	/**  Stopped or failed inside one transaction: the database is as it was. */
+	nothing_changed: boolean,
+	/**  A new database made for this restore was removed again after a failure or a Stop. */
+	removed_new_database: boolean,
+};
+
+export type RestoreResult_Serialize = {
+	/**  `done`, `stopped` or `failed`. */
+	outcome: string,
+	message: string | null,
+	target_db: string,
+	objects: number | null,
+	/**  Objects the tool reported as created, in order (at most 200). */
+	done: string[],
+	warnings: RestoreWarning[],
+	seconds: number | null,
+	/**  Stopped or failed inside one transaction: the database is as it was. */
+	nothing_changed: boolean,
+	/**  A new database made for this restore was removed again after a failure or a Stop. */
+	removed_new_database: boolean,
+};
+
+export type RestoreWarning = {
+	text: string,
+	count: number | null,
 };
 
 export type RowEdit = RowEdit_Serialize | RowEdit_Deserialize;

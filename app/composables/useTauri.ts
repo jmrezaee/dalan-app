@@ -2,7 +2,7 @@
 import { Channel } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { commands } from '~/types/bindings'
-import type { CodeLanguage, MgAggRequest, MgDocOp, MgFindRequest, MgIndexOp, MgStage, AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, SqlRunEvent_Serialize, RunMode, TxnAction, GridEdits_Deserialize, StructureOp_Deserialize, TableRef, ActivityView, SessionAction, ExportFormat, TransferProgress, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
+import type { CodeLanguage, MgAggRequest, MgDocOp, MgFindRequest, MgIndexOp, MgStage, AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, SqlRunEvent_Serialize, RunMode, TxnAction, GridEdits_Deserialize, StructureOp_Deserialize, TableRef, ActivityView, SessionAction, ExportFormat, TransferProgress, RestoreOptions_Deserialize as RestoreOptions, RestoreProgress_Serialize as RestoreProgress, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -115,13 +115,15 @@ export function useTauri() {
       progress.onmessage = onProgress
       return unwrap(commands.sqlBackupStart(connId, transferId, progress as never))
     },
-    sqlRestorePrepare: (connId: string) => unwrap(commands.sqlRestorePrepare(connId)),
-    sqlRestoreCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, onProgress: (p: TransferProgress) => void) => {
-      const progress = new Channel<TransferProgress>()
+    // D12 (S48, F31): restore any dump. The file's path stays in Rust; the window holds the dump's id.
+    restorePick: (connId: string, folder: boolean) => unwrap(commands.restorePick(connId, folder)),
+    restorePrepare: (connId: string, dumpId: string, options: RestoreOptions) => unwrap(commands.restorePrepare(connId, dumpId, options)),
+    restoreCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, onProgress: (p: RestoreProgress) => void) => {
+      const progress = new Channel<RestoreProgress>()
       progress.onmessage = onProgress
-      return unwrap(commands.sqlRestoreCommit(connId, pendingId, typedName, transferId, progress as never))
+      return unwrap(commands.restoreCommit(connId, pendingId, typedName, transferId, progress as never))
     },
-    sqlRestoreDiscard: (connId: string, pendingId: string) => unwrap(commands.sqlRestoreDiscard(connId, pendingId)),
+    restoreForget: (connId: string, dumpId: string) => unwrap(commands.restoreForget(connId, dumpId)),
     sqlCancel: (connId: string, editorId: string) => unwrap(commands.sqlCancel(connId, editorId)),
     sqlEditorClose: (connId: string, editorId: string) => unwrap(commands.sqlEditorClose(connId, editorId)),
     sqlCatalog: (connId: string, refresh: boolean) => unwrap(commands.sqlCatalog(connId, refresh)),

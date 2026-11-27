@@ -13,6 +13,7 @@ pub mod myextra;
 pub mod mysql;
 pub mod mytransfer;
 pub mod pg;
+pub mod restore;
 pub mod run;
 pub mod structure;
 #[cfg(test)]
@@ -700,7 +701,10 @@ pub struct SqlManager {
     /// Files chosen for import, by id: the window only ever holds the id and the name, never the path.
     pub import_files: Mutex<HashMap<String, (String, std::path::PathBuf)>>,
     pub import_pending: crate::dbs::gate::PendingStore<transfer::ImportPlan>,
-    pub restore_pending: crate::dbs::gate::PendingStore<std::path::PathBuf>,
+    /// Dumps picked for a restore (D12), by id, bound to their connection: the window holds the id, never the path.
+    dumps: Mutex<HashMap<String, (String, Arc<crate::dbs::dumpfile::Dump>)>>,
+    /// Restores held for their confirmation.
+    pub restore_jobs: crate::dbs::gate::PendingStore<restore::Job>,
     /// Running exports, backups and restores by id, so Stop can reach them.
     pub transfers: Mutex<HashMap<String, Arc<AtomicBool>>>,
     pub grid_pending: crate::dbs::gate::PendingStore<Vec<grid::GridStatement>>,
@@ -831,6 +835,39 @@ impl SqlManager {
             .ok_or_else(|| AppError::validation("Choose the file again."))
     }
 
+    /// Keeps a picked dump for this connection (at most four; the oldest goes, with its unpacked folder).
+    pub fn put_dump(&self, conn_id: &str, id: String, dump: crate::dbs::dumpfile::Dump) {
+        if let Ok(mut d) = self.dumps.lock() {
+            while d.len() >= 4 {
+                let oldest = d.keys().min().cloned();
+                if let Some(k) = oldest {
+                    d.remove(&k);
+                }
+            }
+            d.insert(id, (conn_id.to_string(), Arc::new(dump)));
+        }
+    }
+
+    pub fn dump(&self, conn_id: &str, id: &str) -> AppResult<Arc<crate::dbs::dumpfile::Dump>> {
+        self.dumps
+            .lock()
+            .ok()
+            .and_then(|d| {
+                d.get(id)
+                    .filter(|(c, _)| c == conn_id)
+                    .map(|(_, x)| Arc::clone(x))
+            })
+            .ok_or_else(|| AppError::validation("Choose the dump again."))
+    }
+
+    pub fn forget_dump(&self, conn_id: &str, id: &str) {
+        if let Ok(mut d) = self.dumps.lock() {
+            if d.get(id).is_some_and(|(c, _)| c == conn_id) {
+                d.remove(id);
+            }
+        }
+    }
+
     /// The SSH connection of a host route (`None` on a direct route).
     pub async fn ssh(&self, conn_id: &str) -> AppResult<Option<Arc<Connected>>> {
         Ok(self.get(conn_id)?.ssh.lock().await.clone())
@@ -916,7 +953,10 @@ impl SqlManager {
         if let Ok(mut f) = self.import_files.lock() {
             f.retain(|_, (c, _)| c != conn_id);
         }
-        self.restore_pending.drop_conn(conn_id);
+        self.restore_jobs.drop_conn(conn_id);
+        if let Ok(mut d) = self.dumps.lock() {
+            d.retain(|_, (c, _)| c != conn_id);
+        }
         self.structure_pending.drop_conn(conn_id);
         let live = self.conns.lock().ok().and_then(|mut m| m.remove(conn_id));
         if let Some(live) = live {

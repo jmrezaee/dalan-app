@@ -28,6 +28,9 @@ hmac = "0.13"
 sha2 = "0.11"
 pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
 base64 = "0.22"
+# D12: dumps made anywhere come gzipped, zstd'd, bzip2'd, xz'd or zipped (replica/databases/restore-copy.md §4).
+async-compression = { version = "0.4", features = ["tokio", "gzip", "zstd", "bzip2", "xz"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 mysql_common = { version = "0.37", default-features = false }
 sqlparser = "0.64"
 tokio-postgres = "0.7"

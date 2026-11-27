@@ -217,6 +217,7 @@ export function install(opts: Options) {
     redisSubNames: () => m.redisSubs.map(s => s.name),
     /** Bulk scans and runs take a moment per batch, so a test can press Stop. */
     redisBulkSlow: (on = true) => { m.redisBulkSlow = on },
+    restoreNext: (kind: string) => { m.restoreNext = kind },
     redisKeyCount: () => m.redisKeys.length,
     /** How many times the Server view asked for INFO (to check it refreshes, and stops when hidden). */
     redisInfoCalls: () => m.redisInfoCalls,

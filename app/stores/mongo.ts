@@ -492,9 +492,6 @@ function setup() {
   const exportColl = (id: string, db: string, coll: string, filter: string, onProgress: (p: TransferProgress) => void) => api.mgExport(connId.value, id, db, coll, filter, onProgress)
   const backupCheck = () => api.sqlBackupCheck(connId.value)
   const backupStart = (id: string, onProgress: (p: TransferProgress) => void) => api.sqlBackupStart(connId.value, id, onProgress)
-  const restorePrepare = () => api.sqlRestorePrepare(connId.value)
-  const restoreCommit = (pending: string, typed: string | null, id: string, onProgress: (p: TransferProgress) => void) => api.sqlRestoreCommit(connId.value, pending, typed, id, onProgress)
-  const restoreDiscard = (id: string) => api.sqlRestoreDiscard(connId.value, id).catch(() => {})
 
   // ---- The shell
   function openShell() {
@@ -560,7 +557,7 @@ function setup() {
     }
   }
 
-  return { transferOpen, openTransfer, closeTransfer, newTransferId, stopTransfer, exportColl, backupCheck, backupStart, restorePrepare, restoreCommit, restoreDiscard, shellOpen, shellDb, shellLog, shellInput, shellHistory, shellBusy, shellReview, openShell, closeShell, shellRun, shellCommit, shellCancel, aggRun, aggAdd, aggRemove, aggMove, aggWrite, aggView, aggCode, loadSchema, loadIndexes, loadValidation, openSchema, checkRules, saveRules, createIndex, dropIndex, dbId, connId, status, steps, prompt, info, error, dbs, treeFilter, tabs, activeTab, current, open, retry, respond, close, toggleDb, openColl, closeColl, load, apply, setLimit, nextPage, prevPage, countDocs, startEdit, startNew, saveEditor, deleteDoc, commitReview, cancelReview }
+  return { transferOpen, openTransfer, closeTransfer, newTransferId, stopTransfer, exportColl, backupCheck, backupStart, shellOpen, shellDb, shellLog, shellInput, shellHistory, shellBusy, shellReview, openShell, closeShell, shellRun, shellCommit, shellCancel, aggRun, aggAdd, aggRemove, aggMove, aggWrite, aggView, aggCode, loadSchema, loadIndexes, loadValidation, openSchema, checkRules, saveRules, createIndex, dropIndex, dbId, connId, status, steps, prompt, info, error, dbs, treeFilter, tabs, activeTab, current, open, retry, respond, close, toggleDb, openColl, closeColl, load, apply, setLimit, nextPage, prevPage, countDocs, startEdit, startNew, saveEditor, deleteDoc, commitReview, cancelReview }
 }
 
 const makeStore = (key: string) => defineStore(`mongo:${key}`, setup)
