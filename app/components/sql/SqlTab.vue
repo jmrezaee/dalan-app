@@ -31,7 +31,7 @@ watch(() => store.status === 'ready' && jobRequests.value.has(props.dbId), (go) 
     backupRequests.value.set(props.tabKey, r.jobId)
   }
 }, { immediate: true })
-const SPECIAL = { activity: 'Activity', transfer: 'Transfer', copy: 'Copy' } as const
+const SPECIAL = { activity: 'Activity', transfer: 'Transfer', copy: 'Copy', compare: 'Compare' } as const
 // "Copy to…" from the database list (S49): once connected, the Copy tab opens.
 watch(() => store.status === 'ready' && copyRequests.value.has(props.dbId), (go) => {
   if (!go) return
@@ -147,6 +147,7 @@ function onTabKey(e: KeyboardEvent, i: number) {
         <SqlActivityTab v-if="store.special.includes('activity')" v-show="store.activeTab === 'activity'" :tab-key="tabKey" :active="active && store.activeTab === 'activity'" />
         <SqlTransferTab v-if="store.special.includes('transfer')" v-show="store.activeTab === 'transfer'" :tab-key="tabKey" />
         <CopyTab v-if="store.special.includes('copy') && db" v-show="store.activeTab === 'copy'" :tab-key="tabKey" :engine="db.engine" :conn-id="store.connId" :db-name="db.name" :environment="db.environment" />
+        <CompareTab v-if="store.special.includes('compare') && db" v-show="store.activeTab === 'compare'" :tab-key="tabKey" :engine="db.engine" :db-name="db.name" />
         <SqlDiagramTab v-for="g in store.diagrams" v-show="store.activeTab === g.id" :key="g.id" :tab-key="tabKey" :diagram="g" />
         <SqlQueryTab v-for="q in store.queries" v-show="store.activeTab === q.id" :key="q.id" :tab-key="tabKey" :query="q" />
         <EmptyState v-if="!store.tabs.length && !store.queries.length && !store.diagrams.length && !store.special.length" :icon="ShieldCheck" title="Open a table or start a query" text="Pick a table from the list, or press New query. Reads run at once; changes ask first." />

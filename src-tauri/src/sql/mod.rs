@@ -17,6 +17,7 @@ pub mod mytransfer;
 pub mod pg;
 pub mod restore;
 pub mod run;
+pub mod schemacat;
 pub mod structure;
 #[cfg(test)]
 mod tests;
@@ -788,6 +789,8 @@ pub struct SqlManager {
     pub restore_jobs: crate::dbs::gate::PendingStore<restore::Job>,
     /// Copies held for their confirmation (D13).
     pub copy_jobs: crate::dbs::gate::PendingStore<copy::CopyJob>,
+    /// Schema syncs held for their confirmation (D16).
+    pub compare_pending: crate::dbs::gate::PendingStore<crate::commands::compare::SyncJob>,
     /// Running exports, backups and restores by id, so Stop can reach them.
     pub transfers: Mutex<HashMap<String, Arc<AtomicBool>>>,
     pub grid_pending: crate::dbs::gate::PendingStore<Vec<grid::GridStatement>>,

@@ -12,6 +12,8 @@ pub mod runner;
 pub mod saved;
 pub mod schedule;
 pub mod scheduler;
+pub mod schemadiff;
+pub mod snapshots;
 pub mod store;
 pub mod transport;
 pub mod url;

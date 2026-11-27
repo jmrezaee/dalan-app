@@ -1945,7 +1945,7 @@ mod mongo {
 
 #[cfg(test)]
 #[path = "copy_tests.rs"]
-mod docker_tests;
+pub(crate) mod docker_tests;
 
 #[cfg(test)]
 mod tests {

@@ -211,6 +211,22 @@ export const commands = {
 	 *  applies the job's retention. Recorded as a run.
 	 */
 	jobBackupRun: (connId: string, jobId: string, transferId: string, progress: Channel<TransferProgress>) => typedError<TransferDone, AppError>(__TAURI_INVOKE("job_backup_run", { connId, jobId, transferId, progress })),
+	schemaCompare: (source: Side, target: Side) => typedError<SchemaCompare_Serialize, AppError>(__TAURI_INVOKE("schema_compare", { source, target })),
+	/**  The script for the chosen differences, for the editor ("Open in a query tab"). */
+	schemaSyncScript: (source: Side, target: Side, chosen: string[]) => typedError<string, AppError>(__TAURI_INVOKE("schema_sync_script", { source, target, chosen })),
+	/**  Builds the script fresh and holds it for the target's confirmation. */
+	schemaSyncPrepare: (source: Side, target: Side, chosen: string[]) => typedError<SyncPlan, AppError>(__TAURI_INVOKE("schema_sync_prepare", { source, target, chosen })),
+	schemaSyncCommit: (connId: string, pendingId: string, typedName: string | null) => typedError<SyncReport_Serialize, AppError>(__TAURI_INVOKE("schema_sync_commit", { connId, pendingId, typedName })),
+	schemaSyncDiscard: (connId: string, pendingId: string) => __TAURI_INVOKE<void>("schema_sync_discard", { connId, pendingId }),
+	/**
+	 *  "Copy as migration…": the script into a file chosen in the system dialog. Returns the file's name, `None` when
+	 *  the dialog was cancelled.
+	 */
+	schemaScriptSave: (source: Side, target: Side, chosen: string[]) => typedError<string | null, AppError>(__TAURI_INVOKE("schema_script_save", { source, target, chosen })),
+	/**  Saves the schema of an open database as a snapshot to compare against later. */
+	schemaSnapshotSave: (connId: string, schema: string) => typedError<SnapshotRow, AppError>(__TAURI_INVOKE("schema_snapshot_save", { connId, schema })),
+	schemaSnapshots: () => typedError<SnapshotRow[], AppError>(__TAURI_INVOKE("schema_snapshots")),
+	schemaSnapshotDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("schema_snapshot_delete", { id })),
 	/**  D15: sets or clears a job's schedule (backups, and copies whose target isn't production) and its retention. */
 	jobSetSchedule: (jobId: string, schedule: Schedule | null, retention: Retention_Deserialize | null) => typedError<JobRow_Serialize, AppError>(__TAURI_INVOKE("job_set_schedule", { jobId, schedule, retention })),
 	jobSchedulePreview: (every: Every) => typedError<SchedulePreview, AppError>(__TAURI_INVOKE("job_schedule_preview", { every })),
@@ -671,6 +687,8 @@ export type ChainLink = {
 	age_s: number | null,
 	query: string,
 };
+
+export type Change = "added" | "removed" | "changed";
 
 export type Choice = "replace" | "keep_both" | "skip";
 
@@ -1200,6 +1218,47 @@ export type DiagramTable = {
 	columns: DiagramColumn[],
 };
 
+/**  One difference. `table` is set for what belongs to a table (columns, keys, indexes). */
+export type DiffItem = DiffItem_Serialize | DiffItem_Deserialize;
+
+/**  One difference. `table` is set for what belongs to a table (columns, keys, indexes). */
+export type DiffItem_Deserialize = {
+	id: string,
+	/**
+	 *  table, column, primary_key, unique, check, foreign_key, exclusion, index, enum, sequence, view, function,
+	 *  trigger.
+	 */
+	kind: string,
+	table?: string | null,
+	name: string,
+	change: Change,
+	source_ddl?: string | null,
+	target_ddl?: string | null,
+	/**  What changed, in words ("type integer → bigint"). */
+	detail: string[],
+	/**  Applying it drops something or changes a column's type: the gate asks for the typed name. */
+	dangerous: boolean,
+};
+
+/**  One difference. `table` is set for what belongs to a table (columns, keys, indexes). */
+export type DiffItem_Serialize = {
+	id: string,
+	/**
+	 *  table, column, primary_key, unique, check, foreign_key, exclusion, index, enum, sequence, view, function,
+	 *  trigger.
+	 */
+	kind: string,
+	table: string | null,
+	name: string,
+	change: Change,
+	source_ddl: string | null,
+	target_ddl: string | null,
+	/**  What changed, in words ("type integer → bigint"). */
+	detail: string[],
+	/**  Applying it drops something or changes a column's type: the gate asks for the typed name. */
+	dangerous: boolean,
+};
+
 export type DumpFormat = 
 /**  `pg_dump -Fc` */
 "pg_custom" | 
@@ -1455,6 +1514,8 @@ export type ExportOptions_Serialize = {
 };
 
 export type FailKind = "error" | "timeout" | "cancelled";
+
+export type Family = "pg" | "my";
 
 export type ForwardInput = ForwardInput_Serialize | ForwardInput_Deserialize;
 
@@ -3572,6 +3633,28 @@ export type SchedulePreview = {
 	next: (number | null)[],
 };
 
+export type SchemaCompare = SchemaCompare_Serialize | SchemaCompare_Deserialize;
+
+export type SchemaCompare_Deserialize = {
+	family: Family,
+	source_label: string,
+	target_label: string,
+	items: DiffItem_Deserialize[],
+	tables: TableDdl_Deserialize[],
+	/**  The target is a live database (a snapshot can't be changed). */
+	can_sync: boolean,
+};
+
+export type SchemaCompare_Serialize = {
+	family: Family,
+	source_label: string,
+	target_label: string,
+	items: DiffItem_Serialize[],
+	tables: TableDdl_Serialize[],
+	/**  The target is a live database (a snapshot can't be changed). */
+	can_sync: boolean,
+};
+
 export type SerialConfig = {
 	baud: number,
 	/**  5 to 8. */
@@ -3662,6 +3745,19 @@ export type ShellReply_Deserialize = {
 export type ShellReply_Serialize = {
 	blocks: string[],
 	note: string | null,
+};
+
+/**  One side of a compare. */
+export type Side = { kind: "database"; conn_id: string; schema: string } | { kind: "snapshot"; id: string };
+
+export type SnapshotRow = {
+	id: string,
+	database_id: string,
+	database_name: string,
+	schema: string,
+	family: Family,
+	captured_at: number | null,
+	tables: number | null,
 };
 
 export type SnippetInput = SnippetInput_Serialize | SnippetInput_Deserialize;
@@ -3976,6 +4072,38 @@ export type Suggestion = {
 	is_question: boolean,
 };
 
+export type SyncPlan = {
+	pending_id: string,
+	/**  `confirm` or `typed`. */
+	level: string,
+	typed_name: string,
+	environment: string,
+	script: string,
+	statements: number | null,
+	dangerous: number | null,
+};
+
+/**  What a sync did: how many statements ran of how many, and the one that failed (with the server's words). */
+export type SyncReport = SyncReport_Serialize | SyncReport_Deserialize;
+
+/**  What a sync did: how many statements ran of how many, and the one that failed (with the server's words). */
+export type SyncReport_Deserialize = {
+	ran: number | null,
+	total: number | null,
+	failed?: string | null,
+	/**  PostgreSQL ran it in one transaction: a failure left the schema as it was. */
+	rolled_back: boolean,
+};
+
+/**  What a sync did: how many statements ran of how many, and the one that failed (with the server's words). */
+export type SyncReport_Serialize = {
+	ran: number | null,
+	total: number | null,
+	failed: string | null,
+	/**  PostgreSQL ran it in one transaction: a failure left the schema as it was. */
+	rolled_back: boolean,
+};
+
 /**  What Settings shows. On other systems `supported` is false and the rest is empty. */
 export type SystemIntegration = SystemIntegration_Serialize | SystemIntegration_Deserialize;
 
@@ -4009,6 +4137,23 @@ export type SystemIntegration_Serialize = {
 	/**  `"user"` (installed for this person) or `"allusers"`, from the installer's saved choices. */
 	edition: string | null,
 	install_dir: string | null,
+};
+
+/**  A table's whole CREATE on each side, for the tree's table rows. */
+export type TableDdl = TableDdl_Serialize | TableDdl_Deserialize;
+
+/**  A table's whole CREATE on each side, for the tree's table rows. */
+export type TableDdl_Deserialize = {
+	name: string,
+	source?: string | null,
+	target?: string | null,
+};
+
+/**  A table's whole CREATE on each side, for the tree's table rows. */
+export type TableDdl_Serialize = {
+	name: string,
+	source: string | null,
+	target: string | null,
 };
 
 export type TableRef = {

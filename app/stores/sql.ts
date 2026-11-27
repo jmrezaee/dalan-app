@@ -123,7 +123,7 @@ function setup() {
   const history = ref<string[]>([])
   const diagrams = ref<DiagramTab[]>([])
   /** The Activity and Transfer inner tabs (S41, S43): each is open or not, one of each. */
-  const special = ref<('activity' | 'transfer' | 'copy')[]>([])
+  const special = ref<('activity' | 'transfer' | 'copy' | 'compare')[]>([])
   let diagramCount = 0
 
   const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : (e as { message?: string })?.message ?? fallback)
@@ -529,11 +529,11 @@ function setup() {
   }
 
   // ---- Activity (S41, F25) and Transfer (S43, F26)
-  function openSpecial(kind: 'activity' | 'transfer' | 'copy') {
+  function openSpecial(kind: 'activity' | 'transfer' | 'copy' | 'compare') {
     if (!special.value.includes(kind)) special.value.push(kind)
     activeTab.value = kind
   }
-  function closeSpecial(kind: 'activity' | 'transfer' | 'copy') {
+  function closeSpecial(kind: 'activity' | 'transfer' | 'copy' | 'compare') {
     special.value = special.value.filter(k => k !== kind)
     if (activeTab.value === kind) activeTab.value = queries.value[0]?.id ?? tabs.value[0]?.id ?? ''
   }

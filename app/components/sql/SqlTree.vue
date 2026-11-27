@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The object tree of a SQL tab (S36): schemas, opened lazily, and each one's tables and views with the planner's row
 // estimate. The search box filters what is already loaded. Enter or double-click opens a table.
-import { Activity, ArrowLeftRight, ChevronDown, ChevronRight, Copy, Eye, Plus, Share2, Table2 } from '@lucide/vue'
+import { Activity, ArrowLeftRight, ChevronDown, ChevronRight, Copy, Eye, GitCompareArrows, Plus, Share2, Table2 } from '@lucide/vue'
 import { Input } from '@/components/ui/input'
 import type { SqlObject_Serialize as SqlObject } from '~/types/bindings'
 
@@ -71,6 +71,7 @@ function onSchemaKey(e: KeyboardEvent, s: (typeof store.schemas)[number]) {
     <button type="button" class="flex h-9 shrink-0 cursor-default items-center gap-2 border-t border-border px-3 text-sm text-muted outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" :data-testid="tid('sql-new-query')" @click="store.newQuery()"><Plus class="size-4" aria-hidden="true" />New query</button>
     <button type="button" class="flex h-9 shrink-0 cursor-default items-center gap-2 border-t border-border px-3 text-sm text-muted outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" :data-testid="tid('sql-new-diagram')" @click="store.openDiagram(store.current?.schema, store.current?.table)"><Share2 class="size-4" aria-hidden="true" />Diagram</button>
     <button type="button" class="flex h-9 shrink-0 cursor-default items-center gap-2 border-t border-border px-3 text-sm text-muted outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" :data-testid="tid('sql-open-copy')" @click="store.openSpecial('copy')"><Copy class="size-4" aria-hidden="true" />Copy to another database</button>
+    <button type="button" class="flex h-9 shrink-0 cursor-default items-center gap-2 border-t border-border px-3 text-sm text-muted outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" :data-testid="tid('sql-open-compare')" @click="store.openSpecial('compare')"><GitCompareArrows class="size-4" aria-hidden="true" />Compare…</button>
   <div class="flex shrink-0 border-t border-border">
       <button type="button" class="flex h-9 flex-1 cursor-default items-center gap-2 px-3 text-sm text-muted outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" :data-testid="tid('sql-open-activity')" @click="store.openSpecial('activity')"><Activity class="size-4" aria-hidden="true" />Activity</button>
       <button type="button" class="flex h-9 flex-1 cursor-default items-center gap-2 px-3 text-sm text-muted outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" :data-testid="tid('sql-open-transfer')" @click="store.openSpecial('transfer')"><ArrowLeftRight class="size-4" aria-hidden="true" />Transfer</button>

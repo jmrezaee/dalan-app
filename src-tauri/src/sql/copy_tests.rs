@@ -33,7 +33,7 @@ fn fixture(name: &str) -> Vec<u8> {
     .unwrap()
 }
 
-fn psql(db: &str, sql: &str) -> String {
+pub(crate) fn psql(db: &str, sql: &str) -> String {
     docker_in(
         "dalan-test-pg",
         &["psql", "-U", "app", "-d", db, "-tAc", sql],
@@ -58,7 +58,7 @@ fn reopen(engine: Engine, port: u16) -> crate::sql::pg::Reopen {
     })
 }
 
-async fn pg(db: &str) -> RawConn {
+pub(crate) async fn pg(db: &str) -> RawConn {
     let login = crate::sql::pg::Login {
         user: "app".into(),
         password: Some(Zeroizing::new("test-pg".into())),
@@ -79,7 +79,7 @@ async fn pg(db: &str) -> RawConn {
     ))
 }
 
-async fn my(port: u16, pw: &str, db: Option<&str>) -> RawConn {
+pub(crate) async fn my(port: u16, pw: &str, db: Option<&str>) -> RawConn {
     let login = crate::sql::mysql::MyLogin {
         user: "root".into(),
         password: Some(Zeroizing::new(pw.into())),
