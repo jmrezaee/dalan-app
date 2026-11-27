@@ -920,7 +920,7 @@ pub async fn create_database(conn: &Conn<'_>, name: &str, encoding: Option<&str>
     }
 }
 
-async fn drop_database(conn: &Conn<'_>, name: &str) -> bool {
+pub(crate) async fn drop_database(conn: &Conn<'_>, name: &str) -> bool {
     match conn {
         Conn::Pg(c) => c
             .client

@@ -714,3 +714,113 @@ async fn l3_restore_stop_kills_the_tool_here_and_on_a_host_and_the_upload_folder
         "/usr/local/bin/psql",
     ]);
 }
+
+/// D16: a dump's catalog through a scratch database, which is gone again afterwards (PostgreSQL and MySQL).
+#[tokio::test]
+#[ignore = "needs the Docker test servers"]
+async fn l3_a_dump_is_read_through_a_scratch_database_that_goes_again() {
+    let _tools = stand_ins();
+    let shop = pg("shop").await;
+    let server = |env: &'static str| crate::sql::schemacat::Scratch {
+        name: "test",
+        environment: env,
+        mode: RedisWriteMode::Confirm,
+    };
+    let dump = Arc::new(
+        dumpfile::pick(&fixture("pg16.sql"), "t".into())
+            .await
+            .unwrap(),
+    );
+    let err = crate::sql::schemacat::from_dump(
+        Conn::Pg(&shop),
+        cfg(Engine::Postgres, 5432, "shop", "app", "test-pg"),
+        None,
+        Arc::clone(&dump),
+        "t",
+        server("production"),
+        None,
+        async |_| unreachable!(),
+    )
+    .await
+    .unwrap_err();
+    assert!(err.message.contains("is production"), "{}", err.message);
+    let cat = crate::sql::schemacat::from_dump(
+        Conn::Pg(&shop),
+        cfg(Engine::Postgres, 5432, "shop", "app", "test-pg"),
+        None,
+        dump,
+        "t",
+        server("staging"),
+        Some("public"),
+        async |db| Ok(crate::sql::RawConn::Pg(Box::new(pg(&db).await))),
+    )
+    .await
+    .unwrap();
+    assert_eq!(cat.schema, "public");
+    assert!(
+        cat.tables
+            .iter()
+            .any(|t| t.name == "orders" && t.constraints.iter().any(|c| c.kind == "f")),
+        "{:?}",
+        cat.tables.iter().map(|t| &t.name).collect::<Vec<_>>()
+    );
+    assert!(cat
+        .objects
+        .iter()
+        .any(|o| o.name.starts_with("order_count(")));
+    assert_eq!(
+        psql(
+            "shop",
+            "select count(*) from pg_database where datname like 'dalan_compare_%'"
+        ),
+        "0",
+        "the scratch database stayed"
+    );
+
+    let mysql = my(13306, "test-mysql").await;
+    let dump = Arc::new(
+        dumpfile::pick(&fixture("mysql84.sql"), "m".into())
+            .await
+            .unwrap(),
+    );
+    let raw = || async {
+        let login = crate::sql::mysql::MyLogin {
+            user: "root".into(),
+            password: Some(Zeroizing::new("test-mysql".into())),
+            database: None,
+            tls: TlsMode::Require,
+            server_name: "127.0.0.1".into(),
+        };
+        crate::sql::mysql::MyConn::connect(
+            (reopen(Engine::Mysql, 13306))().await.unwrap(),
+            login,
+            reopen(Engine::Mysql, 13306),
+        )
+        .await
+        .unwrap()
+        .0
+    };
+    let cat = crate::sql::schemacat::from_dump(
+        Conn::My(&mysql),
+        cfg(Engine::Mysql, 3306, "shop", "root", "test-mysql"),
+        None,
+        dump,
+        "m",
+        server("none"),
+        None,
+        async |_| Ok(crate::sql::RawConn::My(raw().await)),
+    )
+    .await
+    .unwrap();
+    assert!(
+        cat.tables.iter().any(|t| t.name == "orders"),
+        "{:?}",
+        cat.tables.iter().map(|t| &t.name).collect::<Vec<_>>()
+    );
+    let left = raw().await.query("select count(*) from information_schema.schemata where schema_name like 'dalan_compare_%'", 0).await.unwrap().rows;
+    assert_eq!(
+        left[0][0].as_deref(),
+        Some("0"),
+        "the scratch database stayed"
+    );
+}

@@ -5,6 +5,12 @@ export const ALLOWED: Allowed[] = [
   {
     rule: 'aria-required-children',
     selector: 'div[role="tablist"]',
+    state: 'E4-data-compare',
+    reason: 'The same app tab bar as in S36-sql-table.',
+  },
+  {
+    rule: 'aria-required-children',
+    selector: 'div[role="tablist"]',
     state: 'E3-schema-compare',
     reason: 'The same app tab bar as in S36-sql-table.',
   },

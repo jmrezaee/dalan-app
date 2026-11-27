@@ -7,6 +7,7 @@ pub mod backup;
 pub mod classify;
 pub mod copy;
 pub mod copycross;
+pub mod datacmp;
 pub mod diagram;
 pub mod explain;
 pub mod grid;
@@ -791,6 +792,8 @@ pub struct SqlManager {
     pub copy_jobs: crate::dbs::gate::PendingStore<copy::CopyJob>,
     /// Schema syncs held for their confirmation (D16).
     pub compare_pending: crate::dbs::gate::PendingStore<crate::commands::compare::SyncJob>,
+    /// "Make target match" held for its confirmation (D16).
+    pub data_pending: crate::dbs::gate::PendingStore<crate::commands::compare::DataJob>,
     /// Running exports, backups and restores by id, so Stop can reach them.
     pub transfers: Mutex<HashMap<String, Arc<AtomicBool>>>,
     pub grid_pending: crate::dbs::gate::PendingStore<Vec<grid::GridStatement>>,

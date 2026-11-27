@@ -2,7 +2,7 @@
 import { Channel } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { commands } from '~/types/bindings'
-import type { Side, Every, HostFolder, Retention_Deserialize as Retention, Schedule, CodeLanguage, MgAggRequest, MgDocOp, MgFindRequest, MgIndexOp, MgStage, AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, SqlRunEvent_Serialize, RunMode, TxnAction, GridEdits_Deserialize, StructureOp_Deserialize, TableRef, ActivityView, SessionAction, ExportFormat, TransferProgress, RestoreOptions_Deserialize as RestoreOptions, CopyRequest_Deserialize as CopyRequest, CopyObject_Deserialize as CopyObject, MaskRule_Deserialize as MaskRule, CopyProgress_Serialize as CopyProgress, RestoreProgress_Serialize as RestoreProgress, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
+import type { Side_Deserialize as Side, DataSide, DataProgress, Every, HostFolder, Retention_Deserialize as Retention, Schedule, CodeLanguage, MgAggRequest, MgDocOp, MgFindRequest, MgIndexOp, MgStage, AuthMethod, AiSettings, SerialConfig, AgentChoice, AppError, ProxyChoice, EnvVar, EditApp, EditEvent, TemplateInput, Choice, TransferEvent, TransferItem, ForwardInput, SnippetInput, GenerateInput, GroupInput, HostInput, IdentityInput, ImportInput, ImportKind, ImportRow, KeyUpdate, PromptAnswer, RawBytes, DatabaseInput_Deserialize, DbEvent_Serialize, SqlRunEvent_Serialize, RunMode, TxnAction, GridEdits_Deserialize, StructureOp_Deserialize, TableRef, ActivityView, SessionAction, ExportFormat, TransferProgress, RestoreOptions_Deserialize as RestoreOptions, CopyRequest_Deserialize as CopyRequest, CopyObject_Deserialize as CopyObject, MaskRule_Deserialize as MaskRule, CopyProgress_Serialize as CopyProgress, RestoreProgress_Serialize as RestoreProgress, PageRequest_Deserialize, SavedQueryInput_Deserialize, RedisBytes, RedisBulkAction, RedisBulkEvent, RedisDatabaseInput_Deserialize, RedisSubEvent_Serialize, RedisWriteMode, RedisWriteOp_Deserialize, RedisEvent_Serialize, SessionEvent } from '~/types/bindings'
 
 type Result<T> = { status: 'ok'; data: T } | { status: 'error'; error: AppError }
 
@@ -144,6 +144,21 @@ export function useTauri() {
     schemaSnapshotSave: (connId: string, schema: string) => unwrap(commands.schemaSnapshotSave(connId, schema)),
     schemaSnapshots: () => unwrap(commands.schemaSnapshots()),
     schemaSnapshotDelete: (id: string) => unwrap(commands.schemaSnapshotDelete(id)),
+    // D16 (E4): data compare and "Make target match".
+    dataColumns: (source: DataSide, target: DataSide) => unwrap(commands.dataColumns(source, target)),
+    dataCompare: (source: DataSide, target: DataSide, key: string[], quick: boolean, transferId: string, onProgress: (p: DataProgress) => void) => {
+      const progress = new Channel<DataProgress>()
+      progress.onmessage = onProgress
+      return unwrap(commands.dataCompare(source, target, key, quick, transferId, progress as never))
+    },
+    dataMatchPrepare: (source: DataSide, target: DataSide, key: string[], quick: boolean) => unwrap(commands.dataMatchPrepare(source, target, key, quick)),
+    dataMatchCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, onProgress: (p: DataProgress) => void) => {
+      const progress = new Channel<DataProgress>()
+      progress.onmessage = onProgress
+      return unwrap(commands.dataMatchCommit(connId, pendingId, typedName, transferId, progress as never))
+    },
+    dataMatchDiscard: (connId: string, pendingId: string) => commands.dataMatchDiscard(connId, pendingId),
+    dataMatchScript: (source: DataSide, target: DataSide, key: string[], quick: boolean) => unwrap(commands.dataMatchScript(source, target, key, quick)),
     // D15 (E2, E8): schedules, retention, and dumps in a folder on a host.
     jobSetSchedule: (jobId: string, schedule: Schedule | null, retention: Retention | null) => unwrap(commands.jobSetSchedule(jobId, schedule, retention)),
     jobSchedulePreview: (every: Every) => unwrap(commands.jobSchedulePreview(every)),

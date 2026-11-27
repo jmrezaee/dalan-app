@@ -23,8 +23,19 @@ use crate::state::AppState;
 #[derive(Debug, Clone, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Side {
-    Database { conn_id: String, schema: String },
-    Snapshot { id: String },
+    Database {
+        conn_id: String,
+        schema: String,
+    },
+    Snapshot {
+        id: String,
+    },
+    /// A dump picked in a tab (`restore_pick`), read through a scratch database on that tab's server.
+    Dump {
+        conn_id: String,
+        dump_id: String,
+        schema: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -72,6 +83,36 @@ async fn side(state: &AppState, s: &Side) -> AppResult<(Catalog, String)> {
             let raw = state.sql.connect_to(conn_id, None).await?;
             let cat = schemacat::read(&raw, schema).await?;
             Ok((cat, format!("{} · {schema}", db.name)))
+        }
+        Side::Dump {
+            conn_id,
+            dump_id,
+            schema,
+        } => {
+            let db_id = state.sql.db_id(conn_id)?;
+            let db = sql::gate_target(&state.store(), &db_id).await?;
+            let dump = state.sql.dump(conn_id, dump_id)?;
+            let cfg = sql::load(&state.store(), &db_id).await?;
+            let ssh = state.sql.ssh(conn_id).await?;
+            let owned = super::restore::Owned::get(&state.sql, conn_id, cfg.engine).await?;
+            let name = dump.info.file_name.clone();
+            let cat = schemacat::from_dump(
+                owned.conn(),
+                cfg,
+                ssh,
+                dump,
+                dump_id,
+                schemacat::Scratch {
+                    name: &db.name,
+                    environment: &db.environment,
+                    mode: db.mode,
+                },
+                schema.as_deref(),
+                async |scratch| state.sql.connect_to(conn_id, Some(scratch)).await,
+            )
+            .await?;
+            let label = format!("{name} · {}", cat.schema);
+            Ok((cat, label))
         }
         Side::Snapshot { id } => {
             let id = id.clone();
@@ -341,4 +382,238 @@ pub async fn schema_snapshot_delete(state: State<'_, AppState>, id: String) -> A
     state
         .with_db_session(move |c, s| snapshots::delete(c, s, &id))
         .await
+}
+
+// ---- Data compare (E4)
+
+use crate::sql::datacmp::{self, DataCompareResult, DataProgress, DataSide, MatchReport};
+use tauri::ipc::Channel;
+
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct DataColumn {
+    pub name: String,
+    pub kind: crate::dbs::datadiff::ValueKind,
+    pub in_target: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct DataColumns {
+    pub columns: Vec<DataColumn>,
+    pub primary_key: Vec<String>,
+}
+
+/// The source table's columns (and which the target has too), and its primary key: the default key.
+#[tauri::command]
+#[specta::specta]
+pub async fn data_columns(
+    state: State<'_, AppState>,
+    source: DataSide,
+    target: DataSide,
+) -> AppResult<DataColumns> {
+    state.require_unlocked()?;
+    let src = state.sql.connect_to(&source.conn_id, None).await?;
+    let dst = state.sql.connect_to(&target.conn_id, None).await?;
+    let (sc, pk) = datacmp::columns(&src, &source.schema, &source.table).await?;
+    let (tc, _) = datacmp::columns(&dst, &target.schema, &target.table).await?;
+    Ok(DataColumns {
+        columns: sc
+            .into_iter()
+            .map(|c| DataColumn {
+                in_target: tc.iter().any(|t| t.name == c.name),
+                kind: c.kind,
+                name: c.name,
+            })
+            .collect(),
+        primary_key: pk,
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::too_many_arguments)]
+pub async fn data_compare(
+    state: State<'_, AppState>,
+    source: DataSide,
+    target: DataSide,
+    key: Vec<String>,
+    quick: bool,
+    transfer_id: String,
+    progress: Channel<DataProgress>,
+) -> AppResult<DataCompareResult> {
+    state.require_unlocked()?;
+    let src = state.sql.connect_to(&source.conn_id, None).await?;
+    let dst = state.sql.connect_to(&target.conn_id, None).await?;
+    let (sr, tr, skipped) = datacmp::readers(&src, &source, &dst, &target, &key).await?;
+    let stop = state.sql.begin_transfer(&transfer_id);
+    let res = datacmp::compare(&src, &sr, &dst, &tr, quick, &stop, &|p| {
+        let _ = progress.send(p);
+    })
+    .await;
+    state.sql.end_transfer(&transfer_id);
+    let mut res = res?;
+    res.skipped = skipped;
+    if quick && sr.family != tr.family {
+        res.warnings
+            .push("The quick pass works within one engine; every row was compared.".into());
+    }
+    Ok(res)
+}
+
+/// What is held for "Make target match": the compare's request (the differences are read again when it runs).
+pub struct DataJob {
+    pub source: DataSide,
+    pub target: DataSide,
+    pub key: Vec<String>,
+    pub quick: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct MatchPlan {
+    pub pending_id: String,
+    pub level: String,
+    pub typed_name: String,
+    pub environment: String,
+}
+
+/// Holds "Make target match" for the target's confirmation: a write; on production always typed (it can delete).
+#[tauri::command]
+#[specta::specta]
+pub async fn data_match_prepare(
+    state: State<'_, AppState>,
+    source: DataSide,
+    target: DataSide,
+    key: Vec<String>,
+    quick: bool,
+) -> AppResult<MatchPlan> {
+    state.require_unlocked()?;
+    let db = sql::gate_target(&state.store(), &state.sql.db_id(&target.conn_id)?).await?;
+    if db.environment == "production" && db.mode != RedisWriteMode::Open {
+        return Err(gate::read_only_error(&db.name));
+    }
+    let class = if db.environment == "production" {
+        Class::Dangerous
+    } else {
+        Class::Write
+    };
+    let decision = gate::decide(db.mode, class);
+    if decision == gate::Decision::Refuse {
+        return Err(gate::read_only_error(&db.name));
+    }
+    let conn = target.conn_id.clone();
+    let id = state.sql.data_pending.put(
+        &conn,
+        class,
+        DataJob {
+            source,
+            target,
+            key,
+            quick,
+        },
+    )?;
+    Ok(MatchPlan {
+        pending_id: id,
+        level: if decision == gate::Decision::Typed {
+            "typed"
+        } else {
+            "confirm"
+        }
+        .into(),
+        typed_name: db.name,
+        environment: db.environment,
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn data_match_commit(
+    state: State<'_, AppState>,
+    conn_id: String,
+    pending_id: String,
+    typed_name: Option<String>,
+    transfer_id: String,
+    progress: Channel<DataProgress>,
+) -> AppResult<MatchReport> {
+    state.require_unlocked()?;
+    let class = state.sql.data_pending.peek_class(&conn_id, &pending_id)?;
+    let db_id = state.sql.db_id(&conn_id)?;
+    let db = sql::gate_target(&state.store(), &db_id).await?;
+    if db.environment == "production" && db.mode != RedisWriteMode::Open {
+        return Err(gate::read_only_error(&db.name));
+    }
+    gate::approve(db.mode, class, &db.name, typed_name.as_deref())?;
+    let (job, _) = state.sql.data_pending.take(&conn_id, &pending_id)?;
+    let src = state.sql.connect_to(&job.source.conn_id, None).await?;
+    let dst = state.sql.connect_to(&job.target.conn_id, None).await?;
+    let (sr, tr, _) = datacmp::readers(&src, &job.source, &dst, &job.target, &job.key).await?;
+    let stop = state.sql.begin_transfer(&transfer_id);
+    let rep = datacmp::make_match(&src, &sr, &dst, &tr, job.quick, &stop, &|p| {
+        let _ = progress.send(p);
+    })
+    .await;
+    state.sql.end_transfer(&transfer_id);
+    let rep = rep?;
+    let text = format!(
+        "make {}.{} match: {} inserted, {} updated, {} deleted",
+        job.target.schema, job.target.table, rep.inserted, rep.updated, rep.deleted
+    );
+    let _ = state
+        .store()
+        .with_db_session(move |c, s| {
+            crate::dbs::history::remember(c, s, &db_id, "data sync", &text)
+        })
+        .await;
+    Ok(rep)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn data_match_discard(state: State<'_, AppState>, conn_id: String, pending_id: String) {
+    let _ = state.sql.data_pending.take(&conn_id, &pending_id);
+}
+
+/// "Save as a script…": the inserts, updates and deletes into a file chosen in the system dialog.
+#[tauri::command]
+#[specta::specta]
+pub async fn data_match_script(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    source: DataSide,
+    target: DataSide,
+    key: Vec<String>,
+    quick: bool,
+) -> AppResult<Option<String>> {
+    state.require_unlocked()?;
+    let name = format!(
+        "match-{}-{}.sql",
+        schemadiff_safe(&target.table),
+        chrono::Local::now().format("%Y-%m-%d-%H%M")
+    );
+    let picked = tokio::task::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Save the statements")
+            .set_file_name(&name)
+            .add_filter("SQL", &["sql"])
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|e| AppError::internal(e.to_string()))?;
+    let Some(p) = picked else { return Ok(None) };
+    let path = p
+        .into_path()
+        .map_err(|_| AppError::validation("That location can't be used."))?;
+    let src = state.sql.connect_to(&source.conn_id, None).await?;
+    let dst = state.sql.connect_to(&target.conn_id, None).await?;
+    let (sr, tr, _) = datacmp::readers(&src, &source, &dst, &target, &key).await?;
+    let file = std::fs::File::create(&path)
+        .map_err(|e| AppError::validation(format!("Couldn't create the file: {e}")))?;
+    let mut out = std::io::BufWriter::new(file);
+    let title = format!(
+        "Make {}.{} match {}.{}",
+        target.schema, target.table, source.schema, source.table
+    );
+    datacmp::write_script(&src, &sr, &dst, &tr, quick, &mut out, &title).await?;
+    use std::io::Write;
+    out.flush().map_err(|e| AppError::internal(e.to_string()))?;
+    Ok(path.file_name().map(|n| n.to_string_lossy().into_owned()))
 }

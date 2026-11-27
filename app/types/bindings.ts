@@ -211,22 +211,31 @@ export const commands = {
 	 *  applies the job's retention. Recorded as a run.
 	 */
 	jobBackupRun: (connId: string, jobId: string, transferId: string, progress: Channel<TransferProgress>) => typedError<TransferDone, AppError>(__TAURI_INVOKE("job_backup_run", { connId, jobId, transferId, progress })),
-	schemaCompare: (source: Side, target: Side) => typedError<SchemaCompare_Serialize, AppError>(__TAURI_INVOKE("schema_compare", { source, target })),
+	schemaCompare: (source: Side_Deserialize, target: Side_Deserialize) => typedError<SchemaCompare_Serialize, AppError>(__TAURI_INVOKE("schema_compare", { source, target })),
 	/**  The script for the chosen differences, for the editor ("Open in a query tab"). */
-	schemaSyncScript: (source: Side, target: Side, chosen: string[]) => typedError<string, AppError>(__TAURI_INVOKE("schema_sync_script", { source, target, chosen })),
+	schemaSyncScript: (source: Side_Deserialize, target: Side_Deserialize, chosen: string[]) => typedError<string, AppError>(__TAURI_INVOKE("schema_sync_script", { source, target, chosen })),
 	/**  Builds the script fresh and holds it for the target's confirmation. */
-	schemaSyncPrepare: (source: Side, target: Side, chosen: string[]) => typedError<SyncPlan, AppError>(__TAURI_INVOKE("schema_sync_prepare", { source, target, chosen })),
+	schemaSyncPrepare: (source: Side_Deserialize, target: Side_Deserialize, chosen: string[]) => typedError<SyncPlan, AppError>(__TAURI_INVOKE("schema_sync_prepare", { source, target, chosen })),
 	schemaSyncCommit: (connId: string, pendingId: string, typedName: string | null) => typedError<SyncReport_Serialize, AppError>(__TAURI_INVOKE("schema_sync_commit", { connId, pendingId, typedName })),
 	schemaSyncDiscard: (connId: string, pendingId: string) => __TAURI_INVOKE<void>("schema_sync_discard", { connId, pendingId }),
 	/**
 	 *  "Copy as migration…": the script into a file chosen in the system dialog. Returns the file's name, `None` when
 	 *  the dialog was cancelled.
 	 */
-	schemaScriptSave: (source: Side, target: Side, chosen: string[]) => typedError<string | null, AppError>(__TAURI_INVOKE("schema_script_save", { source, target, chosen })),
+	schemaScriptSave: (source: Side_Deserialize, target: Side_Deserialize, chosen: string[]) => typedError<string | null, AppError>(__TAURI_INVOKE("schema_script_save", { source, target, chosen })),
 	/**  Saves the schema of an open database as a snapshot to compare against later. */
 	schemaSnapshotSave: (connId: string, schema: string) => typedError<SnapshotRow, AppError>(__TAURI_INVOKE("schema_snapshot_save", { connId, schema })),
 	schemaSnapshots: () => typedError<SnapshotRow[], AppError>(__TAURI_INVOKE("schema_snapshots")),
 	schemaSnapshotDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("schema_snapshot_delete", { id })),
+	/**  The source table's columns (and which the target has too), and its primary key: the default key. */
+	dataColumns: (source: DataSide, target: DataSide) => typedError<DataColumns, AppError>(__TAURI_INVOKE("data_columns", { source, target })),
+	dataCompare: (source: DataSide, target: DataSide, key: string[], quick: boolean, transferId: string, progress: Channel<DataProgress>) => typedError<DataCompareResult_Serialize, AppError>(__TAURI_INVOKE("data_compare", { source, target, key, quick, transferId, progress })),
+	/**  Holds "Make target match" for the target's confirmation: a write; on production always typed (it can delete). */
+	dataMatchPrepare: (source: DataSide, target: DataSide, key: string[], quick: boolean) => typedError<MatchPlan, AppError>(__TAURI_INVOKE("data_match_prepare", { source, target, key, quick })),
+	dataMatchCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, progress: Channel<DataProgress>) => typedError<MatchReport, AppError>(__TAURI_INVOKE("data_match_commit", { connId, pendingId, typedName, transferId, progress })),
+	dataMatchDiscard: (connId: string, pendingId: string) => __TAURI_INVOKE<void>("data_match_discard", { connId, pendingId }),
+	/**  "Save as a script…": the inserts, updates and deletes into a file chosen in the system dialog. */
+	dataMatchScript: (source: DataSide, target: DataSide, key: string[], quick: boolean) => typedError<string | null, AppError>(__TAURI_INVOKE("data_match_script", { source, target, key, quick })),
 	/**  D15: sets or clears a job's schedule (backups, and copies whose target isn't production) and its retention. */
 	jobSetSchedule: (jobId: string, schedule: Schedule | null, retention: Retention_Deserialize | null) => typedError<JobRow_Serialize, AppError>(__TAURI_INVOKE("job_set_schedule", { jobId, schedule, retention })),
 	jobSchedulePreview: (every: Every) => typedError<SchedulePreview, AppError>(__TAURI_INVOKE("job_schedule_preview", { every })),
@@ -1000,6 +1009,95 @@ export type CsvPreview = {
 	table_columns: CsvColumn[],
 	/**  For each file column, the table column with the same name (case aside), if any. */
 	suggested: (string | null)[],
+};
+
+export type DataChange = DataChange_Serialize | DataChange_Deserialize;
+
+export type DataChange_Deserialize = {
+	column: string,
+	source?: string | null,
+	target?: string | null,
+};
+
+export type DataChange_Serialize = {
+	column: string,
+	source: string | null,
+	target: string | null,
+};
+
+export type DataColumn = {
+	name: string,
+	kind: ValueKind,
+	in_target: boolean,
+};
+
+export type DataColumns = {
+	columns: DataColumn[],
+	primary_key: string[],
+};
+
+export type DataCompareResult = DataCompareResult_Serialize | DataCompareResult_Deserialize;
+
+export type DataCompareResult_Deserialize = {
+	only_source: number | null,
+	only_target: number | null,
+	different: number | null,
+	identical: number | null,
+	/**  Up to 100 of each, in key order. */
+	samples: DataSample_Deserialize[],
+	columns: string[],
+	key: string[],
+	/**  Columns left out (binary, or only on one side). */
+	skipped: string[],
+	ranges: number | null,
+	ranges_same: number | null,
+	warnings: string[],
+	seconds: number | null,
+};
+
+export type DataCompareResult_Serialize = {
+	only_source: number | null,
+	only_target: number | null,
+	different: number | null,
+	identical: number | null,
+	/**  Up to 100 of each, in key order. */
+	samples: DataSample_Serialize[],
+	columns: string[],
+	key: string[],
+	/**  Columns left out (binary, or only on one side). */
+	skipped: string[],
+	ranges: number | null,
+	ranges_same: number | null,
+	warnings: string[],
+	seconds: number | null,
+};
+
+export type DataProgress = {
+	rows: number | null,
+	ranges_done: number | null,
+	ranges: number | null,
+};
+
+export type DataSample = DataSample_Serialize | DataSample_Deserialize;
+
+export type DataSample_Deserialize = {
+	/**  `only_source`, `only_target` or `different`. */
+	kind: string,
+	key: string,
+	changes: DataChange_Deserialize[],
+};
+
+export type DataSample_Serialize = {
+	/**  `only_source`, `only_target` or `different`. */
+	kind: string,
+	key: string,
+	changes: DataChange_Serialize[],
+};
+
+export type DataSide = {
+	conn_id: string,
+	schema: string,
+	table: string,
 };
 
 /**
@@ -2329,6 +2427,20 @@ export type MaskSuggestion = {
 	table: string,
 	column: string,
 	kind: MaskKind,
+};
+
+export type MatchPlan = {
+	pending_id: string,
+	level: string,
+	typed_name: string,
+	environment: string,
+};
+
+export type MatchReport = {
+	inserted: number | null,
+	updated: number | null,
+	deleted: number | null,
+	seconds: number | null,
 };
 
 export type MgAggRequest = MgAggRequest_Serialize | MgAggRequest_Deserialize;
@@ -3748,7 +3860,17 @@ export type ShellReply_Serialize = {
 };
 
 /**  One side of a compare. */
-export type Side = { kind: "database"; conn_id: string; schema: string } | { kind: "snapshot"; id: string };
+export type Side = Side_Serialize | Side_Deserialize;
+
+/**  One side of a compare. */
+export type Side_Deserialize = { kind: "database"; conn_id: string; schema: string } | { kind: "snapshot"; id: string } | 
+/**  A dump picked in a tab (`restore_pick`), read through a scratch database on that tab's server. */
+{ kind: "dump"; conn_id: string; dump_id: string; schema?: string | null };
+
+/**  One side of a compare. */
+export type Side_Serialize = { kind: "database"; conn_id: string; schema: string } | { kind: "snapshot"; id: string } | 
+/**  A dump picked in a tab (`restore_pick`), read through a scratch database on that tab's server. */
+{ kind: "dump"; conn_id: string; dump_id: string; schema: string | null };
 
 export type SnapshotRow = {
 	id: string,
@@ -4308,6 +4430,10 @@ export type UpdateInfo_Serialize = {
 	version: string,
 	notes: string | null,
 };
+
+export type ValueKind = "bool" | "num" | "time" | "json" | "text" | 
+/**  Not compared (binary text forms differ between servers). */
+"binary";
 
 export type VaultLocked = {
 	reason: LockReason,
