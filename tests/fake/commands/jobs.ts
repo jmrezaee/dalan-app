@@ -112,6 +112,6 @@ export const jobsFake: Pick<Handlers, Keys> = {
     send(channel(a.progress), { rows: 0, bytes: 3 * 2 ** 20 })
     recordJobRun(a.jobId, 'ok', null, 'Saved /backups/app-nightly.dump')
     tag(`job-backup:${a.jobId}`)
-    return { path: '/backups/app-nightly.dump', rows: 0, bytes: 3 * 2 ** 20 }
+    return { path: '/backups/app-nightly.dump', rows: 0, bytes: 3 * 2 ** 20, check: { ok: true, summary: 'PostgreSQL custom archive, 14 objects', problem: null }, file_id: null }
   },
 }

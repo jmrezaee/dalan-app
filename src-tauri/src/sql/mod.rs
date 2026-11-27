@@ -25,6 +25,7 @@ mod tests;
 pub mod transfer;
 pub mod typemap;
 pub mod values;
+pub mod verify;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};

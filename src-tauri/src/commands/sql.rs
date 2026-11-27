@@ -966,7 +966,7 @@ pub(crate) async fn pick_save(
         .transpose()
 }
 
-async fn pick_open(
+pub(crate) async fn pick_open(
     app: &tauri::AppHandle,
     title: &'static str,
 ) -> AppResult<Option<std::path::PathBuf>> {
@@ -1001,6 +1001,9 @@ pub struct TransferDone {
     pub path: String,
     pub rows: f64,
     pub bytes: f64,
+    /// Backups (D17): the read check, and an id to run the restore check with (the path stays here).
+    pub check: Option<crate::dbs::backupcheck::ReadCheck>,
+    pub file_id: Option<String>,
 }
 
 /// Writes a table (or the rows matching `filter`) to a file the person picks. Rows stream to the file; progress
@@ -1060,6 +1063,8 @@ pub async fn sql_export_table(
             path: path.display().to_string(),
             rows,
             bytes,
+            check: None,
+            file_id: None,
         })),
         Err(e) => {
             drop(out);
@@ -1350,10 +1355,14 @@ pub async fn sql_backup_start(
             let bytes = std::fs::metadata(&path)
                 .map(|m| m.len() as f64)
                 .unwrap_or(0.0);
+            // D17: every backup is read back at once.
+            let check = crate::dbs::backupcheck::read_check(&path).await;
             Ok(Some(TransferDone {
                 path: path.display().to_string(),
                 rows: 0.0,
                 bytes,
+                check: Some(check),
+                file_id: Some(state.sql.put_file(&conn_id, path.clone())),
             }))
         }
         Err(e) => {

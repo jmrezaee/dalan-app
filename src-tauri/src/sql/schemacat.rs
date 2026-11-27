@@ -649,111 +649,50 @@ pub async fn apply(
     }
 }
 
-/// The server a dump is read on (its saved name, environment and write mode, for the restore's own checks).
-pub struct Scratch<'a> {
-    pub name: &'a str,
-    pub environment: &'a str,
-    pub mode: crate::redis::store::RedisWriteMode,
-}
-
 /// A dump's catalog (D16, E3 "with a dump file"): restored schema-only into a scratch database
-/// `dalan_compare_<id>` on a server that isn't production, read, and the scratch database dropped again (also when
-/// anything fails). Reading the dump's DDL text directly would compare types, defaults and names in the dump's
-/// own spelling and report differences that aren't there.
+/// `dalan_compare_<id>` on a server that isn't production (`restore::with_scratch`), read, and dropped again.
+/// Reading the dump's DDL text directly would compare types, defaults and names in the dump's own spelling and
+/// report differences that aren't there.
 #[allow(clippy::too_many_arguments)]
 pub async fn from_dump(
     conn: super::restore::Conn<'_>,
-    mut cfg: super::SqlConfig,
+    cfg: super::SqlConfig,
     ssh: Option<std::sync::Arc<crate::ssh::Connected>>,
     dump: std::sync::Arc<crate::dbs::dumpfile::Dump>,
     dump_id: &str,
-    server: Scratch<'_>,
+    server: super::restore::Scratch<'_>,
     schema: Option<&str>,
     open: impl AsyncFnOnce(String) -> AppResult<RawConn>,
 ) -> AppResult<Catalog> {
-    use super::restore;
-    if server.environment == "production" {
-        return Err(crate::error::AppError::validation(format!(
-            "Reading a dump needs a scratch database, and {} is production. Pick a tab of another server.",
-            server.name
-        )));
-    }
-    let scratch = format!(
-        "dalan_compare_{}",
-        &uuid::Uuid::now_v7().simple().to_string()[24..]
-    );
-    let opts = restore::RestoreOptions {
-        new_database: Some(scratch.clone()),
-        source_database: dump
-            .info
-            .databases
-            .first()
-            .cloned()
-            .filter(|_| dump.info.databases.len() > 1),
-        existing: crate::dbs::dumpscan::Existing::Stop,
-        content: crate::dbs::dumpscan::Content::Schema,
-        skip_owner_acl: true,
-        include_roles: false,
-        single_transaction: false,
-        objects: None,
-        rename_schema: None,
-        jobs: 0,
-        disable_triggers: false,
-    };
-    let (plan, job) = restore::plan(restore::PlanInput {
-        conn: match &conn {
-            restore::Conn::Pg(c) => restore::Conn::Pg(c),
-            restore::Conn::My(c) => restore::Conn::My(c),
-            restore::Conn::Mongo(c) => restore::Conn::Mongo(c),
+    let source_db = dump.info.source_db.clone();
+    super::restore::with_scratch(
+        conn,
+        cfg,
+        ssh,
+        dump,
+        dump_id,
+        server,
+        "dalan_compare",
+        crate::dbs::dumpscan::Content::Schema,
+        async |scratch| {
+            let raw = open(scratch.clone()).await?;
+            let my = matches!(raw, RawConn::My(_));
+            let mut cat = read(
+                &raw,
+                if my {
+                    &scratch
+                } else {
+                    schema.unwrap_or("public")
+                },
+            )
+            .await?;
+            if my {
+                cat.schema = source_db.unwrap_or_else(|| "dump".into());
+            }
+            Ok(cat)
         },
-        cfg: &cfg,
-        ssh: ssh.as_deref(),
-        dump: &dump,
-        dump_id: dump_id.into(),
-        opts,
-        saved_name: server.name.into(),
-        environment: server.environment.into(),
-        mode: server.mode,
-    })
-    .await?;
-    if let Some(why) = plan.blocked {
-        return Err(crate::error::AppError::validation(why));
-    }
-    restore::create_database(&conn, &scratch, restore::encoding(&job)).await?;
-    cfg.database = Some(scratch.clone());
-    let read = async {
-        let (outcome, message, _) = restore::run(restore::RunInput {
-            job: &job,
-            cfg: &cfg,
-            ssh,
-            dump: std::sync::Arc::clone(&dump),
-            stop: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            progress: &|_| {},
-        })
-        .await?;
-        if outcome != "done" {
-            return Err(crate::error::AppError::validation(message.unwrap_or_else(
-                || "The dump couldn't be read into the scratch database.".into(),
-            )));
-        }
-        let raw = open(scratch.clone()).await?;
-        let mut cat = read(
-            &raw,
-            if matches!(raw, RawConn::My(_)) {
-                &scratch
-            } else {
-                schema.unwrap_or("public")
-            },
-        )
-        .await?;
-        if matches!(raw, RawConn::My(_)) {
-            cat.schema = dump.info.source_db.clone().unwrap_or_else(|| "dump".into());
-        }
-        Ok(cat)
-    }
-    .await;
-    restore::drop_database(&conn, &scratch).await;
-    read
+    )
+    .await
 }
 
 #[cfg(test)]

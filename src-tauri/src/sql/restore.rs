@@ -2016,3 +2016,96 @@ mod tests {
 #[cfg(test)]
 #[path = "restore_tests.rs"]
 mod docker_tests;
+
+/// The server a dump is restored on for a compare or a backup check (its saved name, environment and write mode,
+/// for the restore's own checks).
+pub struct Scratch<'a> {
+    pub name: &'a str,
+    pub environment: &'a str,
+    pub mode: crate::redis::store::RedisWriteMode,
+}
+
+/// Restores `dump` into a new scratch database `<prefix>_<id>` on a server that isn't production, hands its name to
+/// `then`, and drops it again, also when the restore or `then` fails (D16 compare with a dump, D17 backup check).
+#[allow(clippy::too_many_arguments)]
+pub async fn with_scratch<T>(
+    conn: Conn<'_>,
+    mut cfg: SqlConfig,
+    ssh: Option<Arc<Connected>>,
+    dump: Arc<Dump>,
+    dump_id: &str,
+    server: Scratch<'_>,
+    prefix: &str,
+    content: crate::dbs::dumpscan::Content,
+    then: impl AsyncFnOnce(String) -> AppResult<T>,
+) -> AppResult<T> {
+    if server.environment == "production" {
+        return Err(AppError::validation(format!(
+            "This needs a scratch database, and {} is production. Pick a tab of another server.",
+            server.name
+        )));
+    }
+    let scratch = format!(
+        "{prefix}_{}",
+        &uuid::Uuid::now_v7().simple().to_string()[24..]
+    );
+    let opts = RestoreOptions {
+        new_database: Some(scratch.clone()),
+        source_database: dump
+            .info
+            .databases
+            .first()
+            .cloned()
+            .filter(|_| dump.info.databases.len() > 1),
+        existing: crate::dbs::dumpscan::Existing::Stop,
+        content,
+        skip_owner_acl: true,
+        include_roles: false,
+        single_transaction: false,
+        objects: None,
+        rename_schema: None,
+        jobs: 0,
+        disable_triggers: false,
+    };
+    let (plan, job) = plan(PlanInput {
+        conn: match &conn {
+            Conn::Pg(c) => Conn::Pg(c),
+            Conn::My(c) => Conn::My(c),
+            Conn::Mongo(c) => Conn::Mongo(c),
+        },
+        cfg: &cfg,
+        ssh: ssh.as_deref(),
+        dump: &dump,
+        dump_id: dump_id.into(),
+        opts,
+        saved_name: server.name.into(),
+        environment: server.environment.into(),
+        mode: server.mode,
+    })
+    .await?;
+    if let Some(why) = plan.blocked {
+        return Err(AppError::validation(why));
+    }
+    create_database(&conn, &scratch, encoding(&job)).await?;
+    cfg.database = Some(scratch.clone());
+    let out = async {
+        let (outcome, message, _) = run(RunInput {
+            job: &job,
+            cfg: &cfg,
+            ssh,
+            dump: Arc::clone(&dump),
+            stop: Arc::new(AtomicBool::new(false)),
+            progress: &|_| {},
+        })
+        .await?;
+        if outcome != "done" {
+            return Err(AppError::validation(message.unwrap_or_else(|| {
+                "The dump couldn't be restored into the scratch database.".into()
+            })));
+        }
+        then(scratch.clone()).await
+    }
+    .await;
+    drop_database(&conn, &scratch).await;
+    out
+}

@@ -51,7 +51,7 @@ export const commands = {
 	 *  Writes a collection (or the documents matching `filter`) to a file the person picks, one extended JSON document per
 	 *  line. The file is written by Rust; `None` when the save dialog was cancelled.
 	 */
-	mgExport: (connId: string, transferId: string, db: string, coll: string, filter: string, progress: Channel<TransferProgress>) => typedError<TransferDone | null, AppError>(__TAURI_INVOKE("mg_export", { connId, transferId, db, coll, filter, progress })),
+	mgExport: (connId: string, transferId: string, db: string, coll: string, filter: string, progress: Channel<TransferProgress>) => typedError<TransferDone_Serialize | null, AppError>(__TAURI_INVOKE("mg_export", { connId, transferId, db, coll, filter, progress })),
 	/**  One shell line. Reads run at once; a change is parsed, classified and held like every other change. */
 	mgShell: (connId: string, db: string, line: string) => typedError<MgShellResult_Serialize, AppError>(__TAURI_INVOKE("mg_shell", { connId, db, line })),
 	/**  Runs what `mg_shell` held, after the mode is asked again (and the database's name, for a dangerous command). */
@@ -149,7 +149,7 @@ export const commands = {
 	 *  Writes a table (or the rows matching `filter`) to a file the person picks. Rows stream to the file; progress
 	 *  arrives on `progress`. `None` when the save dialog was cancelled.
 	 */
-	sqlExportTable: (connId: string, transferId: string, schema: string, table: string, filter: string, format: ExportFormat, options: ExportOptions_Deserialize, progress: Channel<TransferProgress>) => typedError<TransferDone | null, AppError>(__TAURI_INVOKE("sql_export_table", { connId, transferId, schema, table, filter, format, options, progress })),
+	sqlExportTable: (connId: string, transferId: string, schema: string, table: string, filter: string, format: ExportFormat, options: ExportOptions_Deserialize, progress: Channel<TransferProgress>) => typedError<TransferDone_Serialize | null, AppError>(__TAURI_INVOKE("sql_export_table", { connId, transferId, schema, table, filter, format, options, progress })),
 	/**  Stop for an export, a backup or a restore. */
 	sqlTransferStop: (transferId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_transfer_stop", { transferId })),
 	/**  The open-file dialog for an import. Rust keeps the path; the window only shows the name. */
@@ -164,7 +164,7 @@ export const commands = {
 	/**  Which dump tool would run, where, and its version (S43's "Tool on db-primary"). */
 	sqlBackupCheck: (connId: string) => typedError<BackupInfo_Serialize, AppError>(__TAURI_INVOKE("sql_backup_check", { connId })),
 	/**  Runs the dump tool and streams its output to a file the person picks. `None` when the dialog was cancelled. */
-	sqlBackupStart: (connId: string, transferId: string, progress: Channel<TransferProgress>) => typedError<TransferDone | null, AppError>(__TAURI_INVOKE("sql_backup_start", { connId, transferId, progress })),
+	sqlBackupStart: (connId: string, transferId: string, progress: Channel<TransferProgress>) => typedError<TransferDone_Serialize | null, AppError>(__TAURI_INVOKE("sql_backup_start", { connId, transferId, progress })),
 	/**
 	 *  The system dialog for a dump file (or a dump folder), then the dump is read: what it is and what is inside.
 	 *  `None` when the dialog was cancelled.
@@ -210,7 +210,10 @@ export const commands = {
 	 *  Runs a saved backup into its folder (here or on a host): `<database>-<job>-<yyyy-mm-dd-hhmm>.<ext>`, then
 	 *  applies the job's retention. Recorded as a run.
 	 */
-	jobBackupRun: (connId: string, jobId: string, transferId: string, progress: Channel<TransferProgress>) => typedError<TransferDone, AppError>(__TAURI_INVOKE("job_backup_run", { connId, jobId, transferId, progress })),
+	jobBackupRun: (connId: string, jobId: string, transferId: string, progress: Channel<TransferProgress>) => typedError<TransferDone_Serialize, AppError>(__TAURI_INVOKE("job_backup_run", { connId, jobId, transferId, progress })),
+	/**  The system dialog for a backup file to check. The window gets an id; the path stays here. */
+	backupCheckPick: (connId: string) => typedError<CsvFile | null, AppError>(__TAURI_INVOKE("backup_check_pick", { connId })),
+	backupVerify: (sourceConnId: string, checkConnId: string, file: CheckFile) => typedError<VerifyReport_Serialize, AppError>(__TAURI_INVOKE("backup_verify", { sourceConnId, checkConnId, file })),
 	schemaCompare: (source: Side_Deserialize, target: Side_Deserialize) => typedError<SchemaCompare_Serialize, AppError>(__TAURI_INVOKE("schema_compare", { source, target })),
 	/**  The script for the chosen differences, for the editor ("Open in a query tab"). */
 	schemaSyncScript: (source: Side_Deserialize, target: Side_Deserialize, chosen: string[]) => typedError<string, AppError>(__TAURI_INVOKE("schema_sync_script", { source, target, chosen })),
@@ -699,6 +702,13 @@ export type ChainLink = {
 
 export type Change = "added" | "removed" | "changed";
 
+/**  Which backup to check. */
+export type CheckFile = 
+/**  A file id from the backup just made, or from `backup_check_pick` (both kept for the source's tab). */
+{ kind: "picked"; file_id: string } | 
+/**  A file in a folder on a host, through the host picker's SFTP session. */
+{ kind: "host"; sftp_id: string; path: string };
+
 export type Choice = "replace" | "keep_both" | "skip";
 
 /**  Ordered by how much care a statement needs: `Read < Write < Schema < Dangerous`. */
@@ -979,6 +989,24 @@ export type CopyTableReport_Serialize = {
 	target_rows: number | null,
 	error: string | null,
 	seconds: number | null,
+};
+
+export type CountRow = CountRow_Serialize | CountRow_Deserialize;
+
+export type CountRow_Deserialize = {
+	name: string,
+	/**  `None`: not in the source (any more). */
+	source?: number | null,
+	restored: number | null,
+	same: boolean,
+};
+
+export type CountRow_Serialize = {
+	name: string,
+	/**  `None`: not in the source (any more). */
+	source: number | null,
+	restored: number | null,
+	same: boolean,
 };
 
 export type CsvColumn = {
@@ -2896,6 +2924,24 @@ export type QuitRequested = {
  */
 export type RawBytes = number[];
 
+export type ReadCheck = ReadCheck_Serialize | ReadCheck_Deserialize;
+
+export type ReadCheck_Deserialize = {
+	ok: boolean,
+	/**  What was read ("PostgreSQL custom archive, 42 objects"). */
+	summary: string,
+	/**  Why it failed. */
+	problem?: string | null,
+};
+
+export type ReadCheck_Serialize = {
+	ok: boolean,
+	/**  What was read ("PostgreSQL custom archive, 42 objects"). */
+	summary: string,
+	/**  Why it failed. */
+	problem: string | null,
+};
+
 /**  One entry of the New Tab "recent" list: the server and when you last connected to it. */
 export type RecentItem = {
 	host_id: string,
@@ -4351,10 +4397,24 @@ export type Themes_Serialize = {
 	groups: ProfileTheme_Serialize[],
 };
 
-export type TransferDone = {
+export type TransferDone = TransferDone_Serialize | TransferDone_Deserialize;
+
+export type TransferDone_Deserialize = {
 	path: string,
 	rows: number | null,
 	bytes: number | null,
+	/**  Backups (D17): the read check, and an id to run the restore check with (the path stays here). */
+	check?: ReadCheck_Deserialize | null,
+	file_id?: string | null,
+};
+
+export type TransferDone_Serialize = {
+	path: string,
+	rows: number | null,
+	bytes: number | null,
+	/**  Backups (D17): the read check, and an id to run the restore check with (the path stays here). */
+	check: ReadCheck_Serialize | null,
+	file_id: string | null,
 };
 
 export type TransferEvent = TransferEvent_Serialize | TransferEvent_Deserialize;
@@ -4457,6 +4517,26 @@ export type VaultStatus_Serialize = {
 	auto_lock_minutes: number,
 	/**  Set while wrong-password attempts are cooling down. */
 	cooldown_secs: number | null,
+};
+
+export type VerifyReport = VerifyReport_Serialize | VerifyReport_Deserialize;
+
+export type VerifyReport_Deserialize = {
+	read: ReadCheck_Deserialize,
+	/**  Empty when the read check failed (nothing was restored). */
+	rows: CountRow_Deserialize[],
+	same: boolean,
+	restored_on: string,
+	seconds: number | null,
+};
+
+export type VerifyReport_Serialize = {
+	read: ReadCheck_Serialize,
+	/**  Empty when the read check failed (nothing was restored). */
+	rows: CountRow_Serialize[],
+	same: boolean,
+	restored_on: string,
+	seconds: number | null,
 };
 
 /* Tauri Specta runtime */

@@ -462,6 +462,8 @@ pub async fn job_backup_run(
                 path: done.path,
                 rows: 0.0,
                 bytes: done.bytes,
+                check: Some(done.check),
+                file_id: None,
             })
         }
         Err(e) => {

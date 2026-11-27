@@ -206,7 +206,7 @@ export const mongo: Pick<Handlers, Keys> = {
     const n = docs(a.db, a.coll).filter(d => matches(d, parseJson(a.filter, 'The filter'))).length
     send(channel(a.progress), { rows: n, bytes: n * 80 })
     tag(`export:${a.db}.${a.coll}.jsonl`)
-    return { path: `/tmp/${a.db}.${a.coll}.jsonl`, rows: n, bytes: n * 80 }
+    return { path: `/tmp/${a.db}.${a.coll}.jsonl`, rows: n, bytes: n * 80, check: null, file_id: null }
   },
   mgShell: (a, { m }) => {
     const line: string = a.line.trim().replace(/;$/, '')

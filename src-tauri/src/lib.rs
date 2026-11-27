@@ -135,6 +135,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::jobs::job_setup,
             commands::jobs::restore_pick_job,
             commands::jobs::job_backup_run,
+            commands::checks::backup_check_pick,
+            commands::checks::backup_verify,
             commands::compare::schema_compare,
             commands::compare::schema_sync_script,
             commands::compare::schema_sync_prepare,

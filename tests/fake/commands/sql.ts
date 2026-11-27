@@ -238,7 +238,7 @@ export const sql: Pick<Handlers, Keys> = {
     tag(`export:${a.table}.${a.format}`)
     for (const mk of a.options?.masks ?? []) tag(`export-mask:${mk.column}=${mk.kind}`)
     exportsDone.push(a.table)
-    return { path: `/tmp/${a.table}.${a.format}`, rows, bytes: rows * 20 }
+    return { path: `/tmp/${a.table}.${a.format}`, rows, bytes: rows * 20, check: null, file_id: null }
   },
   sqlTransferStop: (a) => {
     stopRestore(a.transferId)
@@ -275,10 +275,12 @@ export const sql: Pick<Handlers, Keys> = {
     const mongo = m.dbs.find(d => d.id === m.sqlConns.get(a.connId)?.db)?.engine === 'mongodb'
     return mongo ? { tool: 'mongodump', runs_on: 'db-primary', version: 'mongodump version: 100.9.4', problem: null } : { tool: 'pg_dump', runs_on: 'db-primary', version: 'pg_dump (PostgreSQL) 16.4', problem: null }
   },
-  sqlBackupStart: (a, { channel, send, tag }) => {
+  sqlBackupStart: (a, { m, channel, send, tag }) => {
     send(channel(a.progress), { rows: 0, bytes: 5 * 2 ** 20 })
     tag('backup:app.dump')
-    return { path: '/tmp/app-2026-11-24.dump', rows: 0, bytes: 5 * 2 ** 20 }
+    // D17: the read check; `backupNext = 'cut'` makes it fail like a cut-off file.
+    const cut = m.restoreNext === 'cut'
+    return { path: '/tmp/app-2026-11-24.dump', rows: 0, bytes: 5 * 2 ** 20, check: cut ? { ok: false, summary: 'PostgreSQL custom archive', problem: 'It ends early or is damaged: unexpected end of file' } : { ok: true, summary: 'PostgreSQL custom archive (gzip), 14 objects', problem: null }, file_id: 'backup-file-1' }
   },
   sqlStructure: (a) => {
     const t = table(a.table)

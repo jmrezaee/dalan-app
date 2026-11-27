@@ -69,7 +69,7 @@ export class Fake {
   redisSubNames = () => this.run<string[]>('redisSubNames')
   redisBulkSlow = (on = true) => this.run<void>('redisBulkSlow', on)
   /** D12: the next restore pick returns a `clean` dump, a `hostile` one, one whose tables `clash`, or a `slow` restore. */
-  restoreNext = (kind: 'clean' | 'hostile' | 'clash' | 'slow') => this.run<void>('restoreNext', kind)
+  restoreNext = (kind: 'clean' | 'hostile' | 'clash' | 'slow' | 'cut') => this.run<void>('restoreNext', kind)
   redisKeyCount = () => this.run<number>('redisKeyCount')
   settings = () => this.run<Record<string, string>>('settings')
   redisDb = (name: string) => this.run<Record<string, unknown> | null>('redisDb', name)

@@ -102,7 +102,7 @@ async fn side(state: &AppState, s: &Side) -> AppResult<(Catalog, String)> {
                 ssh,
                 dump,
                 dump_id,
-                schemacat::Scratch {
+                crate::sql::restore::Scratch {
                     name: &db.name,
                     environment: &db.environment,
                     mode: db.mode,

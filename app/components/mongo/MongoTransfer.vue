@@ -35,7 +35,9 @@ async function doExport() {
 }
 
 // ---- Backup and restore
-const bk = reactive({ info: null as BackupInfo | null, running: false, id: '', bytes: 0, done: '', error: '' })
+const bk = reactive({ info: null as BackupInfo | null, running: false, id: '', bytes: 0, done: '', error: '', checked: '', checkOk: true, fileId: '' })
+// D17 (E7): the backup check (restore into a scratch database and count rows).
+const checkOpen = ref(false)
 const restore = useRestoreStore(props.tabKey)
 // Closing the tab ends what it started: nothing keeps running unseen.
 onBeforeUnmount(() => { if (exp.running) void store.stopTransfer(exp.id); if (bk.running) void store.stopTransfer(bk.id) })
@@ -76,6 +78,10 @@ async function backup() {
   try {
     const r = await store.backupStart(bk.id, (p: TransferProgress) => { bk.bytes = p.bytes ?? 0 })
     bk.done = r ? `Saved ${r.path} · ${mb(r.bytes ?? 0)}` : ''
+    // D17: every backup is read back at once.
+    bk.checked = r?.check ? (r.check.ok ? `Read back: ${r.check.summary}.` : `It doesn't read back: ${r.check.problem ?? r.check.summary}`) : ''
+    bk.checkOk = r?.check?.ok ?? true
+    bk.fileId = r?.file_id ?? ''
   }
   catch (e) { bk.error = message(e, 'The backup failed.') }
   bk.running = false
@@ -111,12 +117,14 @@ async function backup() {
         <p v-if="bk.info?.problem" role="alert" class="text-xs text-danger" data-part="problem">{{ bk.info.problem }}</p>
         <p v-if="bk.running" role="status" class="text-xs text-muted" data-part="progress">Dumping… {{ mb(bk.bytes) }} copied to this computer as it goes</p>
         <p v-if="bk.done" role="status" class="text-xs text-success" data-part="done">{{ bk.done }}</p>
+        <p v-if="bk.checked" :role="bk.checkOk ? 'status' : 'alert'" :class="['text-xs', bk.checkOk ? 'text-muted' : 'text-danger']" data-part="read-check">{{ bk.checked }}</p>
+        <BackupCheckDialog v-model:open="checkOpen" :tab-key="tabKey" :file-id="bk.fileId" />
         <p v-if="bk.error" role="alert" class="text-xs text-danger" data-part="error">{{ bk.error }}</p>
         <p class="text-xs text-muted">Restore takes any mongodump archive or folder, from Dalan or made elsewhere, into this database or a new one. You see what is inside before anything runs.</p>
                 <div v-if="job.naming" class="flex items-center gap-2"><Input v-model="job.name" class="h-7 text-xs" placeholder="Nightly backup" aria-label="Job name" /><Button size="sm" :disabled="!job.name.trim()" :data-testid="tid('backup-save-job')" @click="saveBackupJob()">Choose folder and save</Button><Button size="sm" variant="secondary" :disabled="!job.name.trim()" :data-testid="tid('backup-save-job-host')" @click="hostPick = true">On a host…</Button></div>
         <HostFolderPicker v-model:open="hostPick" mode="folder" title="Folder for the backups" :on-pick="(p) => saveBackupJob({ host_id: p.hostId, dir: p.path })" />
         <p v-if="job.saved" role="status" class="text-xs text-success">{{ job.saved }}</p>
-<div class="mt-auto flex justify-end gap-2"><Button v-if="bk.running" variant="secondary" @click="store.stopTransfer(bk.id)">Stop</Button><Button variant="ghost" :disabled="bk.running || !!bk.info?.problem" @click="job.naming = !job.naming">Save as a job…</Button><Button variant="secondary" :disabled="bk.running" :data-testid="tid('mongo-restore')" @click="restore.start(store.connId, db?.environment === 'production')">Restore…</Button><Button :disabled="bk.running || !!bk.info?.problem" :data-testid="tid('mongo-backup')" @click="backup">Back up…</Button></div>
+<div class="mt-auto flex justify-end gap-2"><Button v-if="bk.running" variant="secondary" @click="store.stopTransfer(bk.id)">Stop</Button><Button variant="ghost" :disabled="bk.running || !!bk.info?.problem" @click="job.naming = !job.naming">Save as a job…</Button><Button variant="ghost" :disabled="bk.running" :data-testid="tid('backup-check')" @click="checkOpen = true">Check a backup…</Button><Button variant="secondary" :disabled="bk.running" :data-testid="tid('mongo-restore')" @click="restore.start(store.connId, db?.environment === 'production')">Restore…</Button><Button :disabled="bk.running || !!bk.info?.problem" :data-testid="tid('mongo-backup')" @click="backup">Back up…</Button></div>
       </section>
     </div>
 

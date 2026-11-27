@@ -721,7 +721,7 @@ async fn l3_restore_stop_kills_the_tool_here_and_on_a_host_and_the_upload_folder
 async fn l3_a_dump_is_read_through_a_scratch_database_that_goes_again() {
     let _tools = stand_ins();
     let shop = pg("shop").await;
-    let server = |env: &'static str| crate::sql::schemacat::Scratch {
+    let server = |env: &'static str| crate::sql::restore::Scratch {
         name: "test",
         environment: env,
         mode: RedisWriteMode::Confirm,
@@ -823,4 +823,79 @@ async fn l3_a_dump_is_read_through_a_scratch_database_that_goes_again() {
         Some("0"),
         "the scratch database stayed"
     );
+}
+
+/// D17: a backup restored into a scratch database `dalan_check_…`, counted against the source, and dropped again.
+#[tokio::test]
+#[ignore = "needs the Docker test servers"]
+async fn l3_a_backup_check_restores_into_scratch_counts_rows_and_drops_it() {
+    let _tools = stand_ins();
+    psql("shop", "drop database if exists d17_src");
+    // The source: what the fixture holds, with one more order than the backup has.
+    let shop = pg("shop").await;
+    let dump = Arc::new(
+        dumpfile::pick(&fixture("pg16.custom"), "t".into())
+            .await
+            .unwrap(),
+    );
+    let (_, r) = restore(
+        Conn::Pg(&shop),
+        &cfg(Engine::Postgres, 5432, "shop", "app", "test-pg"),
+        None,
+        &fixture("pg16.custom"),
+        opts(Some("d17_src")),
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(r.unwrap().outcome, "done");
+    psql(
+        "d17_src",
+        "insert into public.orders (customer_id) values (1)",
+    );
+    let src = crate::sql::RawConn::Pg(Box::new(pg("d17_src").await));
+    let rows = with_scratch(
+        Conn::Pg(&shop),
+        cfg(Engine::Postgres, 5432, "shop", "app", "test-pg"),
+        None,
+        dump,
+        "t",
+        Scratch {
+            name: "test",
+            environment: "staging",
+            mode: RedisWriteMode::Confirm,
+        },
+        "dalan_check",
+        crate::dbs::dumpscan::Content::All,
+        async |scratch| {
+            let restored = crate::sql::verify::counts(
+                &crate::sql::RawConn::Pg(Box::new(pg(&scratch).await)),
+                &scratch,
+            )
+            .await?;
+            let source = crate::sql::verify::counts(&src, "d17_src").await?;
+            Ok(crate::sql::verify::compare(restored, &source))
+        },
+    )
+    .await
+    .unwrap();
+    let orders = rows.iter().find(|r| r.name == "public.orders").unwrap();
+    assert_eq!(
+        (orders.restored, orders.source, orders.same),
+        (4.0, Some(5.0), false)
+    );
+    assert!(
+        rows.iter()
+            .filter(|r| r.name != "public.orders")
+            .all(|r| r.same),
+        "{rows:?}"
+    );
+    assert_eq!(
+        psql(
+            "shop",
+            "select count(*) from pg_database where datname like 'dalan_check_%'"
+        ),
+        "0"
+    );
+    psql("shop", "drop database d17_src");
 }

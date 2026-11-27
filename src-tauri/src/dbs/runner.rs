@@ -155,6 +155,8 @@ pub struct BackupDone {
     pub bytes: f64,
     /// What happened, for the run's log (the file, and what retention removed).
     pub log: Vec<String>,
+    /// The read check (D17) of the file as it landed.
+    pub check: crate::dbs::backupcheck::ReadCheck,
 }
 
 /// Runs a saved backup of the database open on `conn_id` into the job's folder, then applies retention.
@@ -252,12 +254,36 @@ pub async fn backup_into(
         dest.fs.remove(&path).await?;
     }
     dest.fs.rename(&part, &path).await?;
-    let mut log = vec![format!("Saved {path} on {}", dest.place)];
+    // D17: read it back where it landed (from a host, through a private local copy).
+    let check = match &dest.fs {
+        Fs::Local => crate::dbs::backupcheck::read_check(std::path::Path::new(&path)).await,
+        Fs::Remote(_) => match fetch(&dest.fs, &path).await {
+            Ok((_tmp, local)) => crate::dbs::backupcheck::read_check(&local).await,
+            Err(e) => crate::dbs::backupcheck::ReadCheck {
+                ok: false,
+                summary: "Not read back".into(),
+                problem: Some(e.message),
+            },
+        },
+    };
+    if !check.ok {
+        // A file that doesn't read back isn't a backup: it is set aside (`.bad`), out of retention's way.
+        let _ = dest.fs.rename(&path, &format!("{path}.bad")).await;
+        return Err(AppError::validation(format!(
+            "The backup was written but doesn't read back ({}): it was kept as {path}.bad.",
+            check.problem.clone().unwrap_or_default()
+        )));
+    }
+    let mut log = vec![
+        format!("Saved {path} on {}", dest.place),
+        format!("Read back: {}", check.summary),
+    ];
     log.extend(apply_retention(&dest, &db_name, &name, ext, &keep).await);
     Ok(BackupDone {
         path,
         bytes: bytes as f64,
         log,
+        check,
     })
 }
 

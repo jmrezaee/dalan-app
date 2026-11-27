@@ -489,6 +489,8 @@ pub async fn mg_export(
                 path: path.display().to_string(),
                 rows,
                 bytes,
+                check: None,
+                file_id: None,
             }))
         }
         (Err(e), _) => {
