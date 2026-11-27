@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
-import type { CopyRequest_Serialize as CopyRequest, JobRow_Serialize as JobRow, JobRun_Serialize as JobRun, RestoreOptions_Serialize as RestoreOptions } from '~/types/bindings'
+import type { Every, Retention_Deserialize as Retention, Schedule, CopyRequest_Serialize as CopyRequest, JobRow_Serialize as JobRow, JobRun_Serialize as JobRun, RestoreOptions_Serialize as RestoreOptions } from '~/types/bindings'
 import { useTauri } from '~/composables/useTauri'
+import { events } from '~/types/bindings'
 
 /** What a database tab does once connected, for a saved job being run (D14, E1). */
 export interface JobRequest { jobId: string, kind: 'copy' | 'restore' | 'backup', copy: CopyRequest | null, restore: RestoreOptions | null, targetDbId: string | null }
@@ -22,6 +23,32 @@ export const useJobsStore = defineStore('jobs', () => {
   const rows = ref<JobRow[]>([])
   const error = ref('')
   const runs = ref<Record<string, JobRun[]>>({})
+  /** D15: scheduled jobs running right now, and a failure the Jobs view hasn't shown yet (the dot on Jobs). */
+  const running = ref(new Set<string>())
+  const failedUnseen = ref(false)
+  let listening = false
+
+  /** Listens once for scheduled runs starting and ending (Rust's scheduler). A plain browser has no events. */
+  function listen() {
+    if (listening) return
+    listening = true
+    events.jobsChanged.listen((e) => {
+      const { job_id: id, running: on, failed } = e.payload
+      const next = new Set(running.value)
+      if (on) next.add(id)
+      else next.delete(id)
+      running.value = next
+      if (failed) failedUnseen.value = true
+      void refresh()
+      if (!on && runs.value[id]) void loadRuns(id)
+    }).catch(() => {})
+  }
+
+  async function setSchedule(id: string, schedule: Schedule | null, retention: Retention | null) {
+    await api.jobSetSchedule(id, schedule, retention)
+    await refresh()
+  }
+  const preview = (every: Every) => api.jobSchedulePreview(every)
 
   async function refresh() {
     try { rows.value = await api.jobsList(); error.value = '' }
@@ -73,5 +100,5 @@ export const useJobsStore = defineStore('jobs', () => {
     catch (e) { error.value = message(e, 'Couldn\'t start the job.') }
   }
 
-  return { rows, error, runs, refresh, loadRuns, rename, remove, run }
+  return { rows, error, runs, running, failedUnseen, listen, setSchedule, preview, refresh, loadRuns, rename, remove, run }
 })

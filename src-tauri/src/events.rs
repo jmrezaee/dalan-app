@@ -33,6 +33,14 @@ pub struct TunnelChanged {
     pub error: Option<String>,
 }
 
+/// D15: a scheduled job started or ended (the Jobs list refreshes; a failure puts a dot on Jobs).
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct JobsChanged {
+    pub job_id: String,
+    pub running: bool,
+    pub failed: bool,
+}
+
 /// The window was closed or ⌘Q pressed while sessions are live: the UI asks before quitting.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct QuitRequested {

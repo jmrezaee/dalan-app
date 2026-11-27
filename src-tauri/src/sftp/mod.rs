@@ -16,7 +16,7 @@ use crate::error::{AppError, AppResult};
 use crate::ssh::{PromptAnswer, Prompts};
 
 pub use edit::{EditEmit, EditEvent, EditManager, EditUpload};
-pub use fs::{Fs, RemoteFs};
+pub use fs::{basename as fs_basename, join, Fs, RemoteFs};
 pub use transfer::{Choice, Emit as TransferEmit, TransferEvent, TransferItem, TransferManager};
 
 /// One copy from `src_path` on `src` into the folder `dst_dir` on `dst`.

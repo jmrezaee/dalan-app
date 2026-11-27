@@ -97,6 +97,8 @@ export class Fake {
   }
 
   quitRequested = (liveSessions: number) => this.run<void>('quitRequested', liveSessions)
+  scheduledRun = (name: string, status: 'ok' | 'failed', missed = 0) => this.run<void>('scheduledRun', name, status, missed)
+  putRemoteFile = (hostId: string, path: string) => this.run<void>('putRemoteFile', hostId, path)
   receiveLink = (target: { user: string | null, host: string, port: number } | null) => this.run<void>('receiveLink', target)
   setSystem = (patch: Partial<SystemIntegration_Serialize>) => this.run<void>('setSystem', patch)
   tunnel = (id: string) => ({ state: (state: 'stopped' | 'starting' | 'active' | 'reconnecting' | 'error', message?: string) => this.run<void>('tunnel', id, state, message ?? null) })

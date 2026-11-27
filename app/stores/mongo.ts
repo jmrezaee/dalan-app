@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { TransferProgress, ShellReply, CodeLanguage, DbEvent_Serialize, MgAggResult, MgCount, MgDoc, MgDocOp, MgIndex, MgNode, MgPending_Serialize as MgPending, MgSchema, MgValidation, MgValidationCheck, PromptKind, RedisStepState, SqlServerInfo } from '~/types/bindings'
+import type { HostFolder, TransferProgress, ShellReply, CodeLanguage, DbEvent_Serialize, MgAggResult, MgCount, MgDoc, MgDocOp, MgIndex, MgNode, MgPending_Serialize as MgPending, MgSchema, MgValidation, MgValidationCheck, PromptKind, RedisStepState, SqlServerInfo } from '~/types/bindings'
 import { useTauri } from '~/composables/useTauri'
 
 // MongoDB tabs (S44, F27): the connection like a SQL tab's, a tree of databases and collections, and one inner tab per
@@ -509,7 +509,7 @@ function setup() {
   const stopTransfer = (id: string) => api.sqlTransferStop(id).catch(() => {})
   /** A saved backup job, into its folder (D14). */
   const backupJob = (jobId: string, id: string, onProgress: (p: TransferProgress) => void) => api.jobBackupRun(connId.value, jobId, id, onProgress).finally(() => { void useJobsStore().refresh() })
-  const saveBackupJob = (name: string) => api.jobSaveBackup(connId.value, name)
+  const saveBackupJob = (name: string, host: HostFolder | null = null) => api.jobSaveBackup(connId.value, name, host)
   const exportColl = (id: string, db: string, coll: string, filter: string, onProgress: (p: TransferProgress) => void) => api.mgExport(connId.value, id, db, coll, filter, onProgress)
   const backupCheck = () => api.sqlBackupCheck(connId.value)
   const backupStart = (id: string, onProgress: (p: TransferProgress) => void) => api.sqlBackupStart(connId.value, id, onProgress)

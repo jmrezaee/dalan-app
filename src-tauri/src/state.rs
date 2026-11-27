@@ -90,6 +90,8 @@ pub struct AppState {
     /// Live Redis connections, one per Redis tab (R1). Closed when the vault locks.
     pub redis: crate::redis::RedisManager,
     pub sql: crate::sql::SqlManager,
+    /// D15: the scheduler started by the latest unlock; an older loop sees a newer number and ends.
+    pub scheduler_gen: std::sync::atomic::AtomicU64,
 }
 
 impl AppState {
@@ -107,6 +109,7 @@ impl AppState {
             quit: crate::quit::QuitGuard::default(),
             redis: crate::redis::RedisManager::default(),
             sql: crate::sql::SqlManager::default(),
+            scheduler_gen: std::sync::atomic::AtomicU64::new(0),
         }
     }
 

@@ -591,9 +591,10 @@ async fn run(
                 Db::My(c) => *live.my.lock().await = Some(c),
                 Db::Mongo(c) => *live.mongo.lock().await = Some(c),
             }
-            emit(DbEvent::Ready { info });
-            // Hold the SSH connection until the tab closes (backups use it too).
+            // Hold the SSH connection until the tab closes (backups use it too). Set before Ready: a scheduled
+            // backup uses it as soon as the connection is ready.
             *live.ssh.lock().await = ssh.clone();
+            emit(DbEvent::Ready { info });
             let _ssh = ssh;
             let _ = cancel.changed().await;
             closed.store(true, Ordering::SeqCst);
@@ -807,6 +808,60 @@ impl SqlManager {
 
     /// Starts connecting and returns the connection's id at once. Everything else arrives through `emit`.
     pub fn open(&self, store: Store, db_id: String, emit: Emit) -> AppResult<String> {
+        self.open_with(store, db_id, emit, Arc::new(Prompts::default()))
+    }
+
+    /// Opens a database with no window to answer questions (a scheduled job, D15): an unknown or changed host key,
+    /// or a password that isn't saved, fails it instead of asking. Returns the connection's id once it is ready.
+    pub async fn open_headless(&self, store: Store, db_id: String) -> AppResult<String> {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let emit: Emit = Arc::new(move |e| {
+            let _ = tx.send(e);
+        });
+        let id = self.open_with(store, db_id, emit, Arc::new(Prompts::non_interactive()))?;
+        let wait = async {
+            let mut said: Option<String> = None;
+            while let Some(e) = rx.recv().await {
+                match e {
+                    DbEvent::Ready { .. } => return Ok(()),
+                    DbEvent::Failed { code, message } => {
+                        return Err(AppError::new(code, said.unwrap_or(message)))
+                    }
+                    DbEvent::Host {
+                        event: SessionEvent::Error { message, .. },
+                    } => said = Some(message),
+                    DbEvent::Closed => break,
+                    _ => {}
+                }
+            }
+            Err(AppError::new(
+                ErrorCode::DbUnreachable,
+                "The connection closed before it was ready.",
+            ))
+        };
+        match tokio::time::timeout(std::time::Duration::from_secs(90), wait).await {
+            Ok(Ok(())) => Ok(id),
+            Ok(Err(e)) => {
+                self.close(&id);
+                Err(e)
+            }
+            Err(_) => {
+                self.close(&id);
+                Err(AppError::new(
+                    ErrorCode::DbUnreachable,
+                    "The database didn't answer within 90 seconds.",
+                ))
+            }
+        }
+    }
+
+    fn open_with(
+        &self,
+        store: Store,
+        db_id: String,
+        emit: Emit,
+        prompts: Arc<Prompts>,
+    ) -> AppResult<String> {
         let conn_id = uuid::Uuid::now_v7().to_string();
         let (cancel, cancel_rx) = watch::channel(false);
         let live = Arc::new(Live {
@@ -815,7 +870,7 @@ impl SqlManager {
             connector: tokio::sync::Mutex::new(None),
             ssh: tokio::sync::Mutex::new(None),
             editors: tokio::sync::Mutex::new(HashMap::new()),
-            prompts: Arc::new(Prompts::default()),
+            prompts,
             cancel,
             conn: tokio::sync::Mutex::new(None),
             my: tokio::sync::Mutex::new(None),

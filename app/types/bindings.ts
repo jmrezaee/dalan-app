@@ -198,13 +198,27 @@ export const commands = {
 	jobSaveCopy: (connId: string, name: string, request: CopyRequest_Deserialize) => typedError<JobRow_Serialize, AppError>(__TAURI_INVOKE("job_save_copy", { connId, name, request })),
 	/**  Saves the restore set up in this tab's restore dialog: the dump's path (it stays in Rust) and the options. */
 	jobSaveRestore: (connId: string, dumpId: string, name: string, options: RestoreOptions_Deserialize) => typedError<JobRow_Serialize, AppError>(__TAURI_INVOKE("job_save_restore", { connId, dumpId, name, options })),
-	/**  Saves a backup of this tab's database into a folder chosen now (`None` when the dialog was cancelled). */
-	jobSaveBackup: (connId: string, name: string) => typedError<JobRow_Serialize | null, AppError>(__TAURI_INVOKE("job_save_backup", { connId, name })),
+	/**
+	 *  Saves a backup of this tab's database into a folder: on a host when `host` is given, otherwise one chosen now in
+	 *  the system dialog (`None` when that was cancelled).
+	 */
+	jobSaveBackup: (connId: string, name: string, host: HostFolder | null) => typedError<JobRow_Serialize | null, AppError>(__TAURI_INVOKE("job_save_backup", { connId, name, host })),
 	jobSetup: (jobId: string) => typedError<JobSetup_Serialize, AppError>(__TAURI_INVOKE("job_setup", { jobId })),
 	/**  A saved restore's dump, read again from where it was (it may have changed since: the safety scan runs again). */
 	restorePickJob: (connId: string, jobId: string) => typedError<DumpInfo_Serialize, AppError>(__TAURI_INVOKE("restore_pick_job", { connId, jobId })),
-	/**  Runs a saved backup into its folder: `<database>-<job>-<yyyy-mm-dd-hhmm>.<ext>`. Recorded as a run. */
+	/**
+	 *  Runs a saved backup into its folder (here or on a host): `<database>-<job>-<yyyy-mm-dd-hhmm>.<ext>`, then
+	 *  applies the job's retention. Recorded as a run.
+	 */
 	jobBackupRun: (connId: string, jobId: string, transferId: string, progress: Channel<TransferProgress>) => typedError<TransferDone, AppError>(__TAURI_INVOKE("job_backup_run", { connId, jobId, transferId, progress })),
+	/**  D15: sets or clears a job's schedule (backups, and copies whose target isn't production) and its retention. */
+	jobSetSchedule: (jobId: string, schedule: Schedule | null, retention: Retention_Deserialize | null) => typedError<JobRow_Serialize, AppError>(__TAURI_INVOKE("job_set_schedule", { jobId, schedule, retention })),
+	jobSchedulePreview: (every: Every) => typedError<SchedulePreview, AppError>(__TAURI_INVOKE("job_schedule_preview", { every })),
+	/**
+	 *  D15 (E8): a dump file in a folder on a host, picked in the SFTP picker (`sftp_id` is the picker's session). It is
+	 *  fetched into a private folder here and read like a local one; a saved restore fetches it again from the host.
+	 */
+	restorePickRemote: (connId: string, sftpId: string, hostId: string, path: string) => typedError<DumpInfo_Serialize, AppError>(__TAURI_INVOKE("restore_pick_remote", { connId, sftpId, hostId, path })),
 	/**  Stop: the running statement is cancelled by the server (a second connection), and no further statement starts. */
 	sqlCancel: (connId: string, editorId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_cancel", { connId, editorId })),
 	/**  The editor tab closed. */
@@ -470,6 +484,7 @@ export const commands = {
 /** Events */
 export const events = {
 	autoLockWarning: makeEvent<AutoLockWarning, AutoLockWarning>("auto-lock-warning"),
+	jobsChanged: makeEvent<JobsChanged, JobsChanged>("jobs-changed"),
 	linkReceived: makeEvent<LinkReceived, LinkReceived>("link-received"),
 	quitRequested: makeEvent<QuitRequested, QuitRequested>("quit-requested"),
 	tunnelChanged: makeEvent<TunnelChanged_Serialize, TunnelChanged_Deserialize>("tunnel-changed"),
@@ -1390,6 +1405,9 @@ export type ErrorCode = "locked" | "wrong_password" | "too_many_attempts" |
 /**  D12: the host has less free space than the dump needs. */
 "db_host_no_space" | "internal";
 
+/**  How often a job runs. Weekdays count from Sunday = 0, like cron. */
+export type Every = { every: "hour"; minute: number } | { every: "day"; hour: number; minute: number } | { every: "week"; weekday: number; hour: number; minute: number } | { every: "cron"; expr: string };
+
 /**  What to do with objects that already exist at the target (§2 "Existing objects"). */
 export type Existing = 
 /**  Clashes are found before anything runs (the plan lists them); nothing is dropped. */
@@ -1661,6 +1679,12 @@ export type HistoryEntry = {
 	id: string,
 	command: string,
 	ran_at: number | null,
+};
+
+/**  A folder on a saved host, picked in the SFTP picker (D15, E8). */
+export type HostFolder = {
+	host_id: string,
+	dir: string,
 };
 
 /**  Create and update share one shape. `id` is `None` to create. */
@@ -1995,6 +2019,15 @@ export type JobRow_Deserialize = {
 	summary: string,
 	created_at: number | null,
 	last_run?: JobRun_Deserialize | null,
+	/**  D15: the schedule (backup jobs, and copy jobs whose target isn't production), in words, and the next run. */
+	schedule?: Schedule | null,
+	schedule_text?: string | null,
+	next_run_at?: number | null,
+	retention?: Retention_Deserialize | null,
+	/**  Why this job can't have a schedule (`None` when it can). */
+	no_schedule?: string | null,
+	/**  Slots missed while Dalan was closed or locked, when the last run made up for them. */
+	missed_before_last?: number | null,
 };
 
 export type JobRow_Serialize = {
@@ -2009,6 +2042,15 @@ export type JobRow_Serialize = {
 	summary: string,
 	created_at: number | null,
 	last_run: JobRun_Serialize | null,
+	/**  D15: the schedule (backup jobs, and copy jobs whose target isn't production), in words, and the next run. */
+	schedule: Schedule | null,
+	schedule_text: string | null,
+	next_run_at: number | null,
+	retention: Retention_Serialize | null,
+	/**  Why this job can't have a schedule (`None` when it can). */
+	no_schedule: string | null,
+	/**  Slots missed while Dalan was closed or locked, when the last run made up for them. */
+	missed_before_last: number | null,
 };
 
 export type JobRun = JobRun_Serialize | JobRun_Deserialize;
@@ -2058,6 +2100,13 @@ export type JobSetup_Serialize = {
 	copy: CopyRequest_Serialize | null,
 	restore: RestoreOptions_Serialize | null,
 	file_name: string | null,
+};
+
+/**  D15: a scheduled job started or ended (the Jobs list refreshes; a failure puts a dot on Jobs). */
+export type JobsChanged = {
+	job_id: string,
+	running: boolean,
+	failed: boolean,
 };
 
 export type KeyKind = "ed25519" | "ecdsa_p256" | "ecdsa_p384" | "ecdsa_p521" | "rsa4096";
@@ -3416,6 +3465,21 @@ export type RestoreWarning = {
 	count: number | null,
 };
 
+/**  Keep the last N files, files younger than N days, or both (a file goes only when every rule set lets it go). */
+export type Retention = Retention_Serialize | Retention_Deserialize;
+
+/**  Keep the last N files, files younger than N days, or both (a file goes only when every rule set lets it go). */
+export type Retention_Deserialize = {
+	keep_last?: number | null,
+	keep_days?: number | null,
+};
+
+/**  Keep the last N files, files younger than N days, or both (a file goes only when every rule set lets it go). */
+export type Retention_Serialize = {
+	keep_last: number | null,
+	keep_days: number | null,
+};
+
 export type RowEdit = RowEdit_Serialize | RowEdit_Deserialize;
 
 export type RowEdit_Deserialize = {
@@ -3494,6 +3558,18 @@ export type SavedQuery_Serialize = {
 	description: string | null,
 	body: string,
 	updated_at: number | null,
+};
+
+/**  A job's schedule as the window sets it. */
+export type Schedule = {
+	/**  A notification after a run that went well too (failures always notify). */
+	notify_ok: boolean,
+} & Every;
+
+/**  What a schedule means: in words, and its next three runs (epoch ms). An invalid cron says why. */
+export type SchedulePreview = {
+	text: string,
+	next: (number | null)[],
 };
 
 export type SerialConfig = {

@@ -77,6 +77,21 @@ function setup() {
     busy.value = false
   }
 
+  /** D15 (E8): a dump in a folder on a host, picked in the SFTP picker; Rust fetches it and reads it. */
+  async function pickRemote(sftpId: string, hostId: string, path: string) {
+    error.value = ''
+    busy.value = true
+    try {
+      const d = await api.restorePickRemote(connId.value, sftpId, hostId, path)
+      if (dump.value) void api.restoreForget(connId.value, dump.value.id).catch(() => {})
+      dump.value = d
+      options.source_database = d.databases.length > 1 ? (d.databases.find(x => x === d.source_db) ?? d.databases[0] ?? null) : null
+      step.value = 'inside'
+    }
+    catch (e) { error.value = message(e, 'Couldn\'t fetch that file.') }
+    busy.value = false
+  }
+
   async function review() {
     const d = dump.value
     if (!d) return
@@ -166,7 +181,7 @@ function setup() {
   /** After a restore into a new database: save it as a database (a copy of this one's connection) to open it. */
   const saveDatabase = (name: string) => api.restoreSaveDatabase(connId.value, name)
 
-  return { jobId, saved, startJob, saveJob, connId, open, step, busy, error, dump, plan, progress, result, typed, options, selected, startedAt, start, pick, review, commit, stop, close, saveDatabase }
+  return { jobId, saved, startJob, saveJob, connId, open, step, busy, error, dump, plan, progress, result, typed, options, selected, startedAt, start, pick, pickRemote, review, commit, stop, close, saveDatabase }
 }
 
 const makeStore = (key: string) => defineStore(`restore:${key}`, setup)

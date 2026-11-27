@@ -39,6 +39,8 @@ sqlparser = "0.64"
 tokio-postgres = "0.7"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 bytes = "1"
+# D15: schedules are in local time (daylight saving included); chrono was already in the tree.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 tokio-postgres-rustls = "0.14"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
@@ -55,6 +57,8 @@ tauri = { version = "2", features = [] }
 tauri-plugin-clipboard-manager = "2.3.3"
 tauri-plugin-dialog = "2.7.3"
 tauri-plugin-log = "2.9.2"
+# D15: a system notification when a scheduled job fails. Sent from Rust only; the webview gets no permission.
+tauri-plugin-notification = "2"
 tauri-plugin-opener = "2.5.5"
 tauri-plugin-updater = "2"
 tauri-specta = { version = "=2.0.0-rc.26", features = ["derive", "typescript"] }

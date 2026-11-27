@@ -154,6 +154,10 @@ pub struct Dump {
     pub folder: Option<PathBuf>,
     /// Removes the unpacked folder when the dump is dropped.
     pub _unpacked: Option<TempDir>,
+    /// D15: a dump fetched from a host into a private folder here (removed with the dump), and where it came from
+    /// (host id, path there), so a saved restore fetches it again.
+    pub _fetched: Option<TempDir>,
+    pub origin: Option<(String, String)>,
     /// PostgreSQL archives: the format version (major, minor) and pg_dump's major version.
     pub archive_version: Option<(u8, u8)>,
     pub dump_major: Option<u32>,
@@ -599,6 +603,8 @@ pub async fn pick(path: &Path, id: String) -> AppResult<Dump> {
         outer: outer.take(),
         folder: None,
         _unpacked: None,
+        _fetched: None,
+        origin: None,
         archive_version: None,
         dump_major: None,
         tables: Vec::new(),
@@ -665,6 +671,8 @@ async fn read_folder(
         outer: None,
         folder: Some(root.clone()),
         _unpacked: unpacked,
+        _fetched: None,
+        origin: None,
         archive_version: None,
         dump_major: None,
         tables: Vec::new(),

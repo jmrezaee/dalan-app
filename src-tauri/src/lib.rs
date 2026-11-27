@@ -135,6 +135,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::jobs::job_setup,
             commands::jobs::restore_pick_job,
             commands::jobs::job_backup_run,
+            commands::jobs::job_set_schedule,
+            commands::jobs::job_schedule_preview,
+            commands::restore::restore_pick_remote,
             commands::sql::sql_cancel,
             commands::sql::sql_editor_close,
             commands::sql::sql_catalog,
@@ -273,7 +276,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::AutoLockWarning,
             events::TunnelChanged,
             events::QuitRequested,
-            events::LinkReceived
+            events::LinkReceived,
+            events::JobsChanged
         ])
 }
 
@@ -318,6 +322,7 @@ pub fn run() {
     app.plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_log::Builder::default().build())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {

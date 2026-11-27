@@ -5,7 +5,7 @@
 // progress.
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import type { MaskKind, BackupInfo_Serialize as BackupInfo, CsvPreview, ExportFormat, CsvImportPending as ImportPending, TransferProgress } from '~/types/bindings'
+import type { MaskKind, BackupInfo_Serialize as BackupInfo, CsvPreview, ExportFormat, CsvImportPending as ImportPending, TransferProgress, HostFolder } from '~/types/bindings'
 import { cn } from '@/lib/utils'
 
 const props = defineProps<{ tabKey: string }>()
@@ -100,6 +100,7 @@ async function check() {
 onMounted(check)
 // A saved backup job (D14): run into its folder when Jobs asks, or save this backup as one.
 const job = reactive({ naming: false, name: '', saved: '' })
+const hostPick = ref(false)
 watch(() => backupRequests.value.get(props.tabKey), async (id) => {
   if (!id || bk.running) return
   backupRequests.value.delete(props.tabKey)
@@ -111,10 +112,11 @@ watch(() => backupRequests.value.get(props.tabKey), async (id) => {
   catch (e) { bk.error = message(e, 'The backup failed.') }
   bk.running = false
 }, { immediate: true })
-async function saveBackupJob() {
+/** Saves the backup as a job: into a folder chosen here, or (D15) a folder on a host picked over SFTP. */
+async function saveBackupJob(host: HostFolder | null = null) {
   bk.error = ''
   try {
-    const row = await store.saveBackupJob(job.name)
+    const row = await store.saveBackupJob(job.name, host)
     if (row) {
       job.saved = `Saved as the job “${row.name}”. Run it from Jobs.`
       job.naming = false
@@ -201,7 +203,8 @@ const panel = 'flex flex-col gap-3 rounded-lg border border-border bg-surface p-
         <p v-if="bk.done" role="status" class="text-xs text-success" data-part="done">{{ bk.done }}</p>
         <p v-if="bk.error" role="alert" class="text-xs text-danger" data-part="error">{{ bk.error }}</p>
         <p class="text-xs text-muted">Restore takes any dump, from Dalan or made elsewhere, into this database or a new one. You see what is inside before anything runs.</p>
-                <div v-if="job.naming" class="flex items-center gap-2"><Input v-model="job.name" class="h-7 text-xs" placeholder="Nightly backup" aria-label="Job name" /><Button size="sm" :disabled="!job.name.trim()" :data-testid="tid('backup-save-job')" @click="saveBackupJob">Choose folder and save</Button></div>
+                <div v-if="job.naming" class="flex items-center gap-2"><Input v-model="job.name" class="h-7 text-xs" placeholder="Nightly backup" aria-label="Job name" /><Button size="sm" :disabled="!job.name.trim()" :data-testid="tid('backup-save-job')" @click="saveBackupJob()">Choose folder and save</Button><Button size="sm" variant="secondary" :disabled="!job.name.trim()" :data-testid="tid('backup-save-job-host')" @click="hostPick = true">On a host…</Button></div>
+        <HostFolderPicker v-model:open="hostPick" mode="folder" title="Folder for the backups" :on-pick="(p) => saveBackupJob({ host_id: p.hostId, dir: p.path })" />
         <p v-if="job.saved" role="status" class="text-xs text-success">{{ job.saved }}</p>
 <div class="mt-auto flex justify-end gap-2"><Button v-if="bk.running" variant="secondary" @click="store.stopTransfer(bk.id)">Stop</Button><Button variant="ghost" :disabled="bk.running || !!bk.info?.problem" @click="job.naming = !job.naming">Save as a job…</Button><Button variant="secondary" :disabled="bk.running" :data-testid="tid('sql-restore')" @click="restore.start(store.connId, db?.environment === 'production')">Restore…</Button><Button :disabled="bk.running || !!bk.info?.problem" @click="backup">Back up…</Button></div>
       </section>

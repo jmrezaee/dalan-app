@@ -7,11 +7,12 @@ use tauri::ipc::Channel;
 use tauri::State;
 use tauri_plugin_dialog::DialogExt;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::dbs::dumpfile::DumpInfo;
 use crate::dbs::jobs::{self, JobKind, JobRow, JobRun, NewJob, RunRecord};
+use crate::dbs::schedule::{Every, Retention, Schedule};
 use crate::error::{AppError, AppResult};
 use crate::sql::copy::CopyRequest;
 use crate::sql::restore::RestoreOptions;
@@ -38,7 +39,7 @@ fn hex(k: &[u8; 32]) -> String {
 /// Records a run of a saved job (a failure to record never fails the run itself).
 #[allow(clippy::too_many_arguments)]
 pub async fn record(
-    state: &State<'_, AppState>,
+    state: &AppState,
     job_id: &str,
     started: i64,
     status: &'static str,
@@ -161,6 +162,7 @@ pub async fn job_save_copy(
                     target: Some(target),
                     summary,
                     plan,
+                    destination: None,
                 },
             )
         })
@@ -198,7 +200,19 @@ pub async fn job_save_restore(
             ""
         }
     );
-    let plan = serde_json::json!({ "path": dump.path, "options": options });
+    // A dump fetched from a host is saved by where it is there, so the job fetches it again (D15).
+    let (plan, destination, summary) = match &dump.origin {
+        Some((host_id, path)) => (
+            serde_json::json!({ "host_id": host_id, "remote_path": path, "options": options }),
+            Some(serde_json::json!({ "host_id": host_id })),
+            format!("{summary} (the dump is on a host)"),
+        ),
+        None => (
+            serde_json::json!({ "path": dump.path, "options": options }),
+            None,
+            summary,
+        ),
+    };
     state
         .with_db_session(move |c, s| {
             jobs::save(
@@ -211,13 +225,22 @@ pub async fn job_save_restore(
                     target: Some(db),
                     summary,
                     plan,
+                    destination,
                 },
             )
         })
         .await
 }
 
-/// Saves a backup of this tab's database into a folder chosen now (`None` when the dialog was cancelled).
+/// A folder on a saved host, picked in the SFTP picker (D15, E8).
+#[derive(Debug, Clone, Deserialize, Type)]
+pub struct HostFolder {
+    pub host_id: String,
+    pub dir: String,
+}
+
+/// Saves a backup of this tab's database into a folder: on a host when `host` is given, otherwise one chosen now in
+/// the system dialog (`None` when that was cancelled).
 #[tauri::command]
 #[specta::specta]
 pub async fn job_save_backup(
@@ -225,9 +248,52 @@ pub async fn job_save_backup(
     state: State<'_, AppState>,
     conn_id: String,
     name: String,
+    host: Option<HostFolder>,
 ) -> AppResult<Option<JobRow>> {
     state.require_unlocked()?;
     let db = state.sql.db_id(&conn_id)?;
+    if let Some(h) = host {
+        let dir = h.dir.trim().to_string();
+        if dir.is_empty() {
+            return Err(AppError::validation("Pick a folder on the host."));
+        }
+        let label: String = {
+            let id = h.host_id.clone();
+            state
+                .with_db_session(move |c, s| {
+                    use rusqlite::OptionalExtension;
+                    c.query_row(
+                        "SELECT label FROM hosts WHERE id = ?1 AND vault_id = ?2",
+                        rusqlite::params![id, s.vault_id],
+                        |r| r.get(0),
+                    )
+                    .optional()?
+                    .ok_or_else(|| AppError::not_found("That host is no longer saved."))
+                })
+                .await?
+        };
+        let target = crate::sql::gate_target(&state.store(), &db).await?;
+        let summary = format!("Back up {} to {dir} on {label}", target.name);
+        let plan = serde_json::json!({ "host_id": h.host_id, "dir": dir });
+        return state
+            .with_db_session(move |c, s| {
+                jobs::save(
+                    c,
+                    s,
+                    NewJob {
+                        name,
+                        kind: JobKind::Backup,
+                        source: Some(db),
+                        target: None,
+                        summary,
+                        plan,
+                        destination: Some(serde_json::json!({ "host_id": h.host_id })),
+                    },
+                )
+            })
+            .await
+            .map(Some);
+    }
     let picked = tokio::task::spawn_blocking(move || {
         app.dialog()
             .file()
@@ -264,6 +330,7 @@ pub async fn job_save_backup(
                     target: None,
                     summary,
                     plan,
+                    destination: None,
                 },
             )
         })
@@ -306,11 +373,15 @@ pub async fn job_setup(state: State<'_, AppState>, job_id: String) -> AppResult<
         restore: plan
             .get("options")
             .and_then(|r| serde_json::from_value(r.clone()).ok()),
-        file_name: plan.get("path").and_then(|p| p.as_str()).and_then(|p| {
-            std::path::Path::new(p)
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-        }),
+        file_name: plan
+            .get("path")
+            .or_else(|| plan.get("remote_path"))
+            .and_then(|p| p.as_str())
+            .and_then(|p| {
+                std::path::Path::new(p)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+            }),
     })
 }
 
@@ -326,6 +397,20 @@ pub async fn restore_pick_job(
     let (_, plan) = state
         .with_db_session(move |c, s| jobs::plan(c, s, &job_id))
         .await?;
+    if let (Some(host_id), Some(remote)) = (
+        plan.get("host_id").and_then(|p| p.as_str()),
+        plan.get("remote_path").and_then(|p| p.as_str()),
+    ) {
+        let fs = crate::sftp::Fs::Remote(std::sync::Arc::new(
+            crate::dbs::runner::open_host(&state.store(), host_id).await?,
+        ));
+        let (tmp, local) = crate::dbs::runner::fetch(&fs, remote).await?;
+        let id = uuid::Uuid::now_v7().to_string();
+        let mut dump = crate::dbs::dumpfile::pick(&local, id.clone()).await?;
+        dump._fetched = Some(tmp);
+        dump.origin = Some((host_id.to_string(), remote.to_string()));
+        return super::restore::keep_dump(&state, &conn_id, id, dump).await;
+    }
     let path = plan
         .get("path")
         .and_then(|p| p.as_str())
@@ -339,12 +424,11 @@ pub async fn restore_pick_job(
     }
     let id = uuid::Uuid::now_v7().to_string();
     let dump = crate::dbs::dumpfile::pick(&path, id.clone()).await?;
-    let info = dump.info.clone();
-    state.sql.put_dump(&conn_id, id, dump);
-    Ok(info)
+    super::restore::keep_dump(&state, &conn_id, id, dump).await
 }
 
-/// Runs a saved backup into its folder: `<database>-<job>-<yyyy-mm-dd-hhmm>.<ext>`. Recorded as a run.
+/// Runs a saved backup into its folder (here or on a host): `<database>-<job>-<yyyy-mm-dd-hhmm>.<ext>`, then
+/// applies the job's retention. Recorded as a run.
 #[tauri::command]
 #[specta::specta]
 pub async fn job_backup_run(
@@ -355,119 +439,42 @@ pub async fn job_backup_run(
     progress: Channel<TransferProgress>,
 ) -> AppResult<super::sql::TransferDone> {
     state.require_unlocked()?;
-    let id = job_id.clone();
-    let (_, plan) = state
-        .with_db_session(move |c, s| jobs::plan(c, s, &id))
-        .await?;
-    let folder = plan
-        .get("folder")
-        .and_then(|p| p.as_str())
-        .map(std::path::PathBuf::from)
-        .ok_or_else(|| AppError::validation("This job has no folder."))?;
-    if !folder.is_dir() {
-        return Err(AppError::validation(format!(
-            "The folder {} isn't there any more.",
-            folder.display()
-        )));
-    }
-    let db_id = state.sql.db_id(&conn_id)?;
-    let cfg = crate::sql::load(&state.store(), &db_id).await?;
-    let ssh = state.sql.ssh(&conn_id).await?;
-    let name = state
-        .with_db_session({
-            let j = job_id.clone();
-            move |c, s| {
-                Ok(jobs::list(c, s)?
-                    .into_iter()
-                    .find(|x| x.id == j)
-                    .map(|x| x.name)
-                    .unwrap_or_default())
-            }
-        })
-        .await?;
-    let ext = if crate::sql::backup::is_my(cfg.engine) {
-        "sql"
-    } else if crate::sql::backup::is_mongo(cfg.engine) {
-        "archive.gz"
-    } else {
-        "dump"
-    };
-    let secs = (crate::db::now_ms() / 1000) % 86_400;
-    let stamp = format!(
-        "{}-{:02}{:02}",
-        super::sql::chrono_free_date(),
-        secs / 3600,
-        (secs % 3600) / 60
-    );
-    let safe = |x: &str| {
-        x.chars()
-            .map(|c| {
-                if c.is_alphanumeric() || c == '-' || c == '_' {
-                    c
-                } else {
-                    '-'
-                }
-            })
-            .collect::<String>()
-    };
-    let path = folder.join(format!(
-        "{}-{}-{stamp}.{ext}",
-        safe(&cfg.database.clone().unwrap_or_else(|| cfg.name.clone())),
-        safe(&name)
-    ));
     let started = crate::db::now_ms();
-    let stop = state.sql.begin_transfer(&transfer_id);
-    let file = std::fs::File::create(&path)
-        .map_err(|e| AppError::validation(format!("Couldn't create the backup file: {e}")))?;
-    let mut out = std::io::BufWriter::new(file);
-    let result = crate::sql::backup::run(crate::sql::backup::Run {
-        cfg: &cfg,
-        ssh: ssh.as_deref(),
-        tool: crate::sql::backup::Tool::Dump,
-        stdout: Some(&mut out),
-        stdin_file: None,
-        progress: &|bytes| {
+    let result =
+        crate::dbs::runner::backup_into(&state, &conn_id, &job_id, &transfer_id, &|bytes| {
             let _ = progress.send(TransferProgress { rows: 0.0, bytes });
-        },
-        log: &|l| log::debug!("dump tool: {l}"),
-        stop: &stop,
-    })
-    .await;
-    state.sql.end_transfer(&transfer_id);
-    drop(out);
+        })
+        .await;
     match result {
-        Ok(()) => {
-            let bytes = std::fs::metadata(&path)
-                .map(|m| m.len() as f64)
-                .unwrap_or(0.0);
+        Ok(done) => {
             record(
                 &state,
                 &job_id,
                 started,
                 "ok",
                 None,
-                Some(bytes as i64),
+                Some(done.bytes as i64),
                 0,
-                format!("Saved {}", path.display()),
+                done.log.join("\n"),
             )
             .await;
             Ok(super::sql::TransferDone {
-                path: path.display().to_string(),
+                path: done.path,
                 rows: 0.0,
-                bytes,
+                bytes: done.bytes,
             })
         }
         Err(e) => {
-            let _ = std::fs::remove_file(&path);
+            let status = if e.message == "Stopped." {
+                "stopped"
+            } else {
+                "failed"
+            };
             record(
                 &state,
                 &job_id,
                 started,
-                if e.message == "Stopped." {
-                    "stopped"
-                } else {
-                    "failed"
-                },
+                status,
                 None,
                 None,
                 0,
@@ -477,4 +484,59 @@ pub async fn job_backup_run(
             Err(e)
         }
     }
+}
+
+/// D15: sets or clears a job's schedule (backups, and copies whose target isn't production) and its retention.
+#[tauri::command]
+#[specta::specta]
+pub async fn job_set_schedule(
+    state: State<'_, AppState>,
+    job_id: String,
+    schedule: Option<Schedule>,
+    retention: Option<Retention>,
+) -> AppResult<JobRow> {
+    state.require_unlocked()?;
+    let id = job_id.clone();
+    state
+        .with_db_session(move |c, s| {
+            jobs::set_schedule(c, s, &id, schedule, retention)?;
+            jobs::list(c, s)?
+                .into_iter()
+                .find(|j| j.id == id)
+                .ok_or_else(|| AppError::not_found("That job is no longer saved."))
+        })
+        .await
+}
+
+/// What a schedule means: in words, and its next three runs (epoch ms). An invalid cron says why.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct SchedulePreview {
+    pub text: String,
+    pub next: Vec<f64>,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn job_schedule_preview(every: Every) -> AppResult<SchedulePreview> {
+    let cron = every.cron()?;
+    let mut next = Vec::new();
+    let mut t = crate::db::now_ms();
+    for _ in 0..3 {
+        match crate::dbs::schedule::next(&cron, t) {
+            Some(x) => {
+                next.push(x as f64);
+                t = x;
+            }
+            None => break,
+        }
+    }
+    if next.is_empty() {
+        return Err(AppError::validation(
+            "That schedule never runs (no such date within a year).",
+        ));
+    }
+    Ok(SchedulePreview {
+        text: every.describe(),
+        next,
+    })
 }

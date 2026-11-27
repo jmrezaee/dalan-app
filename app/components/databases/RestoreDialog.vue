@@ -2,7 +2,7 @@
 // S48 "Restore a dump" (F31): a dump made anywhere, into this database or a new one. Rust reads the file (its path
 // never reaches the window), says what is inside and what it won't restore, plans against the server, and holds the
 // restore for the confirmation (typed for an existing database). The tool runs on the host, or here on a direct route.
-import { ArrowLeft, FileArchive, FolderOpen, TriangleAlert } from '@lucide/vue'
+import { ArrowLeft, FileArchive, FolderOpen, Server, TriangleAlert } from '@lucide/vue'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils'
 const props = defineProps<{ tabKey: string, dbName: string, database: string | null, environment: string, engine: Engine }>()
 const store = useRestoreStore(props.tabKey)
 const open = computed({ get: () => store.open, set: (v: boolean) => { if (!v) store.close() } })
+const hostPick = ref(false)
 
 const STEPS = [['file', 'File'], ['inside', 'What\'s inside'], ['target', 'Target and options'], ['review', 'Review'], ['progress', 'Restore']] as const
 const stepIndex = computed(() => STEPS.findIndex(s => s[0] === (store.step === 'result' ? 'progress' : store.step)))
@@ -126,6 +127,8 @@ const radio = 'flex items-start gap-2 text-sm'
           <div class="flex flex-wrap gap-2">
             <Button :loading="store.busy" :data-testid="tid('restore-pick-file')" @click="store.pick(false)"><FileArchive class="size-4" aria-hidden="true" />Choose a file…</Button>
             <Button variant="secondary" :disabled="store.busy" :data-testid="tid('restore-pick-folder')" @click="store.pick(true)"><FolderOpen class="size-4" aria-hidden="true" />Choose a folder…</Button>
+            <Button variant="secondary" :disabled="store.busy" :data-testid="tid('restore-pick-host')" @click="hostPick = true"><Server class="size-4" aria-hidden="true" />Choose on a host…</Button>
+            <HostFolderPicker v-model:open="hostPick" mode="file" title="Restore a dump from a host" :on-pick="(p) => store.pickRemote(p.sftpId, p.hostId, p.path)" />
           </div>
           <p v-if="store.busy" role="status" class="text-xs text-muted">Reading the file… big dumps take a moment.</p>
         </section>

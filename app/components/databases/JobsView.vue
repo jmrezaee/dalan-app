@@ -2,19 +2,28 @@
 // Jobs (D14, E1): saved restores, copies and backups. Run opens the database's tab and goes through the same review as
 // the first time (the confirmation is built fresh: nothing approved earlier carries over). History shows the last 50
 // runs with their logs. A job never holds a password.
-import { ArchiveRestore, Copy, HardDriveDownload, ListChecks, Pencil, Play, Trash2 } from '@lucide/vue'
+import { ArchiveRestore, CalendarClock, Copy, HardDriveDownload, ListChecks, Pencil, Play, Trash2 } from '@lucide/vue'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { JobRow_Serialize as JobRow } from '~/types/bindings'
 
 const jobs = useJobsStore()
-onMounted(() => { void jobs.refresh() })
+onMounted(() => { void jobs.refresh(); jobs.failedUnseen = false })
 const ICON = { copy: Copy, restore: ArchiveRestore, backup: HardDriveDownload } as const
 const KIND = { copy: 'Copy', restore: 'Restore', backup: 'Backup' } as const
 const when = (ms: number | null | undefined) => (ms ? new Date(ms).toLocaleString() : '')
 const STATUS: Record<string, string> = { ok: 'text-success', failed: 'text-danger', stopped: 'text-warning', missed: 'text-warning' }
 
 const open = ref<string | null>(null)
+// D15: the schedule dialog, for one job at a time.
+const scheduling = ref<JobRow | null>(null)
+const scheduleOpen = computed({ get: () => scheduling.value !== null, set: (v: boolean) => { if (!v) scheduling.value = null } })
+const time = (ms: number | null | undefined) => (ms ? new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : '')
+const keeps = (j: JobRow) => {
+  const r = j.retention
+  if (!r) return ''
+  return [r.keep_last != null && `the last ${r.keep_last}`, r.keep_days != null && `${r.keep_days} days`].filter(Boolean).join(' or ')
+}
 async function toggleHistory(j: JobRow) {
   open.value = open.value === j.id ? null : j.id
   if (open.value) await jobs.loadRuns(j.id)
@@ -52,11 +61,16 @@ async function remove() {
               <p v-else class="font-medium">{{ j.name }} <span class="text-xs font-normal text-muted">{{ KIND[j.kind] }}</span></p>
               <p class="truncate text-xs text-muted" :title="j.summary">{{ j.summary }}</p>
               <p class="text-xs text-muted" data-part="last-run">
-                <template v-if="j.last_run">Last run {{ when(j.last_run.started_at) }} · <span :class="STATUS[j.last_run.status]">{{ j.last_run.status }}</span></template>
+                <template v-if="jobs.running.has(j.id)"><span class="text-accent">Running now…</span></template>
+                <template v-else-if="j.last_run">Last run {{ when(j.last_run.started_at) }} · <span :class="STATUS[j.last_run.status]">{{ j.last_run.status }}</span></template>
                 <template v-else>Never run</template>
               </p>
+              <p v-if="j.missed_before_last && j.last_run" class="text-xs text-warning" data-part="missed">Missed {{ j.missed_before_last }} {{ j.missed_before_last === 1 ? 'run' : 'runs' }} while closed or locked; ran at {{ time(j.last_run.started_at) }}</p>
+              <p v-if="j.schedule_text" class="text-xs text-muted" data-part="schedule">{{ j.schedule_text }}<template v-if="j.next_run_at"> · next {{ when(j.next_run_at) }}</template><template v-if="keeps(j)"> · keeps {{ keeps(j) }}</template></p>
+              <p v-else-if="j.no_schedule && j.kind === 'copy'" class="text-xs text-muted">{{ j.no_schedule }}</p>
             </div>
             <Button size="sm" :data-testid="tid('job-run')" @click="jobs.run(j)"><Play class="size-3.5" aria-hidden="true" />Run</Button>
+            <Button v-if="!j.no_schedule" size="sm" variant="ghost" :data-testid="tid('job-schedule')" @click="scheduling = j"><CalendarClock class="size-3.5" aria-hidden="true" />Schedule…</Button>
             <Button size="sm" variant="ghost" :aria-expanded="open === j.id" @click="toggleHistory(j)">History</Button>
             <Button v-if="renaming.id === j.id" size="sm" variant="secondary" @click="rename">Save</Button>
             <Button v-else size="sm" variant="ghost" :aria-label="`Rename ${j.name}`" @click="Object.assign(renaming, { id: j.id, name: j.name })"><Pencil class="size-3.5" aria-hidden="true" /></Button>
@@ -72,6 +86,7 @@ async function remove() {
         </li>
       </ul>
     </div>
+    <ScheduleDialog v-if="scheduling" v-model:open="scheduleOpen" :job="scheduling" />
     <AlertDialog v-model:open="confirmOpen">
       <AlertDialogContent v-if="toDelete">
         <AlertDialogHeader>

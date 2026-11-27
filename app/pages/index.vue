@@ -33,6 +33,7 @@ onMounted(() => {
   redisDatabases.refresh()
   databasesStore.refreshSaved()
   void jobsStore.refresh()
+  jobsStore.listen()
   forwardsStore.watch()
   quitStore.watch()
   linksStore.watch()
@@ -58,7 +59,7 @@ const nav = computed(() => [
   { id: 'forwards', label: 'Port forwarding', icon: Waypoints, count: forwardsStore.rules.length },
   { id: 'snippets', label: 'Snippets', icon: Code2, count: snippetsStore.snippets.length },
   { id: 'saved', label: 'Saved queries', icon: Star, count: databasesStore.saved.length },
-  { id: 'jobs', label: 'Jobs', icon: ListChecks, count: jobsStore.rows.length },
+  { id: 'jobs', label: 'Jobs', icon: ListChecks, count: jobsStore.rows.length, alert: jobsStore.failedUnseen ? 'A scheduled job failed' : undefined },
   { id: 'logs', label: 'Logs', icon: ScrollText },
   { id: 'known-hosts', label: 'Known hosts', icon: ShieldCheck },
 ])

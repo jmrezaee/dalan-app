@@ -6,7 +6,7 @@ import { fail, type Handlers } from '../types'
 import { recordJobRun } from './jobs'
 import type { DumpInfo_Serialize, RestorePlan_Serialize } from '../../../app/types/bindings'
 
-type Keys = 'restorePick' | 'restorePrepare' | 'restoreCommit' | 'restoreForget' | 'restoreSaveDatabase'
+type Keys = 'restorePickRemote' | 'restorePick' | 'restorePrepare' | 'restoreCommit' | 'restoreForget' | 'restoreSaveDatabase'
 
 const held = new Map<string, { connId: string, typed: string, target: string, newDb: boolean, slow: boolean }>()
 const stops = new Set<string>()
@@ -53,6 +53,13 @@ export function dumpFor(engine: string, kind: string, folder: boolean): DumpInfo
 }
 
 export const restore: Pick<Handlers, Keys> = {
+  restorePickRemote: (a, { m, tag }) => {
+    const c = m.sqlConns.get(a.connId)
+    const db = m.dbs.find(d => d.id === c?.db)
+    if (!db) fail('not_found', 'That database connection is closed.')
+    tag(`restore-remote:${a.hostId}:${a.path}`)
+    return { ...dumpFor(db.engine, m.restoreNext, false), file_name: a.path.split('/').pop()! }
+  },
   restorePick: (a, { m }) => {
     const c = m.sqlConns.get(a.connId)
     const db = m.dbs.find(d => d.id === c?.db)

@@ -68,6 +68,7 @@ pub async fn vault_unlock(
                 .with_db(move |c| crate::vault::secrets::sweep_orphans(c, &vault_id))
                 .await;
             super::tunnels::autostart(&app, &state).await; // rules marked "start when Dalan unlocks"
+            crate::dbs::scheduler::start(&app); // saved jobs on a schedule (D15)
             Ok(())
         }
         Err(e) => {

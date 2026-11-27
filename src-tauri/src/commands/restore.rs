@@ -82,7 +82,39 @@ pub async fn restore_pick(
         .into_path()
         .map_err(|_| AppError::validation("That location can't be used."))?;
     let id = uuid::Uuid::now_v7().to_string();
-    let mut dump = dumpfile::pick(&path, id.clone()).await?;
+    let dump = dumpfile::pick(&path, id.clone()).await?;
+    keep_dump(&state, &conn_id, id, dump).await.map(Some)
+}
+
+/// D15 (E8): a dump file in a folder on a host, picked in the SFTP picker (`sftp_id` is the picker's session). It is
+/// fetched into a private folder here and read like a local one; a saved restore fetches it again from the host.
+#[tauri::command]
+#[specta::specta]
+pub async fn restore_pick_remote(
+    state: State<'_, AppState>,
+    conn_id: String,
+    sftp_id: String,
+    host_id: String,
+    path: String,
+) -> AppResult<DumpInfo> {
+    state.require_unlocked()?;
+    state.sql.db_id(&conn_id)?;
+    let fs = state.sftp.fs(&sftp_id)?;
+    let (tmp, local) = crate::dbs::runner::fetch(&fs, &path).await?;
+    let id = uuid::Uuid::now_v7().to_string();
+    let mut dump = dumpfile::pick(&local, id.clone()).await?;
+    dump._fetched = Some(tmp);
+    dump.origin = Some((host_id, path));
+    keep_dump(&state, &conn_id, id, dump).await
+}
+
+/// Lists an archive newer than Dalan's reader with the target's pg_restore, then keeps the dump for the dialog.
+pub(crate) async fn keep_dump(
+    state: &AppState,
+    conn_id: &str,
+    id: String,
+    mut dump: dumpfile::Dump,
+) -> AppResult<DumpInfo> {
     // An archive newer than Dalan's reader: pg_restore on the target lists it, when it can.
     if matches!(
         dump.info.format,
@@ -90,14 +122,14 @@ pub async fn restore_pick(
     ) && dump.toc.is_empty()
         && dump.info.notes.iter().any(|n| n.code == "toc")
     {
-        let ssh = state.sql.ssh(&conn_id).await?;
+        let ssh = state.sql.ssh(conn_id).await?;
         if let Ok(text) = restore::list_archive(ssh.as_deref(), &dump).await {
             dumpfile::apply_list(&mut dump, &text);
         }
     }
     let info = dump.info.clone();
-    state.sql.put_dump(&conn_id, id, dump);
-    Ok(Some(info))
+    state.sql.put_dump(conn_id, id, dump);
+    Ok(info)
 }
 
 /// Plans the restore and, unless something blocks it, holds it for the confirmation.

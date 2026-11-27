@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { MaskRule_Deserialize as MaskRule, Activity_Serialize as Activity, ActivityView, CsvPreview, SessionPending, SessionAction, ExportFormat, TransferProgress, Diagram, ExplainPlan_Serialize as ExplainPlan, StructureOp_Deserialize as StructureOp, StructurePending, TableStructure_Serialize as TableStructure, PendingRun, TxnState, GridPending, SqlCatalog, SqlRunEvent_Serialize, RunMode, SqlCell_Serialize as Cell, DbEvent_Serialize, PageCursor_Serialize, PromptKind, RedisStepState, SqlColumn_Serialize as SqlColumn, SqlObject_Serialize as SqlObject, SqlServerInfo, SqlTableInfo_Serialize as SqlTableInfo } from '~/types/bindings'
+import type { HostFolder, MaskRule_Deserialize as MaskRule, Activity_Serialize as Activity, ActivityView, CsvPreview, SessionPending, SessionAction, ExportFormat, TransferProgress, Diagram, ExplainPlan_Serialize as ExplainPlan, StructureOp_Deserialize as StructureOp, StructurePending, TableStructure_Serialize as TableStructure, PendingRun, TxnState, GridPending, SqlCatalog, SqlRunEvent_Serialize, RunMode, SqlCell_Serialize as Cell, DbEvent_Serialize, PageCursor_Serialize, PromptKind, RedisStepState, SqlColumn_Serialize as SqlColumn, SqlObject_Serialize as SqlObject, SqlServerInfo, SqlTableInfo_Serialize as SqlTableInfo } from '~/types/bindings'
 import { useTauri } from '~/composables/useTauri'
 
 export type SqlStatus = 'connecting' | 'ready' | 'failed' | 'closed'
@@ -602,7 +602,7 @@ function setup() {
   const stopTransfer = (id: string) => api.sqlTransferStop(id).catch(() => {})
   /** A saved backup job, into its folder (D14). */
   const backupJob = (jobId: string, id: string, onProgress: (p: TransferProgress) => void) => api.jobBackupRun(connId.value, jobId, id, onProgress).finally(() => { void useJobsStore().refresh() })
-  const saveBackupJob = (name: string) => api.jobSaveBackup(connId.value, name)
+  const saveBackupJob = (name: string, host: HostFolder | null = null) => api.jobSaveBackup(connId.value, name, host)
   const exportTable = (id: string, schema: string, table: string, filter: string, format: ExportFormat, header: boolean, onProgress: (p: TransferProgress) => void, masks: MaskRule[] = []) => api.sqlExportTable(connId.value, id, schema, table, filter, format, header, masks, onProgress)
   const importPick = () => api.sqlImportPick(connId.value)
   const importPreview = (schema: string, table: string, path: string, delimiter: string, header: boolean): Promise<CsvPreview> => api.sqlImportPreview(connId.value, schema, table, path, delimiter, header)
