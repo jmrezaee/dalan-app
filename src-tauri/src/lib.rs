@@ -166,6 +166,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::jobs::job_set_schedule,
             commands::jobs::job_schedule_preview,
             commands::restore::restore_pick_remote,
+            commands::restore::restore_pick_dropped,
             commands::sql::sql_cancel,
             commands::sql::sql_editor_close,
             commands::sql::sql_catalog,
@@ -305,7 +306,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::TunnelChanged,
             events::QuitRequested,
             events::LinkReceived,
-            events::JobsChanged
+            events::JobsChanged,
+            events::FileDropped
         ])
 }
 
@@ -405,6 +407,24 @@ pub fn run() {
                     if let Some(n) = ask(app) {
                         api.prevent_close();
                         let _ = events::QuitRequested { live_sessions: n }.emit(app);
+                    }
+                }
+                // A file dragged in from Finder: kept here, the window is told its name and id.
+                RunEvent::WindowEvent {
+                    event: WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }),
+                    ..
+                } => {
+                    let state = app.state::<AppState>();
+                    if let (true, Some(p)) = (state.is_unlocked(), paths.first()) {
+                        let id = uuid::Uuid::now_v7().to_string();
+                        let name = p
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        if let Ok(mut slot) = state.dropped.lock() {
+                            *slot = Some((id.clone(), p.clone()));
+                        }
+                        let _ = events::FileDropped { id, name }.emit(app);
                     }
                 }
                 RunEvent::ExitRequested {

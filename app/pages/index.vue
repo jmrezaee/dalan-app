@@ -34,6 +34,7 @@ onMounted(() => {
   databasesStore.refreshSaved()
   void jobsStore.refresh()
   jobsStore.listen()
+  listenDrops()
   forwardsStore.watch()
   quitStore.watch()
   linksStore.watch()

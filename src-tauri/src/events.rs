@@ -41,6 +41,13 @@ pub struct JobsChanged {
     pub failed: bool,
 }
 
+/// A file was dropped on the window. Only its name comes here; the path stays in Rust under `id`.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct FileDropped {
+    pub id: String,
+    pub name: String,
+}
+
 /// The window was closed or ⌘Q pressed while sessions are live: the UI asks before quitting.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct QuitRequested {

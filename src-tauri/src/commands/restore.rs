@@ -86,6 +86,35 @@ pub async fn restore_pick(
     keep_dump(&state, &conn_id, id, dump).await.map(Some)
 }
 
+/// The file dropped on the window (`FileDropped`'s id), read like a picked one. Taken once.
+#[tauri::command]
+#[specta::specta]
+pub async fn restore_pick_dropped(
+    state: State<'_, AppState>,
+    conn_id: String,
+    drop_id: String,
+) -> AppResult<DumpInfo> {
+    state.require_unlocked()?;
+    state.sql.db_id(&conn_id)?;
+    let path = take_dropped(&state.dropped, &drop_id)
+        .ok_or_else(|| AppError::validation("Drop the file on the tab again."))?;
+    let id = uuid::Uuid::now_v7().to_string();
+    let dump = dumpfile::pick(&path, id.clone()).await?;
+    keep_dump(&state, &conn_id, id, dump).await
+}
+
+/// The dropped path for this id, once: a second take, or an older id, gets nothing.
+pub(crate) fn take_dropped(
+    slot: &std::sync::Mutex<Option<(String, std::path::PathBuf)>>,
+    id: &str,
+) -> Option<std::path::PathBuf> {
+    let mut g = slot.lock().ok()?;
+    match g.as_ref() {
+        Some((i, _)) if i == id => g.take().map(|(_, p)| p),
+        _ => None,
+    }
+}
+
 /// D15 (E8): a dump file in a folder on a host, picked in the SFTP picker (`sftp_id` is the picker's session). It is
 /// fetched into a private folder here and read like a local one; a saved restore fetches it again from the host.
 #[tauri::command]
@@ -316,4 +345,19 @@ pub async fn restore_save_database(
             store::save(c, s, input, false)
         })
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::take_dropped;
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+
+    #[test]
+    fn a_dropped_file_is_taken_once_and_only_by_its_id() {
+        let slot = Mutex::new(Some(("d1".to_string(), PathBuf::from("/x/a.dump"))));
+        assert_eq!(take_dropped(&slot, "d0"), None);
+        assert_eq!(take_dropped(&slot, "d1"), Some(PathBuf::from("/x/a.dump")));
+        assert_eq!(take_dropped(&slot, "d1"), None);
+    }
 }

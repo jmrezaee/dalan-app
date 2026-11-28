@@ -175,4 +175,20 @@ test.describe('Restore a dump (S48, F31)', () => {
     await expect(page.getByTestId('restore-dialog')).toBeVisible()
     await expect(page.getByTestId('sql-tab-app-prod').getByTestId('sql-transfer')).toBeVisible()
   })
+
+  test('a dump dropped on the window from Finder opens the restore dialog of the database tab in front, reading it', async ({ page }) => {
+    const fake = await openApp(page, { scenario: 'team', unlocked: true })
+    // Dropped with no database tab in front: nothing takes it, and a tab opened later doesn't either.
+    await fake.dropFile('drop-0', 'early.dump')
+    const dlg = await openShop(page)
+    await expect(dlg.getByRole('list', { name: 'Steps' }).locator('[aria-current=step]')).toHaveText('1. File')
+    await dlg.getByRole('button', { name: 'Cancel' }).first().click()
+    await expect(dlg).toHaveCount(0)
+    // Dropped on the open tab: its restore dialog reads the file (only the id crossed; the path stays in Rust).
+    await fake.dropFile('drop-1', 'shop.dump')
+    await expect(dlg.locator('[data-part=source]')).toContainText('PostgreSQL custom archive')
+    const calls = await fake.calls()
+    expect(calls).toContain('restore-dropped:drop-1')
+    expect(calls).not.toContain('restore-dropped:drop-0')
+  })
 })
