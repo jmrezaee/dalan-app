@@ -1,102 +1,11 @@
-import { execSync } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { button, createVault, servers, type } from '../support'
+import { txt, tid, inTab, sh, psql, mysql, mongo, answer, FIX, clickText, vault, nav, addDb, toTab, openTransfer } from '../k-support'
 
 // Hand checks K1 to K7 (replica/testing/hand-checks.md section K) on the real app, against the Docker test servers:
 // restore, copies, jobs and masking, schedules and host folders, compare, backup check, bulk and MongoDB import.
 // System dialogs answer from DALAN_TEST_PICKS (debug builds only: `pick_or` in commands/sql.rs). Results are checked
 // in the servers themselves (docker exec).
-
-/** What an element shows (WebKitWebDriver's getText leaves some text out). */
-async function txt(el: ChainablePromiseElement | WebdriverIO.Element): Promise<string> {
-  const e = await el
-  await e.waitForExist()
-  return browser.execute((x: HTMLElement) => x.innerText, e as unknown as HTMLElement)
-}
-const tid = (id: string) => $(`[data-testid="${id}"]`)
-const inTab = (name: string, id: string) => $(`[data-testid="sql-tab-${name}"] [data-testid="${id}"]`)
-const sh = (cmd: string) => execSync(cmd, { encoding: 'utf8' }).trim()
-const psql = (db: string, sql: string) => sh(`docker exec dalan-test-pg psql -U app -d ${db} -tAc "${sql.replace(/"/g, '\\"')}"`)
-const mysql = (sql: string) => sh(`docker exec dalan-test-mysql mysql -uroot -ptest-mysql -N -e "${sql.replace(/"/g, '\\"')}" 2>/dev/null`)
-const mongo = (js: string) => sh(`docker exec dalan-test-mongo mongosh --quiet -u app -p test-mongo --authenticationDatabase admin --eval '${js}'`)
-const PICKS = '/tmp/dalan-picks'
-function answer(kind: 'open' | 'folder' | 'save', path: string) {
-  mkdirSync(PICKS, { recursive: true })
-  writeFileSync(`${PICKS}/${kind}`, path)
-}
-const FIX = '/work/tests/fixtures/dumps'
-
-async function clickText(scope: string, text: string) {
-  const el = await $(`(${scope}//*[(self::button or @role="radio" or @role="tab" or self::a or self::label) and contains(normalize-space(.),"${text}")])[last()]`)
-  await el.waitForClickable()
-  await el.click()
-}
-// A toast can sit over the tab strip or the sidebar; these clicks go to the element's own handler.
-async function jsClick(sel: string) {
-  const el = await $(sel)
-  await el.waitForExist()
-  await browser.execute((e: HTMLElement) => e.click(), el as unknown as HTMLElement)
-  await browser.pause(300)
-}
-async function vault() {
-  if (await $('//*[@role="tab"][normalize-space(.)="Vault"]').isDisplayed()) await jsClick('//*[@role="tab"][normalize-space(.)="Vault"]')
-}
-async function nav(section: string) {
-  await vault()
-  await jsClick(`//nav[@aria-label="Vault"]//a[contains(normalize-space(.),"${section}")]`)
-}
-
-/** Saves a database with the form (TLS off) and opens it in a tab. */
-async function addDb(d: { engine: 'PostgreSQL' | 'MySQL' | 'MongoDB', name: string, address: string, port: number, database: string, user: string, password: string, environment?: 'Staging' | 'Production' }) {
-  await nav('Databases')
-  await button('New database').click()
-  await clickText('//*[@data-testid="new-database-dialog"]', d.engine)
-  await clickText('//*[@data-testid="new-database-dialog"]', 'Continue')
-  // The sheet slides in; until it stops, a click lands on the dialog closing behind it.
-  await tid('db-form-sheet').waitForDisplayed()
-  await tid('new-database-dialog').waitForExist({ reverse: true })
-  await browser.pause(600)
-  await type($('#db-name'), d.name)
-  if (d.environment) await clickText('//*[@role="radiogroup"][@aria-label="Environment"]', d.environment)
-  // MongoDB takes members as address:port.
-  if (d.engine === 'MongoDB') {
-    await type($('#db-address'), `${d.address}:${d.port}`)
-  }
-  else {
-    await type($('#db-address'), d.address)
-    await type($('#db-port'), String(d.port))
-  }
-  if (await $('#db-database').isExisting()) await type($('#db-database'), d.database)
-  if (d.engine === 'MongoDB') await type($('#db-auth'), 'admin')
-  await type($('#db-user'), d.user)
-  await type($('#db-pass'), d.password)
-  await clickText('//*[@role="radiogroup"][@aria-label="TLS"]', 'Off')
-  await clickText('//*[@data-testid="db-form-sheet"]', 'Save')
-  await tid('db-form-sheet').waitForExist({ reverse: true })
-  await openDb(d.name)
-}
-async function openDb(name: string) {
-  await nav('Databases')
-  const row = await tid(`database-row-${name}`)
-  await row.waitForDisplayed()
-  // A table row isn't clickable through WebDriver: click its first cell, then Enter opens it (the row has the focus).
-  await row.$('td:first-child').click()
-  await browser.execute((id: string) => (document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null)?.focus(), `database-row-${name}`)
-  await browser.keys('Enter')
-  const tab = (d: string) => $(`[data-testid="sql-tab-${d}"], [data-testid="mongo-tab-${d}"]`)
-  await (await tab(name)).waitForDisplayed({ timeout: 30_000 })
-  await browser.waitUntil(async () => (await $(`[data-testid="sql-tab-${name}"] [role="tree"], [data-testid="mongo-tab-${name}"] [role="tree"]`).isDisplayed()), { timeout: 30_000 })
-}
-async function toTab(name: string) {
-  await jsClick(`//*[@role="tab"][.//text()[normalize-space(.)="${name}"]]`)
-}
-
-// The Transfer tab's buttons move once the dump tool's version line arrives; wait for it before clicking them.
-async function openTransfer(tab: string) {
-  await inTab(tab, 'sql-open-transfer').click()
-  await browser.waitUntil(async () => /pg_dump|mysqldump|mariadb-dump|not found/i.test(await txt($(`[data-testid="sql-tab-${tab}"]`))), { timeout: 30_000 })
-  await browser.pause(400)
-}
 
 describe('hand checks K1 to K7 on the real app', function () {
   // Restores, copies and a schedule that waits minutes: longer than the usual two.

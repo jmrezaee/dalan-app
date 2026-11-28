@@ -43,7 +43,11 @@ test.describe('Saved jobs and masking (E1, E5)', () => {
     await copy.getByTestId('copy-mask-suggested').click()
     await expect(copy.getByTestId('copy-plan').locator('[data-part=warnings]')).toHaveCount(0)
     await masking.getByRole('combobox', { name: 'Masking for public.customers.name' }).selectOption('fake_name')
+    // An edit not yet applied: Copy waits, so what runs is what the review shows.
+    await expect(copy.getByTestId('copy-run')).toBeDisabled()
+    await expect(copy.locator('[data-part=unapplied]')).toContainText('Apply the changes first')
     await masking.getByRole('button', { name: 'Apply changes' }).click()
+    await expect(copy.getByTestId('copy-run')).toBeEnabled()
     const sent = JSON.parse((await fake.calls('copy-request')).at(-1)!.slice('copy-request:'.length))
     expect(sent.masks.sort()).toEqual(['customers.email=fake_email', 'customers.name=fake_name'])
     await copy.getByRole('button', { name: 'Save as a job…' }).click()

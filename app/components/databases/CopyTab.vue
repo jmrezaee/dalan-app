@@ -55,13 +55,19 @@ const cross = computed(() => !!target.value && family(target.value.engine) !== f
 const LABEL: Record<string, string> = { postgres: 'PostgreSQL', mysql: 'MySQL', mariadb: 'MariaDB', mongodb: 'MongoDB' }
 watch(cross, (c) => { if (c) store.routines = false })
 const pickOf = (source: string) => Object.values(store.picks).find(p => `${p.schema}.${p.name}` === source || p.name === source)
+// Types, DDL and masking edited after the review: Copy waits for "Apply changes", so what runs is what is shown
+// (K9 found a copy that ran with the old plan, unmasked, when Copy was pressed right after "Use the suggestions").
+const unapplied = ref(false)
+watch(() => store.plan, () => { unapplied.value = false })
 function setType(source: string, col: string, value: string) {
   const p = pickOf(source)
   if (p) p.types[col] = value
+  unapplied.value = true
 }
 function setDdl(source: string, value: string) {
   const p = pickOf(source)
   if (p) p.ddl = value
+  unapplied.value = true
 }
 // A saved job being run: planned as soon as its target tab is connected.
 watch(() => store.autoReview && !!target.value?.ready, (go) => {
@@ -74,10 +80,12 @@ function setMask(source: string, col: string, kind: MaskKind) {
   const p = pickOf(source)
   if (!p) return
   p.masks[col] = { kind, value: p.masks[col]?.value ?? '' }
+  unapplied.value = true
 }
 function setMaskValue(source: string, col: string, value: string) {
   const p = pickOf(source)
   if (p?.masks[col]) p.masks[col]!.value = value
+  unapplied.value = true
 }
 const maskOf = (source: string, col: string) => pickOf(source)?.masks[col] ?? { kind: 'keep' as MaskKind, value: '' }
 function applySuggestions() {
@@ -228,7 +236,8 @@ const section = 'flex flex-col gap-2 rounded-lg border border-border bg-surface 
         <Button v-if="!store.jobId" variant="ghost" class="mr-auto" @click="job.naming = !job.naming">Save as a job…</Button>
         <span v-else class="mr-auto self-center text-xs text-muted">Running a saved job: it asks again, as on its first run.</span>
         <Button variant="secondary" @click="store.reset()">Back</Button>
-        <Button :class="p.level === 'typed' ? buttonVariants({ variant: 'destructive' }) : ''" :disabled="!p.pending_id || !typedOk" :data-testid="tid('copy-run')" @click="store.commit(connId)">Copy</Button>
+        <span v-if="unapplied && !store.busy" class="self-center text-xs text-warning" data-part="unapplied">Apply the changes first: the copy runs what the review shows.</span>
+        <Button :class="p.level === 'typed' ? buttonVariants({ variant: 'destructive' }) : ''" :disabled="!p.pending_id || !typedOk || unapplied || store.busy" :data-testid="tid('copy-run')" @click="store.commit(connId)">Copy</Button>
       </div>
     </div>
 
