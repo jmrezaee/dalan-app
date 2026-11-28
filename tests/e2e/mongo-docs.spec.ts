@@ -285,15 +285,20 @@ test.describe('A MongoDB tab (D8)', () => {
   })
 
   test('Transfer (S43): a collection exports, the dump tool is named, and a restore opens S48 with what the archive holds', async ({ page }) => {
-    await openApp(page, { scenario: 'team', unlocked: true })
+    const fake = await openApp(page, { scenario: 'team', unlocked: true })
     const tab = await openMongo(page)
     await tab.getByTestId('mongo-coll-customers').click()
     await tab.getByTestId('mongo-open-transfer').click()
     const tr = tab.getByTestId('mongo-transfer')
     await expect(tr.locator('[data-part="tool"]')).toContainText('mongodump')
     await tr.getByRole('textbox', { name: 'Export filter' }).fill('{"vip": true}')
+    // A masking rule for a field goes to Rust with the export (E5).
+    await tr.getByTestId('export-masks').locator('summary').click()
+    await tr.getByRole('button', { name: 'Add a rule' }).click()
+    await tr.getByRole('textbox', { name: 'Masked field 1' }).fill('email')
     await tr.getByTestId('mongo-export').click()
     await expect(tr.locator('[data-part="done"]').first()).toContainText('4 documents')
+    expect(await fake.calls()).toContain('export-masks:email=hash')
     await tr.getByTestId('mongo-backup').click()
     await expect(tr.locator('[data-part="done"]').last()).toContainText('Saved')
     await tr.getByTestId('mongo-restore').click()

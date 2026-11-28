@@ -51,7 +51,7 @@ export const commands = {
 	 *  Writes a collection (or the documents matching `filter`) to a file the person picks, one extended JSON document per
 	 *  line. The file is written by Rust; `None` when the save dialog was cancelled.
 	 */
-	mgExport: (connId: string, transferId: string, db: string, coll: string, filter: string, progress: Channel<TransferProgress>) => typedError<TransferDone_Serialize | null, AppError>(__TAURI_INVOKE("mg_export", { connId, transferId, db, coll, filter, progress })),
+	mgExport: (connId: string, transferId: string, db: string, coll: string, filter: string, masks: MaskRule_Deserialize[], progress: Channel<TransferProgress>) => typedError<TransferDone_Serialize | null, AppError>(__TAURI_INVOKE("mg_export", { connId, transferId, db, coll, filter, masks, progress })),
 	/**  One shell line. Reads run at once; a change is parsed, classified and held like every other change. */
 	mgShell: (connId: string, db: string, line: string) => typedError<MgShellResult_Serialize, AppError>(__TAURI_INVOKE("mg_shell", { connId, db, line })),
 	/**  Runs what `mg_shell` held, after the mode is asked again (and the database's name, for a dangerous command). */

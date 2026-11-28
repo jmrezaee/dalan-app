@@ -227,8 +227,17 @@ pub(crate) async fn export_into(
                 rt.block_on(async {
                     if mongo {
                         let c = state.sql.mongo(conn_id).await?;
-                        crate::mongo::docs::export(&c, &o.schema, &o.name, "{}", out, stop, &report)
-                            .await
+                        crate::mongo::docs::export(
+                            &c,
+                            &o.schema,
+                            &o.name,
+                            "{}",
+                            &request.masks,
+                            out,
+                            stop,
+                            &report,
+                        )
+                        .await
                     } else if let Some(my) = state.sql.my(conn_id).await? {
                         my.export_table(
                             &o.schema,

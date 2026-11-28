@@ -4,7 +4,7 @@
 // is always typed.
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import type { BackupInfo_Serialize as BackupInfo, TransferProgress, HostFolder } from '~/types/bindings'
+import type { MaskKind, BackupInfo_Serialize as BackupInfo, TransferProgress, HostFolder } from '~/types/bindings'
 
 const props = defineProps<{ tabKey: string }>()
 const store = useMongoStore(props.tabKey)
@@ -22,12 +22,14 @@ const pick = ref('')
 watch(colls, (c) => { if (!c.some(x => x.id === pick.value)) pick.value = c.length ? (store.current && c.some(x => x.id === `${store.current!.db}.${store.current!.coll}`) ? `${store.current.db}.${store.current.coll}` : c[0]!.id) : '' }, { immediate: true })
 const target = computed(() => colls.value.find(c => c.id === pick.value) ?? null)
 const exp = reactive({ filter: '', running: false, id: '', rows: 0, done: '', error: '' })
+// Masking (E5): rules for top-level fields, applied in Rust before anything is written.
+const masks = reactive<{ column: string, kind: MaskKind, value: string }[]>([])
 async function doExport() {
   const t = target.value
   if (!t || exp.running) return
   Object.assign(exp, { running: true, id: store.newTransferId(), rows: 0, done: '', error: '' })
   try {
-    const r = await store.exportColl(exp.id, t.db, t.coll, exp.filter, (p: TransferProgress) => { exp.rows = p.rows ?? 0 })
+    const r = await store.exportColl(exp.id, t.db, t.coll, exp.filter, (p: TransferProgress) => { exp.rows = p.rows ?? 0 }, masks.filter(m => m.column.trim()).map(m => ({ column: m.column.trim(), kind: m.kind, value: m.value.trim() || null })))
     exp.done = r ? `Saved ${r.path} · ${fmt(r.rows)} documents · ${mb(r.bytes)}` : ''
   }
   catch (e) { exp.error = message(e, 'The export failed.') }
@@ -101,6 +103,16 @@ async function backup() {
         <label class="flex flex-col gap-1 text-xs text-muted">Filter (optional)
           <Input v-model="exp.filter" class="h-8 font-mono text-xs text-text" placeholder="{ &quot;status&quot;: &quot;open&quot; }" autocomplete="off" spellcheck="false" aria-label="Export filter" />
         </label>
+        <details class="text-xs" :data-testid="tid('export-masks')"><summary class="cursor-default text-muted">Mask fields{{ masks.length ? ` · ${masks.length}` : '' }}</summary>
+          <div v-for="(m, i) in masks" :key="i" class="mt-1 flex items-center gap-1">
+            <Input v-model="m.column" class="h-7 w-28 font-mono text-xs" placeholder="field" :aria-label="`Masked field ${i + 1}`" />
+            <MaskKindSelect v-model="m.kind" :label="`Masking for field ${i + 1}`" />
+            <Input v-if="['fixed', 'truncate', 'date_shift'].includes(m.kind)" v-model="m.value" class="h-7 w-20 text-xs" :placeholder="m.kind === 'fixed' ? 'value' : m.kind === 'truncate' ? 'chars' : '± days'" :aria-label="`Value for field ${i + 1}`" />
+            <Button size="sm" variant="ghost" :aria-label="`Remove rule ${i + 1}`" @click="masks.splice(i, 1)">×</Button>
+          </div>
+          <Button size="sm" variant="ghost" class="mt-1" @click="masks.push({ column: '', kind: 'hash', value: '' })">Add a rule</Button>
+          <p class="mt-1 text-muted">Top-level fields. Shuffle isn't available for MongoDB; it leaves the field as it is.</p>
+        </details>
         <p v-if="exp.running" role="status" class="text-xs text-muted" data-part="progress">Writing… {{ fmt(exp.rows) }} documents</p>
         <p v-if="exp.done" role="status" class="text-xs text-success" data-part="done">{{ exp.done }}</p>
         <p v-if="exp.error" role="alert" class="text-xs text-danger" data-part="error">{{ exp.error }}</p>
