@@ -39,7 +39,7 @@ test.describe('Saved jobs and masking (E1, E5)', () => {
     // Production data to a non-production target with no masking: a reminder, not a block.
     await expect(copy.getByTestId('copy-plan').locator('[data-part=warnings]')).toContainText('with no masking. Add rules?')
     const masking = copy.getByTestId('copy-masking')
-    await expect(masking).toContainText('1 columns look personal')
+    await expect(masking).toContainText('1 column looks personal')
     await copy.getByTestId('copy-mask-suggested').click()
     await expect(copy.getByTestId('copy-plan').locator('[data-part=warnings]')).toHaveCount(0)
     await masking.getByRole('combobox', { name: 'Masking for public.customers.name' }).selectOption('fake_name')

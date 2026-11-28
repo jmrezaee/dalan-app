@@ -189,7 +189,7 @@ const typedOk = computed(() => !store.plan || store.plan.level !== 'typed' || st
         <div v-if="r.items.length && !store.plan" class="flex flex-wrap justify-end gap-2">
           <Button variant="ghost" :disabled="!store.chosen.size || store.busy" @click="store.saveScript()"><FileDown class="size-4" aria-hidden="true" />Copy as migration…</Button>
           <Button variant="secondary" :disabled="!store.chosen.size || store.busy" @click="openInQuery"><SquareTerminal class="size-4" aria-hidden="true" />Open in a query tab</Button>
-          <Button :disabled="!store.chosen.size || !r.can_sync || store.busy" :title="r.can_sync ? undefined : 'A snapshot can\'t be changed'" :data-testid="tid('compare-sync')" @click="store.prepare()">Sync…</Button>
+          <Button :disabled="!store.chosen.size || !r.can_sync || store.busy" :title="r.can_sync ? undefined : 'A snapshot can\'t be changed'" :data-testid="tid('compare-sync')" @click="store.prepare()">Sync {{ store.chosen.size }} {{ store.chosen.size === 1 ? 'change' : 'changes' }}…</Button>
         </div>
 
         <section v-if="store.plan" class="flex flex-col gap-2 rounded-lg border border-border bg-surface p-3" aria-label="Sync" :data-testid="tid('compare-plan')">

@@ -143,6 +143,7 @@ const radio = 'flex items-start gap-2 text-sm'
             <template v-if="d.created"><dt class="text-muted">Made on</dt><dd>{{ d.created }}</dd></template>
             <template v-if="d.encoding"><dt class="text-muted">Encoding</dt><dd>{{ d.encoding }}</dd></template>
           </dl>
+          <p class="-mt-2 text-xs text-muted">Read from the file's first bytes, not its name.</p>
           <p v-if="d.refused" role="alert" class="flex items-start gap-2 rounded-md border border-danger/40 p-3 text-danger" data-part="refused"><TriangleAlert class="mt-0.5 size-4 shrink-0" aria-hidden="true" />{{ d.refused }}</p>
           <p v-else-if="engineMismatch" role="alert" class="text-danger" data-part="mismatch">{{ engineMismatch }}</p>
           <div>

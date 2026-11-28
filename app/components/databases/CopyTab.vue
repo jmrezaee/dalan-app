@@ -97,6 +97,7 @@ const canReview = computed(() => !!target.value?.ready && store.chosen.length > 
 
 // ---- Review, progress, report
 const p = computed(() => store.plan)
+const personal = computed(() => (p.value?.tables ?? []).reduce((n, t) => n + t.suggested_masks.length, 0))
 const typedOk = computed(() => !p.value || p.value.level !== 'typed' || store.typed === p.value.typed_name)
 const pr = computed(() => store.progress)
 const pct = computed(() => {
@@ -211,7 +212,7 @@ const section = 'flex flex-col gap-2 rounded-lg border border-border bg-surface 
       </details>
       <!-- Masking: per column, in the stream. -->
       <details class="rounded-md border border-border bg-surface p-3" :data-testid="tid('copy-masking')" :open="p.tables.some(t => t.suggested_masks.length || Object.values(pickOf(t.source)?.masks ?? {}).some(m => m.kind !== 'keep')) || undefined">
-        <summary class="cursor-default text-xs font-medium">Masking<span v-if="p.tables.some(t => t.suggested_masks.length)" class="text-warning"> · {{ p.tables.reduce((n, t) => n + t.suggested_masks.length, 0) }} columns look personal</span></summary>
+        <summary class="cursor-default text-xs font-medium">Masking<span v-if="p.tables.some(t => t.suggested_masks.length)" class="text-warning"> · {{ personal }} {{ personal === 1 ? 'column looks' : 'columns look' }} personal</span></summary>
         <p class="mt-1 text-xs text-muted">Values are changed between the source and the target: the real ones never reach it. Hashes and fakes are keyed, so the same value is masked the same way in every table{{ store.jobId ? ' and on every run of this job' : '' }}.</p>
         <div v-for="t in p.tables.filter(x => x.column_names.length)" :key="`mask-${t.source}`" class="mt-2">
           <h4 class="text-xs font-medium text-muted">{{ t.source }}</h4>

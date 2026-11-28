@@ -28,6 +28,8 @@ async function toggleHistory(j: JobRow) {
   open.value = open.value === j.id ? null : j.id
   if (open.value) await jobs.loadRuns(j.id)
 }
+// The newest job whose last run didn't finish well (the board's banner).
+const failed = computed(() => jobs.rows.filter(j => j.last_run && ['failed', 'stopped'].includes(j.last_run.status)).sort((a, b) => (b.last_run!.started_at ?? 0) - (a.last_run!.started_at ?? 0))[0] ?? null)
 const renaming = reactive({ id: '', name: '' })
 async function rename() {
   try { await jobs.rename(renaming.id, renaming.name); renaming.id = '' }
@@ -46,9 +48,15 @@ async function remove() {
   <div class="flex min-h-0 flex-1 flex-col" :data-testid="tid('jobs-view')">
     <header class="flex h-14 shrink-0 items-center gap-3 border-b border-border px-5">
       <h1 class="text-lg font-semibold">Jobs</h1>
+      <p class="hidden truncate text-sm text-muted md:block">Saved restores, copies and backups you can run again.</p>
+      <span class="ml-auto shrink-0 rounded-full bg-surface-raised px-2 py-0.5 text-xs text-muted">Schedules run while Dalan is open and unlocked</span>
     </header>
     <div class="min-h-0 flex-1 overflow-auto p-5">
       <p v-if="jobs.error" role="alert" class="mb-3 text-sm text-danger">{{ jobs.error }}</p>
+      <div v-if="failed" role="alert" class="mb-3 flex max-w-[960px] items-center gap-3 rounded-md border border-danger/40 px-3 py-2 text-sm text-danger" data-part="failed-banner">
+        <span class="min-w-0 flex-1">The last run of “{{ failed.name }}” {{ failed.last_run?.status === 'stopped' ? 'was cut off' : 'failed' }} at {{ time(failed.last_run?.started_at) }}. Its history says why.</span>
+        <Button size="sm" variant="secondary" @click="open !== failed.id && toggleHistory(failed)">Open history</Button>
+      </div>
       <EmptyState v-if="!jobs.rows.length" :icon="ListChecks" title="No saved jobs yet" text="Set up a copy, a restore or a backup in a database's tab, then choose “Save as a job…”. It runs again from here, asking the same questions." />
       <ul v-else class="m-0 flex max-w-[960px] list-none flex-col gap-2 p-0" aria-label="Saved jobs">
         <li v-for="j in jobs.rows" :key="j.id" class="rounded-lg border border-border bg-surface p-3 text-sm" :data-testid="tid(`job-${j.name}`)">

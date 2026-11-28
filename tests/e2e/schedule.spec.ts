@@ -80,6 +80,11 @@ test.describe('Scheduled jobs and host folders (E2, E8)', () => {
     await nav(page).getByRole('link', { name: /Jobs/ }).click()
     await expect(row.locator('[data-part=last-run]')).toContainText('failed')
     await expect(page.getByTestId('nav-alert-jobs')).toHaveCount(0)
+    // The banner names it, and Open history shows the runs.
+    const banner = page.getByTestId('jobs-view').locator('[data-part=failed-banner]')
+    await expect(banner).toContainText('The last run of “Nightly” failed')
+    await banner.getByRole('button', { name: 'Open history' }).click()
+    await expect(row.getByRole('button', { name: 'History' })).toHaveAttribute('aria-expanded', 'true')
     // Turning it off.
     await row.getByTestId('job-schedule').click()
     await dlg.getByRole('radio', { name: 'Off' }).check()

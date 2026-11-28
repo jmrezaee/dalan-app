@@ -14,7 +14,7 @@ const KINDS: [MaskKind, string][] = [
   ['fake_address', 'Fake address'],
   ['fake_iban', 'Fake IBAN'],
   ['hash', 'Hash (same shape, joins kept)'],
-  ['shuffle', 'Shuffle within the column'],
+  ['shuffle', 'Shuffle across the table'],
   ['truncate', 'Cut to n characters'],
   ['date_shift', 'Shift dates'],
 ]
