@@ -116,6 +116,18 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev pkg-config
+      - name: Database tools for backups and restores (D12 to D18)
+        # PostgreSQL 17's client reads dumps from 13 to 17 and 16 is the test server's own (pg_restore 17 can't restore
+        # into 16); MySQL's client and MongoDB's tools. Without them the restore and backup tests fail with DbToolMissing.
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends postgresql-client-17 postgresql-client-16 mysql-client
+          curl -fsSL -o /tmp/mdt.deb "https://fastdl.mongodb.org/tools/db/mongodb-database-tools-ubuntu2404-x86_64-100.10.0.deb"
+          sudo apt-get install -y /tmp/mdt.deb
+          pg_restore --version; /usr/lib/postgresql/16/bin/pg_restore --version; mysqldump --version; mongodump --version
       - name: Start the test servers
         run: scripts/test-servers.sh up
       - name: What is running
@@ -125,7 +137,8 @@ jobs:
           mkdir -p .output/public && echo '<!doctype html>' > .output/public/index.html
       - name: Real-server tests
         working-directory: src-tauri
-        run: cargo test -- --ignored
+        # One at a time: several tests start and stop dump tools and watch the servers' process lists.
+        run: cargo test -- --ignored --test-threads=1
       - name: Server logs when a test failed
         if: failure()
         run: for c in dalan-test-kbd dalan-test-squid dalan-test-slow; do echo "== $c"; docker logs --tail 40 $c; done
