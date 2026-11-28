@@ -1189,6 +1189,9 @@ impl Scanner {
             || (first == "SECURITY" && second == "LABEL")
             || (first == "COMMENT" && pair("ON", "EXTENSION"));
         let is_gtid = my && first == "SET" && (has("GTID_PURGED") || has("SQL_LOG_BIN"));
+        // pg_dump 17 and later write `SET transaction_timeout = 0`, which servers before 17 refuse. 0 is the default,
+        // so leaving it out changes nothing on any server.
+        let new_setting = !my && first == "SET" && has("TRANSACTION_TIMEOUT");
         let setval = first == "SELECT" && has("SETVAL");
         let class = if matches!(first, "INSERT" | "REPLACE" | "COPY" | "LOCK" | "UNLOCK")
             || (first == "SELECT"
@@ -1322,6 +1325,7 @@ impl Scanner {
             || (is_role && (!rw.include_roles || superuser))
             || ((is_owner || is_acl) && rw.skip_owner_acl)
             || is_gtid
+            || new_setting
             || (rw.content == Content::Schema && class == Class::Data)
             || ((rw.content == Content::Data || rw.existing == Existing::Append)
                 && class == Class::Schema)

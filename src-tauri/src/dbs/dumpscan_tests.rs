@@ -570,3 +570,22 @@ fn choosing_tables_leaves_out_everything_that_belongs_to_the_others() {
         "{my}"
     );
 }
+
+#[test]
+fn pg_dump_17s_transaction_timeout_never_reaches_an_older_server() {
+    let text = b"SET statement_timeout = 0;\nSET transaction_timeout = 0;\nSET lock_timeout = 0;\nCREATE TABLE public.t (id int);\n";
+    let out = send(Dialect::Pg, text, rw());
+    assert!(!out.contains("transaction_timeout"), "{out}");
+    assert!(
+        out.contains("SET lock_timeout = 0;") && out.contains("CREATE TABLE public.t"),
+        "{out}"
+    );
+    // pg_restore 17 does the same for archives: a client of the server's version is used, or the plan says why not.
+    assert!(crate::sql::restore::needs_older_restore(17, 16));
+    assert!(!crate::sql::restore::needs_older_restore(17, 17));
+    assert!(!crate::sql::restore::needs_older_restore(16, 13));
+    assert_eq!(
+        crate::sql::restore::versioned_pg_restore(16)[0],
+        "/usr/lib/postgresql/16/bin/pg_restore"
+    );
+}

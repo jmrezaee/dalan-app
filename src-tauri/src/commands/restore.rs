@@ -70,9 +70,9 @@ pub async fn restore_pick(
             "Restore from a dump"
         });
         if folder {
-            d.blocking_pick_folder()
+            crate::commands::sql::pick_or("folder", || d.blocking_pick_folder())
         } else {
-            d.blocking_pick_file()
+            crate::commands::sql::pick_or("open", || d.blocking_pick_file())
         }
     })
     .await

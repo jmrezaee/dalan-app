@@ -295,10 +295,12 @@ pub async fn job_save_backup(
             .map(Some);
     }
     let picked = tokio::task::spawn_blocking(move || {
-        app.dialog()
-            .file()
-            .set_title("Folder for the backups")
-            .blocking_pick_folder()
+        crate::commands::sql::pick_or("folder", || {
+            app.dialog()
+                .file()
+                .set_title("Folder for the backups")
+                .blocking_pick_folder()
+        })
     })
     .await
     .map_err(|e| AppError::internal(e.to_string()))?;

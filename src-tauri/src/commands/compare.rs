@@ -329,12 +329,14 @@ pub async fn schema_script_save(
         chrono::Local::now().format("%Y-%m-%d-%H%M")
     );
     let picked = tokio::task::spawn_blocking(move || {
-        app.dialog()
-            .file()
-            .set_title("Save the migration")
-            .set_file_name(&name)
-            .add_filter("SQL", &["sql"])
-            .blocking_save_file()
+        crate::commands::sql::pick_or("save", || {
+            app.dialog()
+                .file()
+                .set_title("Save the migration")
+                .set_file_name(&name)
+                .add_filter("SQL", &["sql"])
+                .blocking_save_file()
+        })
     })
     .await
     .map_err(|e| AppError::internal(e.to_string()))?;
@@ -589,12 +591,14 @@ pub async fn data_match_script(
         chrono::Local::now().format("%Y-%m-%d-%H%M")
     );
     let picked = tokio::task::spawn_blocking(move || {
-        app.dialog()
-            .file()
-            .set_title("Save the statements")
-            .set_file_name(&name)
-            .add_filter("SQL", &["sql"])
-            .blocking_save_file()
+        crate::commands::sql::pick_or("save", || {
+            app.dialog()
+                .file()
+                .set_title("Save the statements")
+                .set_file_name(&name)
+                .add_filter("SQL", &["sql"])
+                .blocking_save_file()
+        })
     })
     .await
     .map_err(|e| AppError::internal(e.to_string()))?;

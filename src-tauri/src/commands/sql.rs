@@ -782,11 +782,13 @@ pub async fn sql_save_export(
     let dialog_app = app.clone();
     let name = suggested_name.replace(['/', '\\'], "-");
     let picked = tokio::task::spawn_blocking(move || {
-        dialog_app
-            .dialog()
-            .file()
-            .set_file_name(&name)
-            .blocking_save_file()
+        crate::commands::sql::pick_or("save", || {
+            dialog_app
+                .dialog()
+                .file()
+                .set_file_name(&name)
+                .blocking_save_file()
+        })
     })
     .await
     .map_err(|e| crate::error::AppError::internal(e.to_string()))?;
@@ -944,17 +946,37 @@ pub fn sql_session_discard(
 
 // ---- Transfer (S43, F26)
 
+/// Test builds only: what the next system dialog of this kind (`open`, `folder`, `save`) answers, read from the file
+/// of that name in `DALAN_TEST_PICKS` (a path, or empty for "cancelled"), so the real-app tests get past a dialog
+/// WebDriver can't reach. Release builds never read it.
+pub(crate) fn pick_or(
+    kind: &str,
+    dialog: impl FnOnce() -> Option<tauri_plugin_dialog::FilePath>,
+) -> Option<tauri_plugin_dialog::FilePath> {
+    if cfg!(debug_assertions) {
+        if let Some(dir) = std::env::var_os("DALAN_TEST_PICKS") {
+            if let Ok(text) = std::fs::read_to_string(std::path::Path::new(&dir).join(kind)) {
+                let t = text.trim();
+                return (!t.is_empty()).then(|| tauri_plugin_dialog::FilePath::Path(t.into()));
+            }
+        }
+    }
+    dialog()
+}
+
 pub(crate) async fn pick_save(
     app: &tauri::AppHandle,
     name: String,
 ) -> AppResult<Option<std::path::PathBuf>> {
     let dialog_app = app.clone();
     let picked = tokio::task::spawn_blocking(move || {
-        dialog_app
-            .dialog()
-            .file()
-            .set_file_name(&name)
-            .blocking_save_file()
+        crate::commands::sql::pick_or("save", || {
+            dialog_app
+                .dialog()
+                .file()
+                .set_file_name(&name)
+                .blocking_save_file()
+        })
     })
     .await
     .map_err(|e| crate::error::AppError::internal(e.to_string()))?;
@@ -972,11 +994,13 @@ pub(crate) async fn pick_open(
 ) -> AppResult<Option<std::path::PathBuf>> {
     let dialog_app = app.clone();
     let picked = tokio::task::spawn_blocking(move || {
-        dialog_app
-            .dialog()
-            .file()
-            .set_title(title)
-            .blocking_pick_file()
+        crate::commands::sql::pick_or("open", || {
+            dialog_app
+                .dialog()
+                .file()
+                .set_title(title)
+                .blocking_pick_file()
+        })
     })
     .await
     .map_err(|e| crate::error::AppError::internal(e.to_string()))?;

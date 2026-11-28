@@ -327,7 +327,7 @@ pub async fn edit_open(
                 if cfg!(target_os = "macos") {
                     d = d.set_directory("/Applications");
                 }
-                d.blocking_pick_file()
+                crate::commands::sql::pick_or("open", || d.blocking_pick_file())
             })
             .await
             .map_err(|e| AppError::internal(e.to_string()))?;

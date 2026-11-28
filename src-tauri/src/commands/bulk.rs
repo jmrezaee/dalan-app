@@ -128,10 +128,12 @@ pub async fn bulk_export(
     } else {
         let a = app.clone();
         let picked = tokio::task::spawn_blocking(move || {
-            a.dialog()
-                .file()
-                .set_title("Folder for the export")
-                .blocking_pick_folder()
+            crate::commands::sql::pick_or("folder", || {
+                a.dialog()
+                    .file()
+                    .set_title("Folder for the export")
+                    .blocking_pick_folder()
+            })
         })
         .await
         .map_err(|e| AppError::internal(e.to_string()))?;
@@ -774,9 +776,11 @@ pub async fn bulk_import_pick(
             "Import a folder of CSV and JSON files"
         });
         if zip {
-            d.add_filter("Zip", &["zip"]).blocking_pick_file()
+            crate::commands::sql::pick_or("open", || {
+                d.add_filter("Zip", &["zip"]).blocking_pick_file()
+            })
         } else {
-            d.blocking_pick_folder()
+            crate::commands::sql::pick_or("folder", || d.blocking_pick_folder())
         }
     })
     .await

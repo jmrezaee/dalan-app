@@ -273,6 +273,21 @@ pub fn valid_new_name(engine: Engine, name: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// pg_restore 17 and later write `SET transaction_timeout`, which a server before 17 refuses.
+pub fn needs_older_restore(tool_major: u32, server_major: u32) -> bool {
+    tool_major >= 17 && server_major > 0 && server_major < 17
+}
+
+/// Where a pg_restore of one major version usually lives (Debian, Homebrew on Apple and Intel Macs, Postgres.app).
+pub fn versioned_pg_restore(major: u32) -> Vec<String> {
+    vec![
+        format!("/usr/lib/postgresql/{major}/bin/pg_restore"),
+        format!("/opt/homebrew/opt/postgresql@{major}/bin/pg_restore"),
+        format!("/usr/local/opt/postgresql@{major}/bin/pg_restore"),
+        format!("/Applications/Postgres.app/Contents/Versions/{major}/bin/pg_restore"),
+    ]
+}
+
 /// The candidates for the tool, as `backup.rs` names them.
 fn tool_candidates(kind: Kind, engine: Engine) -> Vec<&'static str> {
     match kind {
@@ -481,7 +496,43 @@ pub async fn plan(p: PlanInput<'_>) -> AppResult<(RestorePlan, Job)> {
         }
         rename = Some((from, to));
     }
-    let (tool, tool_version) = resolve(ssh, kind, engine).await?;
+    let (mut tool, mut tool_version) = resolve(ssh, kind, engine).await?;
+    // pg_restore 17 and later set `transaction_timeout`, which servers before 17 refuse (and with one transaction the
+    // whole restore stops on it). A client of the server's own version, when one is installed, doesn't.
+    if kind == Kind::PgArchive {
+        if let Conn::Pg(c) = &p.conn {
+            let server = c
+                .client
+                .query_one("show server_version_num", &[])
+                .await
+                .ok()
+                .and_then(|r| r.get::<_, String>(0).parse::<u32>().ok())
+                .map_or(0, |n| n / 10_000);
+            let tm = dumpfile::major(tool_version.rsplit(' ').next().unwrap_or("")).unwrap_or(0);
+            if needs_older_restore(tm, server) {
+                let reads = p
+                    .dump
+                    .archive_version
+                    .is_none_or(|av| av <= pg_restore_reads(server));
+                let mut found = None;
+                for c in versioned_pg_restore(server) {
+                    if reads {
+                        if let Ok(v) = backup::tool_version(ssh, &c).await {
+                            found = Some((c, v));
+                            break;
+                        }
+                    }
+                }
+                match found {
+                    Some((c, v)) => (tool, tool_version) = (c, v),
+                    None => return Err(AppError::validation(format!(
+                        "pg_restore {tm} {} sets transaction_timeout, which PostgreSQL {server} refuses, so this restore would stop at its first line. Install the PostgreSQL {server} client there (Dalan finds it in /usr/lib/postgresql/{server}/bin, Homebrew's postgresql@{server} or Postgres.app), or restore a plain SQL dump.",
+                        backup::runs_on(ssh)
+                    ))),
+                }
+            }
+        }
+    }
     let mut warnings = Vec::new();
     let mut skipped = Vec::new();
     // A dump newer than the tool.
