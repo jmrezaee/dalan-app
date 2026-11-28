@@ -21,6 +21,8 @@ Asked for by Mehrdad on 2026-11-27:
 
 Both screens are new boards: add them to the "Databases" page of the design canvas and to `replica/design/components.md` (with every state) before building, as the spec's rule says.
 
+The boards are drawn (2026-11-28) on the "Databases" page of the design canvas, in the row below the MongoDB boards: **DbRestore** (S48), **DbCopy** (S49), **DbJobs** (jobs, schedules, host folders), **DbCompare** (schema and data compare) and **DbBulk** (bulk export and import, MongoDB import).
+
 ## 2. Restore from any dump (S48, F31)
 
 ### Formats we accept
