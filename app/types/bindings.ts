@@ -3132,6 +3132,8 @@ export type ProxyConfig_Serialize = {
 /**  The window was closed or ⌘Q pressed while sessions are live: the UI asks before quitting. */
 export type QuitRequested = {
 	live_sessions: number,
+	/**  Scheduled jobs running right now: quitting stops them (they run again at the next unlock). */
+	running_jobs: number,
 };
 
 /**

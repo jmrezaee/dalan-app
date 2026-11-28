@@ -97,7 +97,7 @@ export class Fake {
   }
 
   dropFile = (id: string, name: string) => this.run<void>('dropFile', id, name)
-  quitRequested = (liveSessions: number) => this.run<void>('quitRequested', liveSessions)
+  quitRequested = (liveSessions: number, runningJobs = 0) => this.run<void>('quitRequested', liveSessions, runningJobs)
   scheduledRun = (name: string, status: 'ok' | 'failed', missed = 0) => this.run<void>('scheduledRun', name, status, missed)
   putRemoteFile = (hostId: string, path: string) => this.run<void>('putRemoteFile', hostId, path)
   receiveLink = (target: { user: string | null, host: string, port: number } | null) => this.run<void>('receiveLink', target)

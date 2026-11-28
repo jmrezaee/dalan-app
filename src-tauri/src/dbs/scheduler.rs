@@ -30,6 +30,23 @@ pub fn start(app: &AppHandle) {
     let generation = state.scheduler_gen.fetch_add(1, Ordering::SeqCst) + 1;
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
+        // A run that was going when Dalan last quit is recorded as stopped; its slot isn't done, so it runs again.
+        {
+            let st = app.state::<AppState>();
+            if let Ok(ids) = st
+                .with_db_session(|c, s| jobs::record_interrupted(c, s))
+                .await
+            {
+                for job_id in ids {
+                    let _ = JobsChanged {
+                        job_id,
+                        running: false,
+                        failed: true,
+                    }
+                    .emit(&app);
+                }
+            }
+        }
         loop {
             {
                 let st = app.state::<AppState>();
@@ -81,7 +98,23 @@ pub async fn tick(app: &AppHandle) {
         }
         .emit(app);
         let started = now_ms();
+        // Marked in the database for the length of the run (found at the next unlock if Dalan quits first), and
+        // counted so quitting asks first.
+        let id = d.id.clone();
+        let _ = state
+            .with_db(move |c| jobs::mark_running(c, &id, Some(started)))
+            .await;
+        state
+            .running_jobs
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let result = run(app, &d).await;
+        state
+            .running_jobs
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        let id = d.id.clone();
+        let _ = state
+            .with_db(move |c| jobs::mark_running(c, &id, None))
+            .await;
         // Only after the run: a run cut short by locking is due again at the next unlock.
         let id = d.id.clone();
         let marked = state

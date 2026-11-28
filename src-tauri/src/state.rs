@@ -95,6 +95,8 @@ pub struct AppState {
     /// A file dropped on the window (drag and drop from Finder): its id and path. The path stays here; the window
     /// gets the id and the file name, and a database tab takes it with `restore_pick_dropped`. One at a time.
     pub dropped: std::sync::Mutex<Option<(String, std::path::PathBuf)>>,
+    /// Scheduled jobs running right now (quitting asks first while there are any).
+    pub running_jobs: std::sync::atomic::AtomicUsize,
 }
 
 impl AppState {
@@ -114,6 +116,7 @@ impl AppState {
             sql: crate::sql::SqlManager::default(),
             scheduler_gen: std::sync::atomic::AtomicU64::new(0),
             dropped: std::sync::Mutex::new(None),
+            running_jobs: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 

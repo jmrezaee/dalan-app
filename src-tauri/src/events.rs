@@ -52,6 +52,8 @@ pub struct FileDropped {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct QuitRequested {
     pub live_sessions: u32,
+    /// Scheduled jobs running right now: quitting stops them (they run again at the next unlock).
+    pub running_jobs: u32,
 }
 
 /// A link (`dalan-app.exe --open-url ssh://...`) arrived, on a cold start or from a second launch. The UI asks

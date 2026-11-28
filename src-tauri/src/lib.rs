@@ -404,9 +404,13 @@ pub fn run() {
                     event: WindowEvent::CloseRequested { api, .. },
                     ..
                 } => {
-                    if let Some(n) = ask(app) {
+                    if let Some((n, jobs)) = ask(app) {
                         api.prevent_close();
-                        let _ = events::QuitRequested { live_sessions: n }.emit(app);
+                        let _ = events::QuitRequested {
+                            live_sessions: n,
+                            running_jobs: jobs,
+                        }
+                        .emit(app);
                     }
                 }
                 // A file dragged in from Finder: kept here, the window is told its name and id.
@@ -430,9 +434,13 @@ pub fn run() {
                 RunEvent::ExitRequested {
                     api, code: None, ..
                 } => {
-                    if let Some(n) = ask(app) {
+                    if let Some((n, jobs)) = ask(app) {
                         api.prevent_exit();
-                        let _ = events::QuitRequested { live_sessions: n }.emit(app);
+                        let _ = events::QuitRequested {
+                            live_sessions: n,
+                            running_jobs: jobs,
+                        }
+                        .emit(app);
                     }
                 }
                 _ => {}
@@ -441,14 +449,17 @@ pub fn run() {
 }
 
 /// `Some(n)` when quitting now would end `n` live sessions and the UI must be asked first.
-fn quit_question(app: &tauri::AppHandle) -> Option<u32> {
+/// Sessions (and open transactions) and scheduled jobs running now, when quitting should ask first.
+fn quit_question(app: &tauri::AppHandle) -> Option<(u32, u32)> {
     let st = app.try_state::<AppState>()?;
-    match st
-        .quit
-        .decide(st.sessions.live_count() + st.sql.open_transactions())
-    {
+    let jobs = st.running_jobs.load(std::sync::atomic::Ordering::SeqCst);
+    let live = st.sessions.live_count() + st.sql.open_transactions();
+    match st.quit.decide(live + jobs) {
         quit::Decision::Allow => None,
-        quit::Decision::Ask(n) => Some(n),
+        quit::Decision::Ask(_) => Some((
+            u32::try_from(live).unwrap_or(u32::MAX),
+            u32::try_from(jobs).unwrap_or(u32::MAX),
+        )),
     }
 }
 
@@ -482,8 +493,12 @@ fn ask_before_quit_from_the_menu(app: &mut tauri::App) -> tauri::Result<()> {
     app.on_menu_event(|app, event| {
         if event.id() == "quit-dalan" {
             match quit_question(app) {
-                Some(n) => {
-                    let _ = events::QuitRequested { live_sessions: n }.emit(app);
+                Some((n, jobs)) => {
+                    let _ = events::QuitRequested {
+                        live_sessions: n,
+                        running_jobs: jobs,
+                    }
+                    .emit(app);
                 }
                 None => app.exit(0),
             }

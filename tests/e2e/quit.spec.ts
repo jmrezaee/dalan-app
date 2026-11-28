@@ -32,4 +32,15 @@ test.describe('quit with live sessions', () => {
     await dialog.getByRole('button', { name: 'Quit anyway' }).click()
     await expect.poll(async () => (await fake.calls()).includes('quit_app')).toBe(true)
   })
+
+  test('a scheduled job running: the question says it stops and runs again at the next unlock', async ({ page }) => {
+    const fake = await openApp(page, { unlocked: true })
+    const dialog = page.getByRole('alertdialog', { name: 'Quit Dalan?' })
+    await expect(async () => {
+      await fake.quitRequested(0, 1)
+      await expect(dialog).toBeVisible({ timeout: 500 })
+    }).toPass()
+    await expect(dialog).toContainText('A scheduled job is running: quitting stops it, and it runs again the next time Dalan is unlocked.')
+    await expect(dialog).not.toContainText('session')
+  })
 })

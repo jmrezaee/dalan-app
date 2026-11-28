@@ -344,6 +344,83 @@ pub fn scheduled(conn: &Connection, s: &VaultSession) -> AppResult<Vec<Due>> {
     Ok(out)
 }
 
+/// The scheduled runs in progress, kept in the database so a run cut off by quitting (or a crash) is found at the
+/// next unlock: `{job_id: started_at}` under the settings key `jobs_running`.
+const RUNNING_KEY: &str = "jobs_running";
+
+fn running_map(conn: &Connection) -> AppResult<serde_json::Map<String, serde_json::Value>> {
+    let v: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            [RUNNING_KEY],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(v.and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default())
+}
+
+fn put_running(conn: &Connection, m: &serde_json::Map<String, serde_json::Value>) -> AppResult<()> {
+    if m.is_empty() {
+        conn.execute("DELETE FROM settings WHERE key = ?1", [RUNNING_KEY])?;
+    } else {
+        conn.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = ?3",
+            params![
+                RUNNING_KEY,
+                serde_json::Value::Object(m.clone()).to_string(),
+                now_ms()
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+/// A scheduled run starts (or, with `None`, has ended).
+pub fn mark_running(conn: &Connection, id: &str, started: Option<i64>) -> AppResult<()> {
+    let mut m = running_map(conn)?;
+    match started {
+        Some(t) => m.insert(id.to_string(), t.into()),
+        None => m.remove(id),
+    };
+    put_running(conn, &m)
+}
+
+/// Runs that were still marked as running when Dalan last stopped: recorded as stopped, with why. Their slots were not
+/// marked done, so the scheduler runs them again.
+pub fn record_interrupted(conn: &Connection, s: &VaultSession) -> AppResult<Vec<String>> {
+    let m = running_map(conn)?;
+    let mut ids = Vec::new();
+    for (id, started) in &m {
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM db_jobs WHERE id = ?1 AND vault_id = ?2)",
+            params![id, s.vault_id],
+            |r| r.get(0),
+        )?;
+        if exists {
+            record_run(
+                conn,
+                s,
+                id,
+                RunRecord {
+                    started_at: started.as_i64().unwrap_or(0),
+                    status: "stopped",
+                    rows: None,
+                    bytes: None,
+                    warnings: 0,
+                    log: "Dalan quit (or stopped) during this run, so it didn't finish. A copy keeps the tables that \
+                          were done before that; the rest rolled back. It runs again now."
+                        .into(),
+                },
+            )?;
+            ids.push(id.clone());
+        }
+    }
+    put_running(conn, &Default::default())?;
+    Ok(ids)
+}
+
 /// Marks a job's slots handled up to `until` (the schedule itself is left as it is).
 pub fn done_until(conn: &Connection, id: &str, until: i64) -> AppResult<()> {
     let sched: Option<String> = conn
@@ -676,5 +753,52 @@ mod tests {
             .find(|j| j.id == to_staging.id)
             .unwrap();
         assert_eq!(row.missed_before_last, Some(3.0));
+    }
+
+    #[test]
+    fn a_run_cut_off_by_quitting_is_recorded_at_the_next_unlock_and_runs_again() {
+        let conn = crate::db::open_in_memory().unwrap();
+        let s = crate::vault::create(
+            &conn,
+            "correct-horse-staple",
+            crate::vault::kdf::KdfParams::cheap(),
+        )
+        .unwrap();
+        let job = save(
+            &conn,
+            &s,
+            NewJob {
+                name: "Nightly".into(),
+                kind: JobKind::Backup,
+                source: None,
+                target: None,
+                summary: String::new(),
+                plan: serde_json::json!({}),
+                destination: None,
+            },
+        )
+        .unwrap();
+        // A run that ends clears its mark; nothing is recorded at the next unlock.
+        mark_running(&conn, &job.id, Some(100)).unwrap();
+        mark_running(&conn, &job.id, None).unwrap();
+        assert!(record_interrupted(&conn, &s).unwrap().is_empty());
+        // A run that was going when the app went away: one "stopped" run with why, once, and its slot isn't done.
+        mark_running(&conn, &job.id, Some(200)).unwrap();
+        mark_running(&conn, "gone-job", Some(300)).unwrap();
+        assert_eq!(record_interrupted(&conn, &s).unwrap(), vec![job.id.clone()]);
+        let r = runs(&conn, &s, &job.id).unwrap();
+        assert_eq!(
+            (r.len(), r[0].status.as_str(), r[0].started_at),
+            (1, "stopped", 200.0)
+        );
+        assert!(r[0].log.contains("runs again now"));
+        assert!(
+            record_interrupted(&conn, &s).unwrap().is_empty(),
+            "recorded once"
+        );
+        // The settings the window reads stay as they were.
+        assert!(!crate::settings::get_all(&conn)
+            .unwrap()
+            .contains_key("jobs_running"));
     }
 }

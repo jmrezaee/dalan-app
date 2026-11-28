@@ -211,7 +211,7 @@ export function install(opts: Options) {
     /** The window was closed or ⌘Q pressed with live sessions: Rust sends this and holds the quit back. */
     /** A file dropped on the window from Finder: Rust keeps the path and sends its id and name. */
     dropFile: (id: string, name: string) => emitEvent('file-dropped', { id, name }),
-    quitRequested: (liveSessions: number) => emitEvent('quit-requested', { live_sessions: liveSessions }),
+    quitRequested: (liveSessions: number, runningJobs = 0) => emitEvent('quit-requested', { live_sessions: liveSessions, running_jobs: runningJobs }),
     /** A link from another app arrives: queued like Rust does, then the event tells the UI to look. */
     receiveLink: (target: { user: string | null, host: string, port: number } | null) => { m.links.push(target); emitEvent('link-received', {}) },
     /** Pretend to run on Windows with these Settings > System values. */
