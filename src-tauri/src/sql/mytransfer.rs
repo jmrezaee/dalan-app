@@ -69,7 +69,7 @@ impl MyDb {
         progress: &(dyn Fn(f64, f64) + Sync),
         stop: &AtomicBool,
     ) -> AppResult<(f64, f64)> {
-        // Masking (E5): a new key per export, applied row by row (a shuffle needs rows together: not here).
+        // Masking (E5): a new key per export, applied row by row (a shuffle holds rows back until the end).
         let key = crate::dbs::masking::new_key();
         let mut mask: Option<Option<crate::dbs::masking::Masker>> = None;
         let filter = filter.trim();
@@ -113,6 +113,41 @@ impl MyDb {
         } else {
             ','
         };
+        let line_of = |cols: &[MyColumn], row: &[Option<String>], rows: f64| -> String {
+            match format {
+                ExportFormat::Csv | ExportFormat::Tsv => format!(
+                    "{}\n",
+                    row.iter()
+                        .map(|v| field(v, delim))
+                        .collect::<Vec<_>>()
+                        .join(&delim.to_string())
+                ),
+                ExportFormat::Json => {
+                    let obj: serde_json::Map<String, serde_json::Value> = cols
+                        .iter()
+                        .zip(row)
+                        .map(|(c, v)| (c.name.clone(), json_value(c.kind, v.as_deref())))
+                        .collect();
+                    format!(
+                        "{}\n  {}",
+                        if rows == 0.0 { "" } else { "," },
+                        serde_json::Value::Object(obj)
+                    )
+                }
+                ExportFormat::Sql => format!(
+                    "insert into {from} ({}) values ({});\n",
+                    cols.iter()
+                        .map(|c| q(&c.name))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    cols.iter()
+                        .zip(row)
+                        .map(|(c, v)| literal(c.kind, v))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            }
+        };
         let result = self
             .conn
             .stream(&sql, |cols: &[MyColumn], row: Vec<Option<String>>| {
@@ -123,13 +158,14 @@ impl MyDb {
                         &cols.iter().map(|c| c.name.clone()).collect::<Vec<_>>(),
                     )
                 });
-                let row = match m {
+                // A shuffle holds the first rows back; they come out after the last one (below).
+                let ready = match m {
                     Some(m) => {
                         let mut one = vec![row];
                         m.batch(&mut one);
-                        one.pop().unwrap_or_default()
+                        one
                     }
-                    None => row,
+                    None => vec![row],
                 };
                 let step = (|| -> Result<(), AppError> {
                     if first {
@@ -147,43 +183,12 @@ impl MyDb {
                             _ => {}
                         }
                     }
-                    let line = match format {
-                        ExportFormat::Csv | ExportFormat::Tsv => format!(
-                            "{}\n",
-                            row.iter()
-                                .map(|v| field(v, delim))
-                                .collect::<Vec<_>>()
-                                .join(&delim.to_string())
-                        ),
-                        ExportFormat::Json => {
-                            let obj: serde_json::Map<String, serde_json::Value> = cols
-                                .iter()
-                                .zip(&row)
-                                .map(|(c, v)| (c.name.clone(), json_value(c.kind, v.as_deref())))
-                                .collect();
-                            format!(
-                                "{}\n  {}",
-                                if rows == 0.0 { "" } else { "," },
-                                serde_json::Value::Object(obj)
-                            )
+                    for row in ready {
+                        put(&line_of(cols, &row, rows), &mut bytes, out)?;
+                        rows += 1.0;
+                        if rows % 500.0 == 0.0 {
+                            progress(rows, bytes);
                         }
-                        ExportFormat::Sql => format!(
-                            "insert into {from} ({}) values ({});\n",
-                            cols.iter()
-                                .map(|c| q(&c.name))
-                                .collect::<Vec<_>>()
-                                .join(", "),
-                            cols.iter()
-                                .zip(&row)
-                                .map(|(c, v)| literal(c.kind, v))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        ),
-                    };
-                    put(&line, &mut bytes, out)?;
-                    rows += 1.0;
-                    if rows % 500.0 == 0.0 {
-                        progress(rows, bytes);
                     }
                     Ok(())
                 })();
@@ -198,6 +203,12 @@ impl MyDb {
         let (cols, _) = result?;
         if let Some(e) = failure {
             return Err(e);
+        }
+        if let Some(Some(m)) = &mask {
+            for row in m.finish() {
+                put(&line_of(&cols, &row, rows), &mut bytes, out)?;
+                rows += 1.0;
+            }
         }
         if stop.load(Ordering::SeqCst) {
             return Err(AppError::new(ErrorCode::Internal, "Stopped."));

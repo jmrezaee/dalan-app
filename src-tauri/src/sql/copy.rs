@@ -1115,6 +1115,24 @@ mod pg {
                 .map(|c| c.0.clone())
                 .collect();
             let mask = super::masker(job, o, &names);
+            let encode = |batch: &[Vec<Option<String>>]| -> bytes::Bytes {
+                let text: String = batch
+                    .iter()
+                    .map(|r| {
+                        format!(
+                            "{}\n",
+                            r.iter()
+                                .map(|v| super::super::copycross::copy_field(
+                                    v,
+                                    super::super::typemap::Conv::Plain
+                                ))
+                                .collect::<Vec<_>>()
+                                .join("\t")
+                        )
+                    })
+                    .collect();
+                bytes::Bytes::from(text)
+            };
             let mut partial: Vec<u8> = Vec::new();
             while let Some(chunk) = out.next().await {
                 let chunk = chunk.map_err(|e| map_error(&e))?;
@@ -1136,22 +1154,7 @@ mod pg {
                             .map(super::super::copycross::copy_fields)
                             .collect();
                         m.batch(&mut batch);
-                        let text: String = batch
-                            .iter()
-                            .map(|r| {
-                                format!(
-                                    "{}\n",
-                                    r.iter()
-                                        .map(|v| super::super::copycross::copy_field(
-                                            v,
-                                            super::super::typemap::Conv::Plain
-                                        ))
-                                        .collect::<Vec<_>>()
-                                        .join("\t")
-                                )
-                            })
-                            .collect();
-                        bytes::Bytes::from(text)
+                        encode(&batch)
                     }
                 };
                 sink.send(chunk).await.map_err(|e| map_error(&e))?;
@@ -1165,6 +1168,13 @@ mod pg {
                         estimate: est,
                         phase: "rows".into(),
                     });
+                }
+            }
+            // The rows a shuffle held back go last.
+            if let Some(m) = &mask {
+                let tail = m.finish();
+                if !tail.is_empty() {
+                    sink.send(encode(&tail)).await.map_err(|e| map_error(&e))?;
                 }
             }
             sink.as_mut().finish().await.map_err(|e| map_error(&e))?;
@@ -1524,6 +1534,37 @@ mod my {
         let mut rows = 0u64;
         let mut after: Option<Vec<Option<String>>> = None;
         let mut last = Instant::now();
+        // One masker for the whole table: a shuffle holds rows back until the end (see `Masker::batch`).
+        let mask = super::masker(job, o, &names);
+        let mut bytes_cols: Vec<bool> = Vec::new();
+        // Multi-row inserts of at most BATCH_BYTES each.
+        let write = |masked: Vec<Vec<Option<String>>>, bytes_cols: Vec<bool>| {
+            let (d, target, list, upsert) = (&d, &target, &list, &upsert);
+            async move {
+                let mut batch = String::new();
+                for row in &masked {
+                    let vals = row
+                        .iter()
+                        .enumerate()
+                        .map(|(j, v)| value(v, bytes_cols.get(j).copied().unwrap_or(false)))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    if batch.is_empty() {
+                        batch = format!("insert into {target} ({list}) values ({vals})");
+                    } else {
+                        batch.push_str(&format!(", ({vals})"));
+                    }
+                    if batch.len() > BATCH_BYTES {
+                        d.query(&format!("{batch}{upsert}"), 0).await?;
+                        batch.clear();
+                    }
+                }
+                if !batch.is_empty() {
+                    d.query(&format!("{batch}{upsert}"), 0).await?;
+                }
+                AppResult::Ok(())
+            }
+        };
         loop {
             if stop.load(Ordering::SeqCst) {
                 return Err(stopped());
@@ -1564,7 +1605,7 @@ mod my {
             if res.rows.is_empty() {
                 break;
             }
-            let bytes_cols: Vec<bool> = res
+            bytes_cols = res
                 .columns
                 .iter()
                 .map(|c| c.kind == crate::sql::values::CellKind::Bytes)
@@ -1574,32 +1615,12 @@ mod my {
                 .filter_map(|k| names.iter().position(|c| c == k))
                 .collect();
             let got = res.rows.len();
-            let mut batch = String::new();
             // Masked values go to the target; the page's keys (for the next page) stay the source's.
             let mut masked = res.rows.clone();
-            if let Some(m) = super::masker(job, o, &names) {
+            if let Some(m) = &mask {
                 m.batch(&mut masked);
             }
-            for row in &masked {
-                let vals = row
-                    .iter()
-                    .enumerate()
-                    .map(|(j, v)| value(v, bytes_cols.get(j).copied().unwrap_or(false)))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                if batch.is_empty() {
-                    batch = format!("insert into {target} ({list}) values ({vals})");
-                } else {
-                    batch.push_str(&format!(", ({vals})"));
-                }
-                if batch.len() > BATCH_BYTES {
-                    d.query(&format!("{batch}{upsert}"), 0).await?;
-                    batch.clear();
-                }
-            }
-            if !batch.is_empty() {
-                d.query(&format!("{batch}{upsert}"), 0).await?;
-            }
+            write(masked, bytes_cols.clone()).await?;
             rows += got as u64;
             after = res
                 .rows
@@ -1619,6 +1640,9 @@ mod my {
             if pk.is_empty() || got < take as usize {
                 break;
             }
+        }
+        if let Some(m) = &mask {
+            write(m.finish(), bytes_cols).await?;
         }
         d.query("commit", 0).await?;
         Ok((rows, src_rows))

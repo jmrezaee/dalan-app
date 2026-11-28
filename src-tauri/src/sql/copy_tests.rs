@@ -699,6 +699,134 @@ async fn l3_copy_masks_values_in_the_stream_on_every_path() {
     assert_eq!(my_emails, emails, "keyed: the same input, the same fake");
 }
 
+#[tokio::test]
+#[ignore = "needs the Docker test servers: scripts/test-servers.sh up"]
+async fn l3_shuffle_is_one_permutation_of_the_whole_table_on_every_path() {
+    use crate::dbs::masking::{MaskKind, MaskRule};
+    let my_sh = |sql: &str| {
+        docker_in(
+            "dalan-test-mysql",
+            &["mysql", "-uroot", "-ptest-mysql", "-N", "-e", sql],
+            b"",
+        )
+    };
+    psql("shop", "drop database if exists sh_src");
+    psql("shop", "create database sh_src");
+    psql("sh_src", "create table t (id int primary key, v text); insert into t select g, 'v' || g from generate_series(1, 20000) g");
+    my_sh("drop database if exists sh_src; create database sh_src; create table sh_src.t (id int primary key, v varchar(20)); set session cte_max_recursion_depth = 30000; insert into sh_src.t (id, v) with recursive s(g) as (select 1 union all select g + 1 from s where g < 20000) select g, concat('v', g) from s");
+    let mut o = obj("public", "t", "table");
+    o.masks = Some(vec![MaskRule {
+        column: "v".into(),
+        kind: MaskKind::Shuffle,
+        value: None,
+    }]);
+    let mut my_o = obj("sh_src", "t", "table");
+    my_o.masks = o.masks.clone();
+    // Each value once, the ids untouched, most rows changed, and values that crossed far (not one page's mix).
+    let check = |pairs: String, path: &str| {
+        let rows: Vec<(u32, u32)> = pairs
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| {
+                let (a, b) = l
+                    .trim()
+                    .split_once(|c: char| c == '|' || c == '\t')
+                    .unwrap();
+                (a.trim().parse().unwrap(), b.trim()[1..].parse().unwrap())
+            })
+            .collect();
+        assert_eq!(rows.len(), 20000, "{path}: rows");
+        let mut vs: Vec<u32> = rows.iter().map(|r| r.1).collect();
+        vs.sort_unstable();
+        assert_eq!(
+            vs,
+            (1..=20000).collect::<Vec<_>>(),
+            "{path}: every value once"
+        );
+        let changed = rows.iter().filter(|(i, v)| i != v).count();
+        assert!(changed > 19000, "{path}: only {changed} changed");
+        let far = rows.iter().filter(|(i, v)| i.abs_diff(*v) > 5000).count();
+        assert!(
+            far > 100,
+            "{path}: only {far} travelled more than 5,000 rows"
+        );
+    };
+    // PostgreSQL → PostgreSQL (COPY).
+    psql("shop", "drop database if exists sh_dst");
+    psql("shop", "create database sh_dst");
+    let r = go(
+        &job(
+            Engine::Postgres,
+            "sh_dst",
+            vec![o.clone()],
+            CopyMode::Create,
+        ),
+        pg("sh_src").await,
+        pg("sh_dst").await,
+        &AtomicBool::new(false),
+    )
+    .await;
+    assert_eq!(r.outcome, "done", "{r:?}");
+    check(
+        psql("sh_dst", "select id || '|' || v from public.t order by id"),
+        "pg to pg",
+    );
+    // PostgreSQL → MySQL.
+    my_sh("drop database if exists sh_dst; create database sh_dst");
+    let r = go(
+        &job(
+            Engine::Postgres,
+            "sh_dst",
+            vec![o.clone()],
+            CopyMode::Create,
+        ),
+        pg("sh_src").await,
+        my(13306, "test-mysql", Some("sh_dst")).await,
+        &AtomicBool::new(false),
+    )
+    .await;
+    assert_eq!(r.outcome, "done", "{r:?}");
+    check(
+        my_sh("select concat(id, '|', v) from sh_dst.t order by id"),
+        "pg to mysql",
+    );
+    // MySQL → PostgreSQL.
+    psql("shop", "drop database if exists sh_dst2");
+    psql("shop", "create database sh_dst2");
+    let to_pg = job(
+        Engine::Mysql,
+        "sh_dst2",
+        vec![my_o.clone()],
+        CopyMode::Create,
+    );
+    let r = go(
+        &to_pg,
+        my(13306, "test-mysql", Some("sh_src")).await,
+        pg("sh_dst2").await,
+        &AtomicBool::new(false),
+    )
+    .await;
+    assert_eq!(r.outcome, "done", "{r:?}");
+    check(
+        psql("sh_dst2", "select id || '|' || v from public.t order by id"),
+        "mysql to pg",
+    );
+    // MySQL → MySQL.
+    my_sh("drop database if exists sh_dst3; create database sh_dst3");
+    let r = go(
+        &job(Engine::Mysql, "sh_dst3", vec![my_o], CopyMode::Create),
+        my(13306, "test-mysql", Some("sh_src")).await,
+        my(13306, "test-mysql", Some("sh_dst3")).await,
+        &AtomicBool::new(false),
+    )
+    .await;
+    assert_eq!(r.outcome, "done", "{r:?}");
+    check(
+        my_sh("select concat(id, '|', v) from sh_dst3.t order by id"),
+        "mysql to mysql",
+    );
+}
+
 /// The resident memory of this process now, in MB (`ps`, which works on macOS and Linux alike).
 pub(crate) fn rss_mb() -> f64 {
     let out = std::process::Command::new("ps")

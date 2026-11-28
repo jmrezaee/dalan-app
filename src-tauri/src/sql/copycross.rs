@@ -960,23 +960,36 @@ async fn one(
                 let mut partial: Vec<u8> = Vec::new();
                 let mut batch = String::new();
                 let mut last = Instant::now();
-                while let Some(chunk) = out.next().await {
-                    let chunk = chunk.map_err(|e| map_error(&e))?;
-                    if stop.load(Ordering::SeqCst) {
-                        return Err(stopped());
-                    }
-                    partial.extend_from_slice(&chunk);
+                // One masker for the table: a shuffle's held-back rows come out once the source has ended.
+                let mask = super::copy::masker(
+                    job,
+                    o,
+                    &cols.iter().map(|c| c.name.clone()).collect::<Vec<_>>(),
+                );
+                let mut ended = false;
+                while !ended {
                     let mut lines: Vec<Vec<Option<String>>> = Vec::new();
-                    while let Some(p) = partial.iter().position(|b| *b == b'\n') {
-                        let line: Vec<u8> = partial.drain(..=p).collect();
-                        lines.push(copy_fields(&line));
-                    }
-                    if let Some(m) = super::copy::masker(
-                        job,
-                        o,
-                        &cols.iter().map(|c| c.name.clone()).collect::<Vec<_>>(),
-                    ) {
-                        m.batch(&mut lines);
+                    match out.next().await {
+                        Some(chunk) => {
+                            let chunk = chunk.map_err(|e| map_error(&e))?;
+                            if stop.load(Ordering::SeqCst) {
+                                return Err(stopped());
+                            }
+                            partial.extend_from_slice(&chunk);
+                            while let Some(p) = partial.iter().position(|b| *b == b'\n') {
+                                let line: Vec<u8> = partial.drain(..=p).collect();
+                                lines.push(copy_fields(&line));
+                            }
+                            if let Some(m) = &mask {
+                                m.batch(&mut lines);
+                            }
+                        }
+                        None => {
+                            ended = true;
+                            if let Some(m) = &mask {
+                                lines = m.finish();
+                            }
+                        }
                     }
                     for f in lines {
                         let vals = f
@@ -1064,17 +1077,31 @@ async fn one(
                     limit,
                 );
                 let mut last = Instant::now();
-                while let Some(page) = pager.next(s).await? {
+                // One masker for the table: a shuffle's held-back rows come out after the last page.
+                let mask = super::copy::masker(
+                    job,
+                    o,
+                    &cols.iter().map(|c| c.name.clone()).collect::<Vec<_>>(),
+                );
+                let mut tail_done = false;
+                loop {
+                    let page = match pager.next(s).await? {
+                        Some(p) => p,
+                        None if !tail_done => {
+                            tail_done = true;
+                            match &mask {
+                                Some(m) => m.finish(),
+                                None => break,
+                            }
+                        }
+                        None => break,
+                    };
                     if stop.load(Ordering::SeqCst) {
                         return Err(stopped());
                     }
                     let mut buf = String::new();
                     let mut page = page;
-                    if let Some(m) = super::copy::masker(
-                        job,
-                        o,
-                        &cols.iter().map(|c| c.name.clone()).collect::<Vec<_>>(),
-                    ) {
+                    if let Some(m) = &mask {
                         m.batch(&mut page);
                     }
                     for row in &page {

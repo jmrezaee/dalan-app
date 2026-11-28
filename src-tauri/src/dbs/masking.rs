@@ -103,10 +103,30 @@ const STREETS: &[&str] = &[
 ];
 const SUFFIX: &[&str] = &["Street", "Road", "Lane", "Avenue", "Way"];
 
-/// The masker for one run: the key and the rules by column position.
+/// The masker for one table of a run: the key and the rules by column position.
 pub struct Masker {
     key: [u8; 32],
     rules: Vec<(usize, MaskRule)>,
+    /// Shuffle across the whole table (see [`Masker::batch`]). A mutex because callers hold `&Masker`; one table's
+    /// rows go through one masker in order, so it is never contended.
+    shuffle: std::sync::Mutex<Shuffle>,
+}
+
+/// How many rows are held back so shuffled values can travel across the whole table, not just one batch.
+// ponytail: a delay-line pool: any value can land anywhere, but most travel a few POOL lengths. A uniform shuffle of a
+// huge table needs a second cursor ordered by a keyed hash; add it if a team needs that.
+const POOL: usize = 4096;
+
+#[derive(Default)]
+struct Shuffle {
+    /// The first rows of the table, not handed back until [`Masker::finish`] (they get the values left at the end).
+    held: Vec<Vec<Option<String>>>,
+    /// Per shuffled column: the values waiting to be given to a row.
+    pool: Vec<Vec<Option<String>>>,
+    /// Rows seen after the pool was full (keys the choices).
+    seen: u64,
+    /// `finish` was called: rows passed after it (the held ones, given back) are left as they are.
+    done: bool,
 }
 
 impl Masker {
@@ -122,7 +142,11 @@ impl Masker {
                     .map(|i| (i, r.clone()))
             })
             .collect();
-        (!rules.is_empty()).then_some(Masker { key, rules })
+        (!rules.is_empty()).then_some(Masker {
+            key,
+            rules,
+            shuffle: Default::default(),
+        })
     }
 
     fn mac(&self, column: &str, value: &str, n: u32) -> [u8; 32] {
@@ -239,33 +263,19 @@ impl Masker {
             .collect()
     }
 
-    /// Masks a batch of rows in place (shuffle mixes the column within the batch).
-    pub fn batch(&self, rows: &mut [Vec<Option<String>>]) {
+    fn pick(&self, column: &str, n: u64, len: usize) -> usize {
+        let b = self.bytes(column, &format!("shuffle:{n}"), 4);
+        u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize % len
+    }
+
+    /// Masks a batch of rows. With a Shuffle rule the column is shuffled over the whole table: the first rows are
+    /// held back (taken out of `rows`) and their values go into a pool; every later row swaps its value with a keyed
+    /// slot of the pool; [`Masker::finish`] gives the values left to the held rows and hands them back. Every value
+    /// ends up in exactly one row, and the same key and rows in the same order give the same result.
+    /// Callers write what is left in `rows`, then the rows from `finish()` at the end of the table.
+    pub fn batch(&self, rows: &mut Vec<Vec<Option<String>>>) {
         for (i, rule) in &self.rules {
             if rule.kind == MaskKind::Shuffle {
-                // Fisher–Yates with keyed choices: a batch with the same values shuffles the same way.
-                let n = rows.len();
-                for k in (1..n).rev() {
-                    let b = self.bytes(
-                        &rule.column,
-                        &format!(
-                            "{k}:{}",
-                            rows[k].get(*i).cloned().flatten().unwrap_or_default()
-                        ),
-                        4,
-                    );
-                    let j = u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize % (k + 1);
-                    let (a, z) = (
-                        rows[k].get(*i).cloned().flatten(),
-                        rows[j].get(*i).cloned().flatten(),
-                    );
-                    if let Some(x) = rows[k].get_mut(*i) {
-                        *x = z;
-                    }
-                    if let Some(x) = rows[j].get_mut(*i) {
-                        *x = a;
-                    }
-                }
                 continue;
             }
             for row in rows.iter_mut() {
@@ -274,6 +284,75 @@ impl Masker {
                 }
             }
         }
+        let cols: Vec<(usize, &str)> = self
+            .rules
+            .iter()
+            .filter(|(_, r)| r.kind == MaskKind::Shuffle)
+            .map(|(i, r)| (*i, r.column.as_str()))
+            .collect();
+        if cols.is_empty() {
+            return;
+        }
+        let mut s = self.shuffle.lock().unwrap_or_else(|e| e.into_inner());
+        if s.done {
+            return;
+        }
+        if s.pool.is_empty() {
+            s.pool = vec![Vec::new(); cols.len()];
+        }
+        // Fill the pool from the first rows, which wait for `finish`.
+        if s.held.len() < POOL {
+            let take = (POOL - s.held.len()).min(rows.len());
+            for row in rows.drain(..take) {
+                for (k, (i, _)) in cols.iter().enumerate() {
+                    s.pool[k].push(row.get(*i).cloned().flatten());
+                }
+                s.held.push(row);
+            }
+        }
+        for row in rows.iter_mut() {
+            let n = s.seen;
+            s.seen += 1;
+            for (k, (i, col)) in cols.iter().enumerate() {
+                let j = self.pick(col, n, s.pool[k].len());
+                if let Some(cell) = row.get_mut(*i) {
+                    std::mem::swap(cell, &mut s.pool[k][j]);
+                }
+            }
+        }
+    }
+
+    /// The rows held back by a shuffle, with the values left in the pool (shuffled), to be written last.
+    pub fn finish(&self) -> Vec<Vec<Option<String>>> {
+        let mut s = self.shuffle.lock().unwrap_or_else(|e| e.into_inner());
+        let Shuffle { held, mut pool, .. } = std::mem::replace(
+            &mut *s,
+            Shuffle {
+                done: true,
+                ..Default::default()
+            },
+        );
+        let cols: Vec<(usize, &str)> = self
+            .rules
+            .iter()
+            .filter(|(_, r)| r.kind == MaskKind::Shuffle)
+            .map(|(i, r)| (*i, r.column.as_str()))
+            .collect();
+        let mut held = held;
+        for (k, (i, col)) in cols.iter().enumerate() {
+            let Some(p) = pool.get_mut(k) else { continue };
+            // Fisher–Yates with keyed choices.
+            for x in (1..p.len()).rev() {
+                let j = self.pick(col, u64::MAX - x as u64, x + 1);
+                p.swap(x, j);
+            }
+            for (row, v) in held.iter_mut().zip(p.drain(..)) {
+                if let Some(cell) = row.get_mut(*i) {
+                    *cell = v;
+                }
+            }
+        }
+        held
     }
 
     /// Masks the named top-level fields of MongoDB documents (strings, numbers and dates by their text; null stays).
@@ -433,6 +512,9 @@ mod tests {
         let mut rows: Vec<Vec<Option<String>>> =
             (0..20).map(|i| vec![Some(i.to_string())]).collect();
         m.batch(&mut rows);
+        // A table smaller than the pool: everything waits for the end.
+        assert!(rows.is_empty());
+        let rows = m.finish();
         let mut got: Vec<i32> = rows
             .iter()
             .map(|r| r[0].as_deref().unwrap().parse().unwrap())
@@ -451,5 +533,59 @@ mod tests {
             Some("2024-01-01T10:00")
         );
         assert!(Masker::new([0; 32], &[rule("x", MaskKind::Keep, None)], &cols).is_none());
+    }
+
+    /// The whole table is one permutation: values cross batches (row by row too, as the MySQL export sends them),
+    /// each value lands in exactly one row, and the same key and order give the same result.
+    #[test]
+    fn shuffle_mixes_the_whole_table_across_batches() {
+        let cols = vec!["id".to_string(), "x".to_string()];
+        let rules = [rule("x", MaskKind::Shuffle, None)];
+        let run = |batch: usize| {
+            let m = Masker::new([3; 32], &rules, &cols).unwrap();
+            let mut out: Vec<Vec<Option<String>>> = Vec::new();
+            let all: Vec<Vec<Option<String>>> = (0..20_000)
+                .map(|i| vec![Some(i.to_string()), Some(format!("v{i}"))])
+                .collect();
+            for chunk in all.chunks(batch) {
+                let mut b = chunk.to_vec();
+                m.batch(&mut b);
+                out.extend(b);
+            }
+            out.extend(m.finish());
+            out
+        };
+        let out = run(1000);
+        assert_eq!(out.len(), 20_000);
+        let mut vals: Vec<String> = out.iter().map(|r| r[1].clone().unwrap()).collect();
+        // Values travel across batches: many rows of the last batch got a value from the first half.
+        let far = out
+            .iter()
+            .filter(|r| r[0].as_deref().unwrap().parse::<u32>().unwrap() >= 19_000)
+            .filter(|r| r[1].as_deref().unwrap()[1..].parse::<u32>().unwrap() < 10_000)
+            .count();
+        assert!(far > 50, "only {far} values crossed from the first half");
+        // The id column is untouched and every value is there exactly once.
+        let mut ids: Vec<u32> = out
+            .iter()
+            .map(|r| r[0].as_deref().unwrap().parse().unwrap())
+            .collect();
+        ids.sort_unstable();
+        assert_eq!(ids, (0..20_000).collect::<Vec<_>>());
+        vals.sort();
+        let mut want: Vec<String> = (0..20_000).map(|i| format!("v{i}")).collect();
+        want.sort();
+        assert_eq!(vals, want);
+        // Same key, same order: the same result, whatever the batch size.
+        let key = |o: &Vec<Vec<Option<String>>>| {
+            let mut v: Vec<(String, String)> = o
+                .iter()
+                .map(|r| (r[0].clone().unwrap(), r[1].clone().unwrap()))
+                .collect();
+            v.sort();
+            v
+        };
+        assert_eq!(key(&out), key(&run(1000)));
+        assert_eq!(key(&out), key(&run(1)));
     }
 }

@@ -242,7 +242,6 @@ impl PgConn {
                         .simple_query("FETCH FORWARD 500 FROM dalan_export")
                         .await
                         .map_err(|e| map_error(&e))?;
-                    let mut got = 0;
                     let mut batch: Vec<Vec<Option<String>>> = msgs
                         .iter()
                         .filter_map(|m| match m {
@@ -254,12 +253,17 @@ impl PgConn {
                             _ => None,
                         })
                         .collect();
+                    // The source's count decides when it has ended (a shuffle hands back fewer rows than it took).
+                    let fetched = batch.len();
                     if let Some(m) = mask {
                         m.batch(&mut batch);
+                        if fetched < 500 {
+                            batch.extend(m.finish());
+                        }
                     }
+                    let got = fetched;
                     for row in &batch {
                         let r = RowView(row);
-                        got += 1;
                         let line = if matches!(format, ExportFormat::Csv | ExportFormat::Tsv) {
                             format!(
                                 "{}\n",
