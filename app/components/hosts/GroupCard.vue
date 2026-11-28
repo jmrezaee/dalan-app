@@ -5,16 +5,13 @@ import { cn } from '@/lib/utils'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 
 defineProps<{ label: string; hosts: number; groups?: number; dropTarget?: boolean }>()
-defineEmits<{ open: []; edit: []; delete: []; drop: [event: DragEvent]; dragover: [event: DragEvent]; dragleave: [] }>()
+defineEmits<{ open: []; edit: []; delete: [] }>()
 </script>
 
 <template>
   <div
     :class="cn('group flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-surface p-3 hover:border-muted/40 hover:bg-surface-raised', dropTarget && 'border-accent bg-accent/10')"
     @click="$emit('open')"
-    @dragover="$emit('dragover', $event)"
-    @dragleave="$emit('dragleave')"
-    @drop.prevent="$emit('drop', $event)"
   >
     <Folder class="size-5 shrink-0 text-accent" aria-hidden="true" />
     <button type="button" class="min-w-0 flex-1 text-left" @click.stop="$emit('open')">

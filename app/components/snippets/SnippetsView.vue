@@ -9,6 +9,7 @@ import { buttonVariants } from '@/components/ui/button'
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { vDrag, vDrop } from '~/utils/pointerDrag'
 
 const snippets = useSnippetsStore()
 const hosts = useHostsStore()
@@ -42,15 +43,16 @@ const targets = (s: SnippetSummary) => (s.target_host_ids.length ? s.target_host
 
 // ---- drag a snippet onto a package
 const dropOn = ref('')
-function onDrop(e: DragEvent, packageId: string | null) {
-  dropOn.value = ''
-  const id = e.dataTransfer?.getData('application/x-dalan-snippet')
-  const s = snippets.snippets.find(x => x.id === id)
-  if (s) {
-    e.preventDefault()
-    void snippets.move(s, packageId)
-  }
-}
+const dropAt = (packageId: string | null) => ({
+  kind: 'snippet',
+  over: () => { dropOn.value = packageId ?? 'none' },
+  leave: () => { dropOn.value = '' },
+  drop: (id: unknown) => {
+    dropOn.value = ''
+    const s = snippets.snippets.find(x => x.id === id)
+    if (s) void snippets.move(s, packageId)
+  },
+})
 
 // ---- package create / rename
 const pkgOpen = ref(false)
@@ -115,10 +117,8 @@ function snippetMenu(s: (typeof snippets.snippets)[number]): MenuItem[] {
 
     <div v-else class="flex max-w-[760px] flex-col gap-5">
       <section
-        v-for="g in groups" :key="g.id ?? 'none'" class="flex flex-col gap-1.5 rounded-lg" :class="dropOn === (g.id ?? 'none') && 'ring-2 ring-accent'"
-        @dragover="(e: DragEvent) => { if (e.dataTransfer?.types.includes('application/x-dalan-snippet')) { e.preventDefault(); dropOn = g.id ?? 'none' } }"
-        @dragleave="dropOn = ''"
-        @drop="(e: DragEvent) => onDrop(e, g.id)"
+        v-for="g in groups" :key="g.id ?? 'none'" v-drop="dropAt(g.id)" class="flex flex-col gap-1.5 rounded-lg"
+        :class="dropOn === (g.id ?? 'none') && 'ring-2 ring-accent'"
       >
         <h2 class="flex items-center gap-2 text-xs font-medium text-muted">
           {{ g.label }}
@@ -131,9 +131,8 @@ function snippetMenu(s: (typeof snippets.snippets)[number]): MenuItem[] {
         <ContextMenu v-for="s in g.items" :key="s.id">
           <ContextMenuTrigger as-child>
         <div
+          v-drag="{ kind: 'snippet', data: s.id, label: s.label }"
           class="flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5 hover:border-muted/40 hover:bg-surface-raised"
-          draggable="true"
-          @dragstart="(e: DragEvent) => e.dataTransfer?.setData('application/x-dalan-snippet', s.id)"
         >
           <button type="button" class="flex min-w-0 flex-1 flex-col text-left" @click="openSheet(s)">
             <span class="font-medium">{{ s.label }}</span>

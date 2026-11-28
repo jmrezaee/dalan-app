@@ -4,6 +4,7 @@
 import { File, Folder, Link2 } from '@lucide/vue'
 import type { FsEntry } from '~/types/bindings'
 import { cn } from '@/lib/utils'
+import { vDrag } from '~/utils/pointerDrag'
 import { formatBytes, formatMode, formatModified } from '~/utils/format'
 import type { Pane } from '~/stores/sftp'
 
@@ -62,12 +63,17 @@ function onBlankContext(ev: MouseEvent) {
   emit('context', null, ev)
 }
 
-function start(ev: DragEvent, e: FsEntry) {
-  const names = props.selected.includes(e.name) ? props.selected : [e.name]
-  emit('update:selected', names)
-  ev.dataTransfer?.setData('text/plain', names.join('\n'))
-  if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'copy'
-  emit('dragstart', names)
+// The rows being dragged: the selection when the row is in it, else that row alone (worked out when the drag starts).
+const rowsFor = (e: FsEntry) => (props.selected.includes(e.name) ? props.selected : [e.name])
+const dragSpec = (e: FsEntry) => {
+  const n = rowsFor(e)
+  return {
+    kind: 'sftp-files',
+    data: n,
+    label: n.length === 1 ? n[0] : `${n.length} items`,
+    start: () => { emit('update:selected', n); emit('dragstart', n) },
+    end: () => emit('dragend'),
+  }
 }
 
 const arrow = (by: Pane['sort']['by']) => (props.sort.by === by ? (props.sort.desc ? ' ↓' : ' ↑') : '')
@@ -89,18 +95,16 @@ const arrow = (by: Pane['sort']['by']) => (props.sort.by === by ? (props.sort.de
         <tr
           v-for="e in shown"
           :key="e.name"
+          v-drag="dragSpec(e)"
           :data-testid="tid(`file-row-${e.name}`)"
           role="row"
           tabindex="0"
-          draggable="true"
           :aria-selected="selected.includes(e.name)"
-          :class="cn('h-7 cursor-default select-none whitespace-nowrap outline-none [-webkit-user-drag:element]', selected.includes(e.name) ? 'bg-accent/15' : 'hover:bg-surface-hover')"
+          :class="cn('h-7 cursor-default select-none whitespace-nowrap outline-none', selected.includes(e.name) ? 'bg-accent/15' : 'hover:bg-surface-hover')"
           @click="select(e, $event)"
           @dblclick="emit('open', e)"
           @keydown.enter="emit('open', e)"
           @keydown.space.prevent="select(e, $event)"
-          @dragstart="start($event, e)"
-          @dragend="emit('dragend')"
           @contextmenu="(select(e, $event), emit('context', e, $event))"
         >
           <td class="px-2.5">
