@@ -273,6 +273,8 @@ export const commands = {
 	 *  fetched into a private folder here and read like a local one; a saved restore fetches it again from the host.
 	 */
 	restorePickRemote: (connId: string, sftpId: string, hostId: string, path: string) => typedError<DumpInfo_Serialize, AppError>(__TAURI_INVOKE("restore_pick_remote", { connId, sftpId, hostId, path })),
+	/**  The file dropped on the window (`FileDropped`'s id), read like a picked one. Taken once. */
+	restorePickDropped: (connId: string, dropId: string) => typedError<DumpInfo_Serialize, AppError>(__TAURI_INVOKE("restore_pick_dropped", { connId, dropId })),
 	/**  Stop: the running statement is cancelled by the server (a second connection), and no further statement starts. */
 	sqlCancel: (connId: string, editorId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_cancel", { connId, editorId })),
 	/**  The editor tab closed. */
@@ -538,6 +540,7 @@ export const commands = {
 /** Events */
 export const events = {
 	autoLockWarning: makeEvent<AutoLockWarning, AutoLockWarning>("auto-lock-warning"),
+	fileDropped: makeEvent<FileDropped, FileDropped>("file-dropped"),
 	jobsChanged: makeEvent<JobsChanged, JobsChanged>("jobs-changed"),
 	linkReceived: makeEvent<LinkReceived, LinkReceived>("link-received"),
 	quitRequested: makeEvent<QuitRequested, QuitRequested>("quit-requested"),
@@ -1801,6 +1804,12 @@ export type ExportOptions_Serialize = {
 export type FailKind = "error" | "timeout" | "cancelled";
 
 export type Family = "pg" | "my";
+
+/**  A file was dropped on the window. Only its name comes here; the path stays in Rust under `id`. */
+export type FileDropped = {
+	id: string,
+	name: string,
+};
 
 export type ForwardInput = ForwardInput_Serialize | ForwardInput_Deserialize;
 

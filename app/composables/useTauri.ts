@@ -191,6 +191,7 @@ export function useTauri() {
     jobSetSchedule: (jobId: string, schedule: Schedule | null, retention: Retention | null) => unwrap(commands.jobSetSchedule(jobId, schedule, retention)),
     jobSchedulePreview: (every: Every) => unwrap(commands.jobSchedulePreview(every)),
     restorePickRemote: (connId: string, sftpId: string, hostId: string, path: string) => unwrap(commands.restorePickRemote(connId, sftpId, hostId, path)),
+    restorePickDropped: (connId: string, dropId: string) => unwrap(commands.restorePickDropped(connId, dropId)),
     jobSetup: (jobId: string) => unwrap(commands.jobSetup(jobId)),
     restorePickJob: (connId: string, jobId: string) => unwrap(commands.restorePickJob(connId, jobId)),
     jobBackupRun: (connId: string, jobId: string, transferId: string, onProgress: (p: TransferProgress) => void) => {

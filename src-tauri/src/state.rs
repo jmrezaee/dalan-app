@@ -92,6 +92,9 @@ pub struct AppState {
     pub sql: crate::sql::SqlManager,
     /// D15: the scheduler started by the latest unlock; an older loop sees a newer number and ends.
     pub scheduler_gen: std::sync::atomic::AtomicU64,
+    /// A file dropped on the window (drag and drop from Finder): its id and path. The path stays here; the window
+    /// gets the id and the file name, and a database tab takes it with `restore_pick_dropped`. One at a time.
+    pub dropped: std::sync::Mutex<Option<(String, std::path::PathBuf)>>,
 }
 
 impl AppState {
@@ -110,6 +113,7 @@ impl AppState {
             redis: crate::redis::RedisManager::default(),
             sql: crate::sql::SqlManager::default(),
             scheduler_gen: std::sync::atomic::AtomicU64::new(0),
+            dropped: std::sync::Mutex::new(None),
         }
     }
 

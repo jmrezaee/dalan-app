@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import type { RestoreOptions_Serialize as SavedRestore, DumpInfo_Serialize as DumpInfo, RestoreOptions_Deserialize as RestoreOptions, RestorePlan_Serialize as RestorePlan, RestoreProgress_Serialize as RestoreProgress, RestoreResult_Serialize as RestoreResult } from '~/types/bindings'
 import { useTauri } from '~/composables/useTauri'
+import { events } from '~/types/bindings'
 
 /** S48's steps, in order. */
 export type RestoreStep = 'file' | 'inside' | 'target' | 'review' | 'progress' | 'result'
@@ -72,6 +73,21 @@ function setup() {
         options.source_database = d.databases.length > 1 ? (d.databases.find(x => x === d.source_db) ?? d.databases[0] ?? null) : null
         step.value = 'inside'
       }
+    }
+    catch (e) { error.value = message(e, 'Couldn\'t read that file.') }
+    busy.value = false
+  }
+
+  /** A file dropped on the window (its id; the path stays in Rust), read like a picked one. */
+  async function pickDropped(dropId: string) {
+    error.value = ''
+    busy.value = true
+    try {
+      const d = await api.restorePickDropped(connId.value, dropId)
+      if (dump.value) void api.restoreForget(connId.value, dump.value.id).catch(() => {})
+      dump.value = d
+      options.source_database = d.databases.length > 1 ? (d.databases.find(x => x === d.source_db) ?? d.databases[0] ?? null) : null
+      step.value = 'inside'
     }
     catch (e) { error.value = message(e, 'Couldn\'t read that file.') }
     busy.value = false
@@ -183,7 +199,7 @@ function setup() {
   /** After a restore into a new database: save it as a database (a copy of this one's connection) to open it. */
   const saveDatabase = (name: string) => api.restoreSaveDatabase(connId.value, name)
 
-  return { jobId, saved, startJob, saveJob, connId, open, step, busy, error, dump, plan, progress, result, typed, options, selected, startedAt, start, pick, pickRemote, review, commit, stop, close, saveDatabase }
+  return { jobId, saved, startJob, saveJob, connId, open, step, busy, error, dump, plan, progress, result, typed, options, selected, startedAt, start, pick, pickRemote, pickDropped, review, commit, stop, close, saveDatabase }
 }
 
 const makeStore = (key: string) => defineStore(`restore:${key}`, setup)
@@ -193,6 +209,30 @@ const stores = new Map<string, ReturnType<typeof makeStore>>()
 export function useRestoreStore(tabKey: string) {
   if (!stores.has(tabKey)) stores.set(tabKey, makeStore(tabKey))
   return stores.get(tabKey)!()
+}
+
+/** A file dropped on the window, waiting for the database tab in front to take it (`takeDrop`). */
+export const droppedFile = ref<{ id: string, name: string } | null>(null)
+let listeningDrops = false
+/** Listens once for files dropped on the window (Rust keeps the path). A plain browser has no events. */
+export function listenDrops() {
+  if (listeningDrops) return
+  listeningDrops = true
+  events.fileDropped.listen((e) => {
+    droppedFile.value = e.payload
+    // Nothing takes it when no database tab is in front: it is not kept for a tab opened later.
+    setTimeout(() => { if (droppedFile.value?.id === e.payload.id) droppedFile.value = null }, 0)
+  }).catch(() => {})
+}
+/** The database tab in front takes a dropped file: its Transfer tab opens with the restore dialog reading it. */
+export function takeDrop(tabKey: string, connId: string, production: boolean, openTransfer: () => void) {
+  const f = droppedFile.value
+  if (!f) return
+  droppedFile.value = null
+  openTransfer()
+  const r = useRestoreStore(tabKey)
+  r.start(connId, production)
+  void r.pickDropped(f.id)
 }
 
 /** Databases whose tab should open its restore dialog once connected ("Restore a dump…" in the database list). */

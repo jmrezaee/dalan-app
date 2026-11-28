@@ -44,6 +44,10 @@ watch(() => store.status === 'ready' && restoreRequests.value.has(props.dbId), (
   store.openTransfer()
   useRestoreStore(props.tabKey).start(store.connId, db.value?.environment === 'production')
 }, { immediate: true })
+// A dump dropped on the window from Finder goes to the database tab in front.
+watch(() => props.active && store.status === 'ready' && !!droppedFile.value, (go) => {
+  if (go) takeDrop(props.tabKey, store.connId, db.value?.environment === 'production', () => store.openTransfer())
+}, { immediate: true })
 const name = computed(() => db.value?.name ?? 'this database')
 const routeText = computed(() => {
   const d = db.value
