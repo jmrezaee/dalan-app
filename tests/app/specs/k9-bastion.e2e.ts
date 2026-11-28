@@ -23,6 +23,8 @@ async function openThrough(name: string) {
 
 describe('K9: a team round trip through a bastion', function () {
   this.timeout(900_000)
+  // The shared test server goes back to having no client tools (other tests check the "not installed" message).
+  after(() => { sh('docker exec dalan-test-ssh sh -c "apk del postgresql16-client mariadb-client >/dev/null 2>&1 || true"') })
   before(async () => {
     // Staging and production differ: production has a column staging lacks, and one order differs.
     for (const db of ['k9_staging', 'k9_prod', 'k9_restored', 'k9_masked', 'k9_from_my']) psql('shop', `drop database if exists ${db}`)
