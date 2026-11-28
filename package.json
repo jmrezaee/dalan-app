@@ -80,6 +80,8 @@
     "dev": "node scripts/sync-tokens.mjs && nuxt dev",
     "build": "node scripts/sync-tokens.mjs && nuxt generate",
     "tauri": "tauri",
+    "dev:app": "tauri dev --config src-tauri/tauri.dev.conf.json",
+    "build:debug": "tauri build --debug --bundles app --config src-tauri/tauri.dev.conf.json",
     "lint": "eslint .",
     "typecheck": "nuxt prepare && vue-tsc -b --noEmit && tsc -p tests/tsconfig.json && tsc -p tests/app/tsconfig.json",
     "test": "vitest run",

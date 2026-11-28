@@ -1,6 +1,6 @@
 use serde::Serialize;
 use specta::Type;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::error::{AppError, AppResult};
 
@@ -15,10 +15,7 @@ pub struct AppInfo {
 #[tauri::command]
 #[specta::specta]
 pub fn app_info(app: AppHandle) -> AppResult<AppInfo> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| AppError::internal(e.to_string()))?;
+    let dir = crate::datadir::data_dir(&app)?;
     Ok(AppInfo {
         version: app.package_info().version.to_string(),
         data_dir: dir.display().to_string(),

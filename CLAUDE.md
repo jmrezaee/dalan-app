@@ -47,7 +47,11 @@ A personal desktop SSH client for Mehrdad and his team. It is a clean-room rebui
    - No "accept all" setting.
 6. **Types are generated, not hand-written.** Generate the TS types for commands and events from Rust (tauri-specta or ts-rs) into `app/types/bindings.ts`.
 7. **Errors are one shape.** `AppError` serialises to `{ code, message }`. Use the codes listed in `architecture.md`. The UI maps codes to friendly copy.
-8. **Clean room.**
+8. **Never touch Mehrdad's own Dalan.** His installed app (`/Applications/Dalan.app`, id `app.dalan.desktop`) holds his real vault in `~/Library/Application Support/app.dalan.desktop`.
+   - Every debug build (`pnpm dev:app`, `pnpm build:debug`, `pnpm tauri dev`, the test runners) uses its own data folder: `src-tauri/src/datadir.rs` puts it in `app.dalan.desktop.dev`, or in `DALAN_DATA_DIR`. It never opens the release folder. A newer build migrates the database forward, and the released app then can't start. That happened on 2026-11-28.
+   - Build and run debug apps with `pnpm dev:app` / `pnpm build:debug`: they use `src-tauri/tauri.dev.conf.json` ("Dalan Dev", `app.dalan.desktop.dev`), so they share neither the bundle id, the WebKit data nor single-instance with the real app.
+   - No automation launches `/Applications/Dalan.app` or reads or writes his real data folder. To look at it, copy it first and work on the copy.
+9. **Clean room.**
    - Do not fetch, read or copy the original app's bundle, private APIs, icons, illustrations, theme names or UI copy.
    - Outside `replica/`, never write the original's name or domain anywhere: code, comments, commits, the README or the UI.
    - `python3 replica/sweep.py . --config replica/brand.json` must pass (exit 0). Run it in CI.
@@ -84,7 +88,8 @@ A personal desktop SSH client for Mehrdad and his team. It is a clean-room rebui
 ```bash
 nvm use 24.12.0
 pnpm install
-pnpm tauri dev            # app with hot reload (UI on :4000)
+pnpm dev:app             # app with hot reload (UI on :4000), as "Dalan Dev" with its own data
+pnpm build:debug          # debug .app bundle, "Dalan Dev"
 pnpm tauri build          # release bundle
 pnpm lint && pnpm typecheck
 pnpm test                 # Vitest (UI)

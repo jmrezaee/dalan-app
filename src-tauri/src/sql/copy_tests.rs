@@ -728,10 +728,7 @@ async fn l3_shuffle_is_one_permutation_of_the_whole_table_on_every_path() {
             .lines()
             .filter(|l| !l.trim().is_empty())
             .map(|l| {
-                let (a, b) = l
-                    .trim()
-                    .split_once(['|', '\t'])
-                    .unwrap();
+                let (a, b) = l.trim().split_once(['|', '\t']).unwrap();
                 (a.trim().parse().unwrap(), b.trim()[1..].parse().unwrap())
             })
             .collect();

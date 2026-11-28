@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod ai;
 pub mod commands;
+pub mod datadir;
 pub mod db;
 pub mod dbs;
 pub mod diagnostics;
@@ -357,7 +358,8 @@ pub fn run() {
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
-            let dir = app.path().app_data_dir()?;
+            // Debug builds keep their own folder: never the released app's vault (see datadir.rs).
+            let dir = datadir::data_dir(app.handle())?;
             perms::private_dir(&dir)?;
             // Edited-file copies from a previous run are stale: nothing is watching them any more.
             let _ = std::fs::remove_dir_all(dir.join("edit-tmp"));
