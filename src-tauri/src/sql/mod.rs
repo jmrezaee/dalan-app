@@ -897,6 +897,18 @@ impl SqlManager {
         Ok(conn_id)
     }
 
+    /// PostgreSQL: the server's major version (`None` for other engines or when it can't be read).
+    pub async fn server_major(&self, conn_id: &str) -> Option<u32> {
+        let c = self.pg(conn_id).await.ok()?;
+        let v: String = c
+            .client
+            .query_one("show server_version_num", &[])
+            .await
+            .ok()?
+            .get(0);
+        v.parse::<u32>().ok().map(|n| n / 10_000)
+    }
+
     pub fn respond(&self, conn_id: &str, prompt_id: &str, answer: PromptAnswer) -> AppResult<()> {
         self.get(conn_id)?.prompts.answer(prompt_id, answer)
     }

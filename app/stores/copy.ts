@@ -150,6 +150,10 @@ function setup() {
     saved.value = ''
     try {
       const row = await api.jobSaveCopy(sourceConnId, name, request(targetConnId))
+      // The copy under review becomes the job's first run: planned again with the job's masking key, so its fakes
+      // and hashes are the ones every later run makes, and the run is recorded.
+      jobId.value = row.id
+      await review(sourceConnId, targetConnId)
       saved.value = `Saved as the job “${row.name}”. Run it again from Jobs.`
       void useJobsStore().refresh()
     }
@@ -174,6 +178,8 @@ function setup() {
 
   function reset() {
     saved.value = ''
+    jobId.value = null
+    autoReview.value = false
     step.value = 'choose'
     plan.value = null
     report.value = null

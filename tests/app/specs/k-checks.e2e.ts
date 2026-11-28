@@ -27,17 +27,23 @@ function answer(kind: 'open' | 'folder' | 'save', path: string) {
 const FIX = '/work/tests/fixtures/dumps'
 
 async function clickText(scope: string, text: string) {
-  const el = await $(`${scope}//*[(self::button or @role="radio" or @role="tab" or self::a or self::label) and contains(normalize-space(.),"${text}")]`)
+  const el = await $(`(${scope}//*[(self::button or @role="radio" or @role="tab" or self::a or self::label) and contains(normalize-space(.),"${text}")])[last()]`)
   await el.waitForClickable()
   await el.click()
 }
+// A toast can sit over the tab strip or the sidebar; these clicks go to the element's own handler.
+async function jsClick(sel: string) {
+  const el = await $(sel)
+  await el.waitForExist()
+  await browser.execute((e: HTMLElement) => e.click(), el as unknown as HTMLElement)
+  await browser.pause(300)
+}
 async function vault() {
-  const tab = await $('//*[@role="tab"][normalize-space(.)="Vault"]')
-  if (await tab.isDisplayed()) await tab.click()
+  if (await $('//*[@role="tab"][normalize-space(.)="Vault"]').isDisplayed()) await jsClick('//*[@role="tab"][normalize-space(.)="Vault"]')
 }
 async function nav(section: string) {
   await vault()
-  await $(`//nav[@aria-label="Vault"]//a[contains(normalize-space(.),"${section}")]`).click()
+  await jsClick(`//nav[@aria-label="Vault"]//a[contains(normalize-space(.),"${section}")]`)
 }
 
 /** Saves a database with the form (TLS off) and opens it in a tab. */
@@ -52,8 +58,14 @@ async function addDb(d: { engine: 'PostgreSQL' | 'MySQL' | 'MongoDB', name: stri
   await browser.pause(600)
   await type($('#db-name'), d.name)
   if (d.environment) await clickText('//*[@role="radiogroup"][@aria-label="Environment"]', d.environment)
-  await type($('#db-address'), d.address)
-  await type($('#db-port'), String(d.port))
+  // MongoDB takes members as address:port.
+  if (d.engine === 'MongoDB') {
+    await type($('#db-address'), `${d.address}:${d.port}`)
+  }
+  else {
+    await type($('#db-address'), d.address)
+    await type($('#db-port'), String(d.port))
+  }
   if (await $('#db-database').isExisting()) await type($('#db-database'), d.database)
   if (d.engine === 'MongoDB') await type($('#db-auth'), 'admin')
   await type($('#db-user'), d.user)
@@ -71,15 +83,24 @@ async function openDb(name: string) {
   await row.$('td:first-child').click()
   await browser.execute((id: string) => (document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null)?.focus(), `database-row-${name}`)
   await browser.keys('Enter')
-  const tab = d => $(`[data-testid="sql-tab-${d}"], [data-testid="mongo-tab-${d}"]`)
+  const tab = (d: string) => $(`[data-testid="sql-tab-${d}"], [data-testid="mongo-tab-${d}"]`)
   await (await tab(name)).waitForDisplayed({ timeout: 30_000 })
   await browser.waitUntil(async () => (await $(`[data-testid="sql-tab-${name}"] [role="tree"], [data-testid="mongo-tab-${name}"] [role="tree"]`).isDisplayed()), { timeout: 30_000 })
 }
 async function toTab(name: string) {
-  await $(`//*[@role="tab"][.//text()[normalize-space(.)="${name}"]]`).click()
+  await jsClick(`//*[@role="tab"][.//text()[normalize-space(.)="${name}"]]`)
 }
 
-describe('hand checks K1 to K7 on the real app', () => {
+// The Transfer tab's buttons move once the dump tool's version line arrives; wait for it before clicking them.
+async function openTransfer(tab: string) {
+  await inTab(tab, 'sql-open-transfer').click()
+  await browser.waitUntil(async () => /pg_dump|mysqldump|mariadb-dump|not found/i.test(await txt($(`[data-testid="sql-tab-${tab}"]`))), { timeout: 30_000 })
+  await browser.pause(400)
+}
+
+describe('hand checks K1 to K7 on the real app', function () {
+  // Restores, copies and a schedule that waits minutes: longer than the usual two.
+  this.timeout(600_000)
   before(async () => {
     for (const db of ['k1_restored', 'k2_copy', 'k7_bulk']) psql('shop', `drop database if exists ${db}`)
     for (const db of ['k3', 'k4']) mysql(`drop database if exists ${db}`)
@@ -92,7 +113,7 @@ describe('hand checks K1 to K7 on the real app', () => {
 
   it('K1: a pg_dump custom archive restores into a new database after showing what is inside', async () => {
     await addDb({ engine: 'PostgreSQL', name: 'pg', address: 'pg', port: 5432, database: 'shop', user: 'app', password: 'test-pg' })
-    await inTab('pg', 'sql-open-transfer').click()
+    await openTransfer('pg')
     await inTab('pg', 'sql-restore').click()
     answer('open', `${FIX}/pg16.custom`)
     await tid('restore-pick-file').click()
@@ -116,10 +137,10 @@ describe('hand checks K1 to K7 on the real app', () => {
   it('K2: a copy into a new database on the same server brings keys, the view and the rows', async () => {
     const t = 'pg · k1_restored'
     await inTab(t, 'sql-open-copy').click()
-    await $(`[data-testid="sql-tab-${t}"] [aria-label="Target database"]`).selectByVisibleText('pg')
+    await $(`[data-testid="sql-tab-${t}"] [aria-label="Target database"]`).selectByVisibleText('pg · PostgreSQL')
     await $(`[data-testid="sql-tab-${t}"] [aria-label="Copy public.customers"]`).click()
     await $(`[data-testid="sql-tab-${t}"] [aria-label="Copy public.orders"]`).click()
-    await $(`[data-testid="sql-tab-${t}"] [aria-label="Into a new database on that server"]`).click()
+    await clickText(`//*[@data-testid="sql-tab-${t}"]`, 'Into a new database on that server')
     await type($(`[data-testid="sql-tab-${t}"] [aria-label="New database name"]`), 'k2_copy')
     await inTab(t, 'copy-review').click()
     await inTab(t, 'copy-run').waitForClickable({ timeout: 30_000 })
@@ -159,6 +180,8 @@ describe('hand checks K1 to K7 on the real app', () => {
     await clickText(`//*[@data-testid="sql-tab-${t}"]`, 'Save as a job…')
     await type($(`[data-testid="sql-tab-${t}"] [aria-label="Job name"]`), 'k4 copy')
     await inTab(t, 'copy-save-job').click()
+    // Saving plans the copy again with the job's key; it says so when that is done.
+    await browser.waitUntil(async () => (await txt(inTab(t, 'copy-tab'))).includes('Saved as the job “k4 copy”'), { timeout: 30_000 })
     await inTab(t, 'copy-run').click()
     await browser.waitUntil(async () => (await txt(inTab(t, 'copy-report'))).includes('Copied into k4'), { timeout: 120_000 })
     const real = psql('k1_restored', 'select string_agg(email, \',\' order by id) from public.customers')
@@ -208,7 +231,7 @@ describe('hand checks K1 to K7 on the real app', () => {
 
   it('K7: a backup reads back and checks out in a scratch database; bulk export and import; MongoDB import', async () => {
     await toTab('pg')
-    await inTab('pg', 'sql-open-transfer').click()
+    await openTransfer('pg')
     answer('save', '/tmp/k7-shop.dump')
     await clickText('//*[@data-testid="sql-tab-pg"]//*[@aria-label="Backup"]', 'Back up…')
     await browser.waitUntil(async () => (await $('//*[@data-testid="sql-tab-pg"]//*[@data-part="read-check"]').isExisting()), { timeout: 120_000 })
@@ -231,6 +254,9 @@ describe('hand checks K1 to K7 on the real app', () => {
     // Bulk export of two tables into a folder, then back into a fresh database.
     sh('rm -rf /tmp/k7out && mkdir -p /tmp/k7out')
     answer('folder', '/tmp/k7out')
+    // The export lists the tables of the schemas open in the tree: open k6a.
+    await $('//*[@data-testid="sql-tab-pg"]//*[@role="tree"]//*[@role="treeitem"][.//text()[normalize-space(.)="k6a"]]').click()
+    await browser.pause(800)
     const ex = '//*[@data-testid="sql-tab-pg"]//*[@data-testid="bulk-export"]'
     await $(`${ex}//label[contains(normalize-space(.),"k6a.big")]`).click()
     await $(`${ex}//label[contains(normalize-space(.),"k6a.t")]`).click()
@@ -244,7 +270,7 @@ describe('hand checks K1 to K7 on the real app', () => {
 
     psql('shop', 'create database k7_bulk')
     await addDb({ engine: 'PostgreSQL', name: 'k7', address: 'pg', port: 5432, database: 'k7_bulk', user: 'app', password: 'test-pg' })
-    await inTab('k7', 'sql-open-transfer').click()
+    await openTransfer('k7')
     answer('folder', `/tmp/k7out/${folder}`)
     const im = '//*[@data-testid="sql-tab-k7"]//*[@data-testid="bulk-import"]'
     await clickText(im, 'Choose a folder…')
@@ -257,7 +283,7 @@ describe('hand checks K1 to K7 on the real app', () => {
     expect(psql('k7_bulk', 'select count(*) from public.big')).toBe('50000')
 
     // MongoDB: extended JSON with an ObjectId and a date, inserted; again as an upsert.
-    mongo('db.getSiblingDB("k7").dropDatabase()')
+    mongo('db.getSiblingDB("k7").dropDatabase(); db.getSiblingDB("k7").seed.insertOne({ x: 1 })')
     writeFileSync('/tmp/k7-items.jsonl', '{"_id": {"$oid": "5f1d7f3e9b1e8a3b2c4d5e6f"}, "sku": "a", "at": {"$date": "2026-01-01T00:00:00Z"}}\n{"sku": "b", "qty": 2}\n')
     await addDb({ engine: 'MongoDB', name: 'mongo', address: 'mongo', port: 27017, database: 'k7', user: 'app', password: 'test-mongo' })
     await $('[data-testid="mongo-tab-mongo"] [data-testid="mongo-open-transfer"]').click()
@@ -265,7 +291,8 @@ describe('hand checks K1 to K7 on the real app', () => {
     const mi = '//*[@data-testid="mongo-tab-mongo"]//*[@data-testid="mongo-import"]'
     await clickText(mi, 'Choose a file…')
     await $(`${mi}//*[@data-part="mg-preview"]`).waitForDisplayed()
-    await $(`${mi}//select[@aria-label="Database to import into"]`).selectByVisibleText('k7').catch(() => {})
+    await $(`${mi}//select[@aria-label="Database to import into"]`).selectByVisibleText('k7')
+    await $(`${mi}//input[@aria-label="Collection to import into"]`).setValue('items')
     await $(`${mi}//*[@data-testid="mongo-import-review"]`).click()
     await $(`${mi}//*[@data-testid="mongo-import-commit"]`).click()
     await browser.waitUntil(async () => (await $(`${mi}//*[@data-part="mg-report"]`).isExisting()), { timeout: 60_000 })
@@ -278,7 +305,7 @@ describe('hand checks K1 to K7 on the real app', () => {
     const a = servers().a!
     sh('docker exec dalan-test-ssh sh -c "rm -rf /tmp/k5 && mkdir -p /tmp/k5 && chown -R test /tmp/k5" 2>/dev/null || true')
     await toTab('pg')
-    await inTab('pg', 'sql-open-transfer').click()
+    await openTransfer('pg')
     const b = '//*[@data-testid="sql-tab-pg"]//*[@aria-label="Backup"]'
     await clickText(b, 'Save as a job…')
     await type($(`${b}//*[@aria-label="Job name"]`), 'k5')
@@ -295,7 +322,10 @@ describe('hand checks K1 to K7 on the real app', () => {
     await $(`${b}//*[@data-testid="backup-save-job-host"]`).click()
     await tid('host-picker').$('select[aria-label="Host"]').selectByVisibleText('server a')
     await clickText('//*[@data-testid="host-picker"]', 'Connect')
-    const trust = await $('//*[@data-testid="host-picker"]//button[normalize-space(.)="Trust and connect"]')
+    // The new host's key is asked about first (it arrives a moment after Connect).
+    const trust = $('//*[@data-testid="host-picker"]//button[normalize-space(.)="Trust and connect"]')
+    const folder = tid('host-picker').$('[aria-label="Folder on the host"]')
+    await browser.waitUntil(async () => (await trust.isExisting()) || (await folder.isExisting()), { timeout: 30_000 })
     if (await trust.isExisting()) await trust.click()
     await type(tid('host-picker').$('[aria-label="Folder on the host"]'), '/tmp/k5')
     await browser.keys('Enter')

@@ -246,8 +246,8 @@ const radio = 'flex items-start gap-2 text-sm'
           <div v-if="!store.jobId && !p.blocked" class="flex items-center gap-2 text-xs">
             <template v-if="naming"><Input v-model="jobName" class="h-7 w-56 text-xs" placeholder="Restore last night's dump" aria-label="Job name" /><Button size="sm" :disabled="!jobName.trim()" :data-testid="tid('restore-save-job')" @click="store.saveJob(jobName); naming = false">Save</Button></template>
             <Button v-else size="sm" variant="ghost" @click="naming = true">Save as a job…</Button>
-            <span v-if="store.saved" role="status" class="text-success">{{ store.saved }}</span>
           </div>
+          <p v-if="store.saved" role="status" class="text-xs text-success">{{ store.saved }}</p>
           <label v-if="p.level === 'typed' && !p.blocked" class="flex flex-col gap-1 text-xs text-muted">Type {{ p.typed_name }} to confirm
             <Input v-model="store.typed" class="font-mono text-xs text-text" autocomplete="off" spellcheck="false" :data-testid="tid('restore-typed')" @keydown.enter.prevent="typedOk && store.commit()" />
           </label>

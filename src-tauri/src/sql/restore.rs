@@ -278,14 +278,9 @@ pub fn needs_older_restore(tool_major: u32, server_major: u32) -> bool {
     tool_major >= 17 && server_major > 0 && server_major < 17
 }
 
-/// Where a pg_restore of one major version usually lives (Debian, Homebrew on Apple and Intel Macs, Postgres.app).
+/// Where a pg_restore of one major version usually lives.
 pub fn versioned_pg_restore(major: u32) -> Vec<String> {
-    vec![
-        format!("/usr/lib/postgresql/{major}/bin/pg_restore"),
-        format!("/opt/homebrew/opt/postgresql@{major}/bin/pg_restore"),
-        format!("/usr/local/opt/postgresql@{major}/bin/pg_restore"),
-        format!("/Applications/Postgres.app/Contents/Versions/{major}/bin/pg_restore"),
-    ]
+    backup::versioned_pg_tool("pg_restore", major)
 }
 
 /// The candidates for the tool, as `backup.rs` names them.

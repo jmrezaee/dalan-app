@@ -163,6 +163,8 @@ function setup() {
     error.value = ''
     try {
       const row = await api.jobSaveRestore(connId.value, d.id, name, optionsForRequest())
+      // This restore, if it runs now, is the job's first run.
+      jobId.value = row.id
       saved.value = `Saved as the job “${row.name}”. Run it again from Jobs.`
       void useJobsStore().refresh()
     }

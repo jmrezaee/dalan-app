@@ -39,12 +39,18 @@ pub async fn vault_status(state: State<'_, AppState>) -> AppResult<VaultStatus> 
 /// F10: derive the key, write the vault row, and leave the vault unlocked.
 #[tauri::command]
 #[specta::specta]
-pub async fn vault_create(state: State<'_, AppState>, master_password: String) -> AppResult<()> {
+pub async fn vault_create(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    master_password: String,
+) -> AppResult<()> {
     let pw = Zeroizing::new(master_password);
     let session = state
         .with_db(move |c| vault::create(c, &pw, KdfParams::default()))
         .await?;
     state.set_session(Some(session));
+    // A new vault is unlocked too: jobs scheduled before the next lock must run (K5 found they didn't).
+    crate::dbs::scheduler::start(&app);
     Ok(())
 }
 

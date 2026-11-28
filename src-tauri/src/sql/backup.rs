@@ -374,6 +374,42 @@ pub struct Run<'a> {
     pub progress: &'a (dyn Fn(f64) + Sync),
     pub log: &'a (dyn Fn(String) + Sync),
     pub stop: &'a AtomicBool,
+    /// PostgreSQL: the server's major version, so a dump is made with a pg_dump that doesn't write settings the
+    /// server (or a pg_restore of its version) can't take. `None` when it isn't known.
+    pub server_major: Option<u32>,
+}
+
+/// Where a PostgreSQL tool of one major version usually lives (Debian, Homebrew on Apple and Intel Macs,
+/// Postgres.app).
+pub fn versioned_pg_tool(name: &str, major: u32) -> Vec<String> {
+    vec![
+        format!("/usr/lib/postgresql/{major}/bin/{name}"),
+        format!("/opt/homebrew/opt/postgresql@{major}/bin/{name}"),
+        format!("/usr/local/opt/postgresql@{major}/bin/{name}"),
+        format!("/Applications/Postgres.app/Contents/Versions/{major}/bin/{name}"),
+    ]
+}
+
+/// The PostgreSQL tool to run against a server of `server_major`: the usual one, unless it is 17 or later and the
+/// server is older (pg_dump and pg_restore 17 write `SET transaction_timeout`, which those servers refuse) and a
+/// client of the server's own version is installed.
+pub async fn pg_tool_for(ssh: Option<&Connected>, name: &str, server_major: Option<u32>) -> String {
+    let Some(server) = server_major.filter(|m| *m > 0 && *m < 17) else {
+        return name.to_string();
+    };
+    let usual = tool_version(ssh, name)
+        .await
+        .ok()
+        .and_then(|v| crate::dbs::dumpfile::major(v.rsplit(' ').next().unwrap_or("")));
+    if usual.is_some_and(|m| m < 17) {
+        return name.to_string();
+    }
+    for c in versioned_pg_tool(name, server) {
+        if tool_version(ssh, &c).await.is_ok() {
+            return c;
+        }
+    }
+    name.to_string()
 }
 
 fn finish(status: Option<i32>, stderr: &str, stopped: bool, tool: &str) -> AppResult<()> {
@@ -403,7 +439,7 @@ pub async fn run(mut r: Run<'_>) -> AppResult<()> {
     let tool: String = if my || mongo {
         resolve_tool(r.ssh, r.cfg.engine, r.tool).await?.0
     } else {
-        tool_name(r.cfg.engine, r.tool)?.to_string()
+        pg_tool_for(r.ssh, tool_name(r.cfg.engine, r.tool)?, r.server_major).await
     };
     let tool = tool.as_str();
     let a = if my {
@@ -667,6 +703,7 @@ mod docker_tests {
             progress: &|_| {},
             log: &|l| log.lock().unwrap().push(l),
             stop: &AtomicBool::new(false),
+            server_major: None,
         })
         .await;
         (r, out, log.into_inner().unwrap())
@@ -711,6 +748,7 @@ mod docker_tests {
             progress: &|_| {},
             log: &|_| {},
             stop: &AtomicBool::new(false),
+            server_major: None,
         })
         .await
         .unwrap();
@@ -838,6 +876,7 @@ mod docker_tests {
             progress: &|_| {},
             log: &|_| {},
             stop: &stop,
+            server_major: None,
         });
         let (res, _) = tokio::join!(fut, async {
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;

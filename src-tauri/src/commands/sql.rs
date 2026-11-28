@@ -1370,6 +1370,7 @@ pub async fn sql_backup_start(
         },
         log: &|l| log::debug!("dump tool: {l}"),
         stop: &stop,
+        server_major: state.sql.server_major(&conn_id).await,
     })
     .await;
     state.sql.end_transfer(&transfer_id);

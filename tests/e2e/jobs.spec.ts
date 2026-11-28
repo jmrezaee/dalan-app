@@ -69,6 +69,27 @@ test.describe('Saved jobs and masking (E1, E5)', () => {
     await expect(row).toContainText('public.customers → public.customers: done')
   })
 
+  test('the copy that is saved as a job, run right away, is the job\'s first run', async ({ page }) => {
+    await openApp(page, { scenario: 'team', unlocked: true })
+    await addDb(page, 'copy-target')
+    const src = await addDb(page, 'app-prod')
+    await src.getByTestId('sql-open-copy').click()
+    const copy = src.getByTestId('copy-tab')
+    await copy.getByRole('checkbox', { name: 'Copy public.customers' }).check()
+    await copy.getByRole('checkbox', { name: 'Into a new database on that server' }).check()
+    await copy.getByRole('textbox', { name: 'New database name' }).fill('scratch')
+    await copy.getByTestId('copy-review').click()
+    await copy.getByRole('button', { name: 'Save as a job…' }).click()
+    await copy.getByRole('textbox', { name: 'Job name' }).fill('First run')
+    await copy.getByTestId('copy-save-job').click()
+    await expect(copy).toContainText('Saved as the job “First run”')
+    await copy.getByTestId('copy-run').click()
+    await expect(copy.getByTestId('copy-report')).toContainText('Copied into scratch')
+    await page.getByRole('tab', { name: 'Vault' }).click()
+    await nav(page).getByRole('link', { name: /Jobs/ }).click()
+    await expect(page.getByTestId('job-First run').locator('[data-part=last-run]')).toContainText('ok')
+  })
+
   test('a restore saved as a job reads its dump again and asks again; a backup job runs into its folder', async ({ page }) => {
     const fake = await openApp(page, { scenario: 'team', unlocked: true })
     const tab = await addDb(page, 'app-prod')
