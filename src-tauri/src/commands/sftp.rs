@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::ipc::Channel;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
@@ -327,7 +327,7 @@ pub async fn edit_open(
                 if cfg!(target_os = "macos") {
                     d = d.set_directory("/Applications");
                 }
-                d.blocking_pick_file()
+                crate::commands::sql::pick_or("open", || d.blocking_pick_file())
             })
             .await
             .map_err(|e| AppError::internal(e.to_string()))?;
@@ -347,11 +347,7 @@ pub async fn edit_open(
             "That kind of file would run on your computer if opened. Choose Open with… and pick an editor.",
         ));
     }
-    let root = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| AppError::internal(e.to_string()))?
-        .join("edit-tmp");
+    let root = crate::datadir::data_dir(&app)?.join("edit-tmp");
     let emit: sftp::EditEmit = Arc::new(move |e| {
         let _ = events.send(e);
     });

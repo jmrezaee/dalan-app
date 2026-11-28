@@ -4,6 +4,7 @@ import { Pencil, X } from '@lucide/vue'
 import type { MenuItem } from '@/components/common/ItemMenuList.vue'
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
+import { vDrag, vDrop } from '~/utils/pointerDrag'
 
 const props = defineProps<{
   label: string
@@ -45,43 +46,34 @@ const menu = computed<MenuItem[]>(() => [
 
 // ---- Drag: the middle half of a tab means "combine", the outer quarters mean "put before/after".
 const zone = ref<'before' | 'after' | 'onto' | null>(null)
-function zoneAt(e: DragEvent): 'before' | 'after' | 'onto' {
-  const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+function zoneAt(e: PointerEvent, el: HTMLElement): 'before' | 'after' | 'onto' {
+  const r = el.getBoundingClientRect()
   const x = (e.clientX - r.left) / r.width
   return x < 0.25 ? 'before' : x > 0.75 ? 'after' : 'onto'
 }
-function onDragOver(e: DragEvent) {
-  if (!props.movable || !e.dataTransfer?.types.includes('application/x-dalan-tab')) return
-  e.preventDefault()
-  zone.value = zoneAt(e)
-}
-function onDrop(e: DragEvent) {
-  if (!props.movable) return
-  e.preventDefault()
-  const z = zoneAt(e)
-  zone.value = null
-  emit('dropOn', z)
-}
+const dragSpec = computed(() => ({ kind: 'tab', data: props.label, label: props.label, disabled: !props.movable || editing.value, start: () => emit('dragStart'), end: () => { zone.value = null; emit('dragEnd') } }))
+const dropSpec = computed(() => ({
+  kind: props.movable ? 'tab' : 'none',
+  over: (e: PointerEvent, el: HTMLElement) => { zone.value = zoneAt(e, el) },
+  leave: () => { zone.value = null },
+  drop: (_d: unknown, e: PointerEvent, el: HTMLElement) => { zone.value = null; emit('dropOn', zoneAt(e, el)) },
+}))
 </script>
 
 <template>
   <ContextMenu>
     <ContextMenuTrigger as-child :disabled="!menu.length">
   <div
+    v-drag="dragSpec"
+    v-drop="dropSpec"
     :class="cn(
-      'group relative flex h-8 min-w-[120px] max-w-[220px] items-center gap-2 rounded-t-md px-2.5 text-sm',
+      'group relative flex h-8 min-w-[120px] max-w-[220px] select-none items-center gap-2 rounded-t-md px-2.5 text-sm',
       active ? 'bg-bg text-text' : 'text-muted hover:bg-surface-hover',
       dragging && 'opacity-90 shadow-drag',
       (dropTarget || zone === 'onto') && 'outline-2 outline-dashed outline-accent',
       zone === 'before' && 'shadow-[inset_2px_0_0_var(--accent)]',
       zone === 'after' && 'shadow-[inset_-2px_0_0_var(--accent)]',
     )"
-    :draggable="movable && !editing"
-    @dragstart="(e: DragEvent) => { e.dataTransfer?.setData('application/x-dalan-tab', label); emit('dragStart') }"
-    @dragend="zone = null; emit('dragEnd')"
-    @dragover="onDragOver"
-    @dragleave="zone = null"
-    @drop="onDrop"
     @auxclick.middle.prevent="closable && emit('close')"
   >
     <span v-if="warning" class="absolute inset-x-0 top-0 h-0.5 rounded-t-md bg-warning" aria-hidden="true" />

@@ -126,6 +126,15 @@ fn fill(version: usize, conn: &mut Connection) {
         )
         .unwrap();
     }
+    // v8: a saved copy job from d1 to itself with one run (its plan is sealed like history; x'00' stands in).
+    if version >= 8 {
+        conn.execute_batch(
+            "INSERT INTO db_jobs (id, vault_id, name, kind, source_database_id, target_database_id, plan_enc, created_at, updated_at)
+               VALUES ('j1', 'v1', 'Nightly refresh', 'copy', 'd1', 'd1', x'00', 1, 1);
+             INSERT INTO db_job_runs (id, job_id, started_at, ended_at, status, rows, warnings) VALUES ('jr1', 'j1', 1, 2, 'ok', 10, 0);",
+        )
+        .unwrap();
+    }
 }
 
 /// Run by hand when a migration is added (see the top of this file). Writes only the files that are missing, so

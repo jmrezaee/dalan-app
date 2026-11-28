@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 defineProps<{
-  items: { id: string; label: string; icon: Component; count?: number }[]
+  items: { id: string; label: string; icon: Component; count?: number; alert?: string }[]
   active: string
   collapsed?: boolean
 }>()
@@ -29,6 +29,7 @@ defineEmits<{ select: [id: string] }>()
           <component :is="it.icon" class="size-4 shrink-0" aria-hidden="true" />
           <template v-if="!collapsed">
             <span class="flex-1 truncate">{{ it.label }}</span>
+            <span v-if="it.alert" class="size-2 rounded-full bg-danger" role="img" :aria-label="it.alert" :data-testid="tid(`nav-alert-${it.id}`)" />
             <Badge v-if="it.count !== undefined">{{ it.count }}</Badge>
           </template>
         </a>

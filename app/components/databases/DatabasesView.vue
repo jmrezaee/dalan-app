@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // S34: the saved databases of every engine, with engine filter chips. Opening a Redis one adds a Redis tab.
-import { Database, Pencil, Plug, Plus, Trash2 } from '@lucide/vue'
+import { ArchiveRestore, Copy, Database, Pencil, Plug, Plus, Trash2 } from '@lucide/vue'
 import type { MenuItem } from '@/components/common/ItemMenuList.vue'
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { buttonVariants } from '@/components/ui/button'
@@ -98,6 +98,10 @@ async function confirmDelete() {
 const menuFor = (d: DbRow): MenuItem[] => [
   { label: 'Open', icon: Plug, onSelect: () => open(d) },
   { label: 'Edit', icon: Pencil, onSelect: () => edit(d) },
+  ...(d.engine === 'redis' ? [] : [
+    { label: 'Restore a dump…', icon: ArchiveRestore, onSelect: () => { restoreRequests.value.add(d.id); open(d) } },
+    { label: 'Copy to…', icon: Copy, onSelect: () => { copyRequests.value.add(d.id); open(d) } },
+  ]),
   { label: 'Delete', icon: Trash2, danger: true, separator: true, onSelect: () => askDelete(d) },
 ]
 

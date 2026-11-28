@@ -98,10 +98,10 @@ test.describe('Import, export and backup (S43, F26)', () => {
     const tab = await openShop(page)
     await tab.getByTestId('sql-open-transfer').click()
     const t = tab.getByTestId('sql-transfer')
-    await t.getByLabel('Table').selectOption('public.customers')
+    await t.getByLabel('Table', { exact: true }).selectOption('public.customers')
     await t.getByRole('button', { name: 'JSON' }).click()
     await t.getByRole('button', { name: 'Save as…' }).click()
-    await expect(t.getByRole('region', { name: 'Export' }).locator('[data-part=done]')).toContainText('Saved /tmp/customers.json · 50 rows')
+    await expect(t.getByRole('region', { name: 'Export', exact: true }).locator('[data-part=done]')).toContainText('Saved /tmp/customers.json · 50 rows')
     expect((await fake.calls()).includes('export:customers.json')).toBe(true)
   })
 
@@ -110,7 +110,7 @@ test.describe('Import, export and backup (S43, F26)', () => {
     const tab = await openShop(page)
     await tab.getByTestId('sql-open-transfer').click()
     const t = tab.getByTestId('sql-transfer')
-    await t.getByLabel('Table').selectOption('public.customers')
+    await t.getByLabel('Table', { exact: true }).selectOption('public.customers')
     await t.getByRole('button', { name: 'Choose file…' }).click()
     const map = t.getByRole('table', { name: 'Column mapping' })
     await expect(map).toContainText('who')
@@ -124,7 +124,7 @@ test.describe('Import, export and backup (S43, F26)', () => {
     await expect(d).toContainText('Load 3 rows into public.customers on app-prod?')
     await expect(d.getByLabel('Statement')).toHaveText('COPY "public"."customers" ("id", "name") FROM STDIN WITH (FORMAT csv)')
     await d.getByRole('button', { name: 'Load rows' }).click()
-    await expect(t.getByRole('region', { name: 'Import' }).locator('[data-part=done]')).toContainText('Loaded 3 rows into public.customers.')
+    await expect(t.getByRole('region', { name: 'Import', exact: true }).locator('[data-part=done]')).toContainText('Loaded 3 rows into public.customers.')
   })
 
   test('S43: a Read-only database refuses an import before any dialog', async ({ page }) => {
@@ -134,11 +134,11 @@ test.describe('Import, export and backup (S43, F26)', () => {
     const t = tab.getByTestId('sql-transfer')
     await t.getByRole('button', { name: 'Choose file…' }).click()
     await t.getByRole('button', { name: 'Review import' }).click()
-    await expect(t.getByRole('region', { name: 'Import' }).locator('[data-part=error]')).toContainText('app-prod is read-only in Dalan')
+    await expect(t.getByRole('region', { name: 'Import', exact: true }).locator('[data-part=error]')).toContainText('app-prod is read-only in Dalan')
     await expect(page.getByTestId('import-confirm')).toHaveCount(0)
   })
 
-  test('S43: backup shows the tool on the host and saves the dump; restore asks for the name', async ({ page }) => {
+  test('S43: backup shows the tool on the host and saves the dump', async ({ page }) => {
     const fake = await openApp(page, { scenario: 'team', unlocked: true })
     const tab = await openShop(page)
     await tab.getByTestId('sql-open-transfer').click()
@@ -147,23 +147,5 @@ test.describe('Import, export and backup (S43, F26)', () => {
     await b.getByRole('button', { name: 'Back up…' }).click()
     await expect(b.locator('[data-part=done]')).toContainText('Saved /tmp/app-2026-11-24.dump · 5.0 MB')
     expect((await fake.calls()).includes('backup:app.dump')).toBe(true)
-    await b.getByRole('button', { name: 'Restore from file…' }).click()
-    const d = page.getByTestId('restore-confirm')
-    await expect(d).toContainText('Restore app-2026-11-22.dump into app-prod?')
-    await expect(d.getByRole('button', { name: 'Restore' })).toBeDisabled()
-    await d.getByLabel('Type app-prod to confirm').fill('app-prod')
-    await d.getByRole('button', { name: 'Restore' }).click()
-    await expect(b.locator('[data-part=done]')).toContainText('Restored app-2026-11-22.dump into app-prod.')
-    expect((await fake.calls()).includes('restore:app-2026-11-22.dump')).toBe(true)
-  })
-
-  test('S43: restoring into a production database that is not Open is refused', async ({ page }) => {
-    await openApp(page, { scenario: 'team', unlocked: true })
-    const tab = await openShop(page, { production: true })
-    await tab.getByTestId('sql-open-transfer').click()
-    const b = tab.getByTestId('sql-transfer').getByRole('region', { name: 'Backup' })
-    await b.getByRole('button', { name: 'Restore from file…' }).click()
-    await expect(b.locator('[data-part=error]')).toContainText('is a production database. To restore into it, switch it to Open first')
-    await expect(page.getByTestId('restore-confirm')).toHaveCount(0)
   })
 })

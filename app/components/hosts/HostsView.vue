@@ -7,6 +7,7 @@ import type { GroupSummary, HostSummary } from '~/types/bindings'
 import { osLetter, osName } from '~/utils/os'
 import { buttonVariants } from '@/components/ui/button'
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
+import { vDrop } from '~/utils/pointerDrag'
 
 const hosts = useHostsStore()
 const sessions = useSessionsStore()
@@ -88,16 +89,13 @@ const upTo = computed(() => groupToDelete.value?.parent_id ? hosts.groupLabel(gr
 // ---- F04: drag a host onto a group or a breadcrumb.
 const dragging = ref<string | null>(null)
 const dropOn = ref<string | null>(null) // group id, or 'root'
-function startDrag(e: DragEvent, h: HostSummary) {
-  dragging.value = h.id
-  e.dataTransfer?.setData('text/plain', h.id)
-  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
-}
-function over(e: DragEvent, target: string) {
-  if (!dragging.value) return
-  e.preventDefault() // allows the drop
-  dropOn.value = target
-}
+// Where a host can land: a group card, a breadcrumb, or "All hosts" (the top level).
+const dropAt = (target: string) => ({
+  kind: 'host',
+  over: () => { dropOn.value = target },
+  leave: () => { if (dropOn.value === target) dropOn.value = null },
+  drop: () => { void dropped(target) },
+})
 async function dropped(target: string) {
   const id = dragging.value
   dragging.value = dropOn.value = null
@@ -127,12 +125,10 @@ const nothingHere = computed(() => hosts.loaded && !empty.value && !hosts.childG
       <nav aria-label="Group" class="flex min-w-0 items-center gap-1 text-xl">
         <component
           :is="hosts.breadcrumb.length || hosts.searching ? 'button' : 'h1'"
+          v-drop="dropAt('root')"
           :type="hosts.breadcrumb.length || hosts.searching ? 'button' : undefined"
           :class="['rounded px-1', dropOn === 'root' && 'bg-accent/10 outline outline-accent', (hosts.breadcrumb.length || hosts.searching) && 'text-muted hover:text-text']"
           @click="hosts.currentGroupId = null; hosts.query = ''; hosts.selectedTags = []"
-          @dragover="over($event, 'root')"
-          @dragleave="dropOn = null"
-          @drop.prevent="dropped('root')"
         >
           Hosts
         </component>
@@ -140,12 +136,10 @@ const nothingHere = computed(() => hosts.loaded && !empty.value && !hosts.childG
           <ChevronRight class="size-4 shrink-0 text-muted" aria-hidden="true" />
           <component
             :is="i < hosts.breadcrumb.length - 1 ? 'button' : 'h1'"
+            v-drop="dropAt(g.id)"
             :type="i < hosts.breadcrumb.length - 1 ? 'button' : undefined"
             :class="['truncate rounded px-1', dropOn === g.id && 'bg-accent/10 outline outline-accent', i < hosts.breadcrumb.length - 1 && 'text-muted hover:text-text']"
             @click="hosts.currentGroupId = g.id"
-            @dragover="over($event, g.id)"
-            @dragleave="dropOn = null"
-            @drop.prevent="dropped(g.id)"
           >
             {{ g.label }}
           </component>
@@ -180,6 +174,7 @@ const nothingHere = computed(() => hosts.loaded && !empty.value && !hosts.childG
           <GroupCard
             v-for="g in hosts.childGroups"
             :key="g.id"
+            v-drop="dropAt(g.id)"
             :data-testid="tid(`group-card-${g.id}`)"
             :label="g.label"
             :hosts="g.host_count"
@@ -188,9 +183,6 @@ const nothingHere = computed(() => hosts.loaded && !empty.value && !hosts.childG
             @open="hosts.currentGroupId = g.id"
             @edit="hosts.editingGroup = g"
             @delete="askDeleteGroup(g)"
-            @dragover="over($event, g.id)"
-            @dragleave="dropOn = null"
-            @drop="dropped(g.id)"
           />
         </div>
       </section>
@@ -225,9 +217,10 @@ const nothingHere = computed(() => hosts.loaded && !empty.value && !hosts.childG
             :dragging="dragging === h.id"
             :menu="menuFor(h)"
             :connected="sessions.liveHostIds.has(h.id)"
+            :drag-id="h.id"
             @select="selected = h.id"
             @open="sessions.open(h)"
-            @dragstart="startDrag($event, h)"
+            @dragstart="dragging = h.id"
             @dragend="dragging = dropOn = null"
           />
         </div>

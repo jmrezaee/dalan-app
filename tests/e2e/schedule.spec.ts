@@ -1,0 +1,141 @@
+import { expect, test } from '../support/fixtures'
+import type { Page } from '@playwright/test'
+import { openApp } from './harness'
+
+// D15 (replica/databases/restore-copy.md §9, E2 and E8): schedules and retention on saved jobs, runs missed while
+// locked, the failure dot on Jobs, and folders on a host for backups and restores. The scheduler itself is Rust's;
+// the fake stands in for its runs (`scheduledRun`).
+const nav = (page: Page) => page.getByRole('navigation', { name: 'Vault' })
+
+async function addDb(page: Page, name: string, opts: { production?: boolean } = {}) {
+  if (await page.getByRole('tab', { name: 'Vault' }).isVisible()) await page.getByRole('tab', { name: 'Vault' }).click()
+  await nav(page).getByRole('link', { name: /Databases/ }).click()
+  await page.getByRole('button', { name: 'New database' }).click()
+  await page.getByTestId('new-database-dialog').getByRole('button', { name: 'Continue' }).click()
+  const s = page.getByTestId('db-form-sheet')
+  await s.getByLabel('Name', { exact: true }).fill(name)
+  if (opts.production) await s.getByRole('radio', { name: 'Production' }).click()
+  await s.getByLabel('Address').fill(`${name}.internal`)
+  await s.getByLabel('Database', { exact: true }).fill('app')
+  await s.getByLabel('Username').fill('app')
+  await s.getByRole('button', { name: 'Save' }).click()
+  await expect(s).toHaveCount(0)
+  await page.getByRole('row', { name: new RegExp(name) }).dblclick()
+  const tab = page.getByTestId(`sql-tab-${name}`)
+  await expect(tab.getByRole('tree', { name: 'Schemas and tables' })).toBeVisible()
+  return tab
+}
+
+async function jobsView(page: Page) {
+  await page.getByRole('tab', { name: 'Vault' }).click()
+  await nav(page).getByRole('link', { name: /Jobs/ }).click()
+}
+
+test.describe('Scheduled jobs and host folders (E2, E8)', () => {
+  test('a backup on a host gets a schedule with retention; missed and failed runs show, with the dot on Jobs', async ({ page }) => {
+    const fake = await openApp(page, { scenario: 'team', unlocked: true })
+    const tab = await addDb(page, 'app-prod')
+    await tab.getByTestId('sql-open-transfer').click()
+    const b = tab.getByTestId('sql-transfer').getByRole('region', { name: 'Backup' })
+    await b.getByRole('button', { name: 'Save as a job…' }).click()
+    await b.getByRole('textbox', { name: 'Job name' }).fill('Nightly')
+    await b.getByTestId('backup-save-job-host').click()
+    const picker = page.getByTestId('host-picker')
+    await expect(picker.getByTestId('host-picker-use')).toBeDisabled()
+    await picker.getByRole('combobox', { name: 'Host' }).selectOption({ label: 'bastion' })
+    await picker.getByRole('button', { name: 'Connect' }).click()
+    await expect(picker.getByRole('textbox', { name: 'Folder on the host' })).toHaveValue('/home/me')
+    await picker.getByTestId('host-picker-use').click()
+    await expect(picker).toHaveCount(0)
+    await expect(b).toContainText('Saved as the job “Nightly”')
+    expect(await fake.calls('job-backup-host')).toContain('job-backup-host:h-bastion:/home/me')
+
+    await jobsView(page)
+    const row = page.getByTestId('job-Nightly')
+    await expect(row).toContainText('Back up app-prod to /home/me on bastion')
+    await row.getByTestId('job-schedule').click()
+    const dlg = page.getByTestId('schedule-dialog')
+    await dlg.getByRole('radio', { name: 'Cron' }).check()
+    await dlg.getByRole('textbox', { name: 'Cron expression' }).fill('0 2 * *')
+    await expect(dlg.getByRole('alert')).toContainText('five fields')
+    await expect(dlg.getByTestId('schedule-save')).toBeDisabled()
+    await dlg.getByRole('radio', { name: 'Every day' }).check()
+    await dlg.getByLabel('Time').fill('03:30')
+    await expect(dlg.locator('[data-part=preview]')).toContainText('Every day at 03:30. Next:')
+    await dlg.getByRole('spinbutton', { name: 'Number of backups to keep' }).fill('7')
+    await dlg.getByTestId('schedule-save').click()
+    await expect(dlg).toHaveCount(0)
+    await expect(row.locator('[data-part=schedule]')).toContainText('Every day at 03:30 · next')
+    await expect(row.locator('[data-part=schedule]')).toContainText('keeps the last 7')
+
+    // The scheduler ran it at unlock, after three slots passed while locked.
+    await fake.scheduledRun('Nightly', 'ok', 3)
+    await expect(row.locator('[data-part=missed]')).toContainText('Missed 3 runs while closed or locked; ran at')
+    await expect(row.locator('[data-part=last-run]')).toContainText('ok')
+    await expect(page.getByTestId('nav-alert-jobs')).toHaveCount(0)
+    // A failure elsewhere in the app: the dot on Jobs, gone once Jobs is opened.
+    await nav(page).getByRole('link', { name: /Hosts/ }).click()
+    await fake.scheduledRun('Nightly', 'failed')
+    await expect(page.getByRole('img', { name: 'A scheduled job failed' })).toBeVisible()
+    await nav(page).getByRole('link', { name: /Jobs/ }).click()
+    await expect(row.locator('[data-part=last-run]')).toContainText('failed')
+    await expect(page.getByTestId('nav-alert-jobs')).toHaveCount(0)
+    // The banner names it, and Open history shows the runs.
+    const banner = page.getByTestId('jobs-view').locator('[data-part=failed-banner]')
+    await expect(banner).toContainText('The last run of “Nightly” failed')
+    await banner.getByRole('button', { name: 'Open history' }).click()
+    await expect(row.getByRole('button', { name: 'History' })).toHaveAttribute('aria-expanded', 'true')
+    // Turning it off.
+    await row.getByTestId('job-schedule').click()
+    await dlg.getByRole('radio', { name: 'Off' }).check()
+    await dlg.getByTestId('schedule-save').click()
+    await expect(row.locator('[data-part=schedule]')).toHaveCount(0)
+  })
+
+  test('a copy into staging can be scheduled and warns that it runs unasked; copies keep no files', async ({ page }) => {
+    await openApp(page, { scenario: 'team', unlocked: true })
+    await addDb(page, 'stage-db')
+    const src = await addDb(page, 'source-db')
+    await src.getByTestId('sql-open-copy').click()
+    const copy = src.getByTestId('copy-tab')
+    await copy.getByRole('combobox', { name: 'Target database' }).selectOption({ label: 'stage-db · PostgreSQL' })
+    await copy.getByRole('checkbox', { name: 'Copy public.customers' }).check()
+    await copy.getByRole('checkbox', { name: 'Into a new database on that server' }).check()
+    await copy.getByRole('textbox', { name: 'New database name' }).fill('scratch')
+    await copy.getByTestId('copy-review').click()
+    await copy.getByRole('button', { name: 'Save as a job…' }).click()
+    await copy.getByRole('textbox', { name: 'Job name' }).fill('To stage')
+    await copy.getByTestId('copy-save-job').click()
+    await expect(copy).toContainText('Saved as the job “To stage”')
+    await jobsView(page)
+    await page.getByTestId('job-To stage').getByTestId('job-schedule').click()
+    const dlg = page.getByTestId('schedule-dialog')
+    await dlg.getByRole('radio', { name: 'Every week' }).check()
+    await dlg.getByRole('combobox', { name: 'Weekday' }).selectOption({ label: 'Friday' })
+    await expect(dlg).toContainText('A scheduled copy runs without asking')
+    await expect(dlg.getByRole('group', { name: 'Keep' })).toHaveCount(0)
+    await dlg.getByTestId('schedule-save').click()
+    await expect(page.getByTestId('job-To stage').locator('[data-part=schedule]')).toContainText('Every Friday at 02:00')
+  })
+
+  test('a dump in a folder on a host is picked over SFTP and read like a local one', async ({ page }) => {
+    const fake = await openApp(page, { scenario: 'team', unlocked: true })
+    await fake.putRemoteFile('h-bastion', '/home/me/backups/shop-2026-11-27.dump')
+    const tab = await addDb(page, 'app-prod')
+    await tab.getByTestId('sql-open-transfer').click()
+    await tab.getByTestId('sql-restore').click()
+    const dlg = page.getByTestId('restore-dialog')
+    await dlg.getByTestId('restore-pick-host').click()
+    const picker = page.getByTestId('host-picker')
+    await picker.getByRole('combobox', { name: 'Host' }).selectOption({ label: 'bastion' })
+    await picker.getByRole('button', { name: 'Connect' }).click()
+    await picker.getByRole('button', { name: 'backups' }).click()
+    await expect(picker.getByTestId('host-picker-use')).toBeDisabled()
+    await picker.getByRole('button', { name: 'shop-2026-11-27.dump' }).click()
+    await picker.getByTestId('host-picker-use').click()
+    await expect(picker).toHaveCount(0)
+    await expect(dlg.getByRole('table', { name: 'Objects in the dump' })).toBeVisible()
+    await expect(dlg).toContainText('shop-2026-11-27.dump')
+    expect(await fake.calls('restore-remote')).toContain('restore-remote:h-bastion:/home/me/backups/shop-2026-11-27.dump')
+  })
+})

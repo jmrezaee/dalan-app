@@ -374,6 +374,16 @@ pub fn delete(conn: &mut Connection, s: &VaultSession, id: &str) -> AppResult<()
     let Some((a, b)) = found else {
         return Err(AppError::not_found("That database is no longer saved."));
     };
+    // A saved job reads or writes it: the job goes first (D14).
+    let job: Option<String> = tx
+        .query_row("SELECT name FROM db_jobs WHERE source_database_id = ?1 OR target_database_id = ?1 LIMIT 1", [id], |r| r.get(0))
+        .optional()?;
+    if let Some(name) = job {
+        return Err(AppError::new(
+            crate::error::ErrorCode::InUse,
+            format!("The saved job “{name}” uses this database. Delete the job first."),
+        ));
+    }
     tx.execute("DELETE FROM databases WHERE id = ?1", [id])?;
     for sid in [a, b].into_iter().flatten() {
         secrets::delete(&tx, s, &sid)?;

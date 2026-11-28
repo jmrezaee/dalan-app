@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { Activity_Serialize as Activity, ActivityView, CsvPreview, SessionPending, SessionAction, ExportFormat, TransferProgress, Diagram, ExplainPlan_Serialize as ExplainPlan, StructureOp_Deserialize as StructureOp, StructurePending, TableStructure_Serialize as TableStructure, PendingRun, TxnState, GridPending, SqlCatalog, SqlRunEvent_Serialize, RunMode, SqlCell_Serialize as Cell, DbEvent_Serialize, PageCursor_Serialize, PromptKind, RedisStepState, SqlColumn_Serialize as SqlColumn, SqlObject_Serialize as SqlObject, SqlServerInfo, SqlTableInfo_Serialize as SqlTableInfo } from '~/types/bindings'
+import type { HostFolder, MaskRule_Deserialize as MaskRule, Activity_Serialize as Activity, ActivityView, CsvPreview, SessionPending, SessionAction, ExportFormat, TransferProgress, Diagram, ExplainPlan_Serialize as ExplainPlan, StructureOp_Deserialize as StructureOp, StructurePending, TableStructure_Serialize as TableStructure, PendingRun, TxnState, GridPending, SqlCatalog, SqlRunEvent_Serialize, RunMode, SqlCell_Serialize as Cell, DbEvent_Serialize, PageCursor_Serialize, PromptKind, RedisStepState, SqlColumn_Serialize as SqlColumn, SqlObject_Serialize as SqlObject, SqlServerInfo, SqlTableInfo_Serialize as SqlTableInfo } from '~/types/bindings'
 import { useTauri } from '~/composables/useTauri'
 
 export type SqlStatus = 'connecting' | 'ready' | 'failed' | 'closed'
@@ -123,7 +123,7 @@ function setup() {
   const history = ref<string[]>([])
   const diagrams = ref<DiagramTab[]>([])
   /** The Activity and Transfer inner tabs (S41, S43): each is open or not, one of each. */
-  const special = ref<('activity' | 'transfer')[]>([])
+  const special = ref<('activity' | 'transfer' | 'copy' | 'compare')[]>([])
   let diagramCount = 0
 
   const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : (e as { message?: string })?.message ?? fallback)
@@ -235,6 +235,15 @@ function setup() {
     catch (e) {
       s.error = message(e, 'Couldn\'t list the tables.')
     }
+    s.loading = false
+  }
+
+  /** The tables of a schema, without opening it in the tree (the Copy tab lists them all). */
+  async function ensureObjects(s: SchemaNode) {
+    if (s.objects || s.loading) return
+    s.loading = true
+    try { s.objects = await api.sqlObjects(connId.value, [s.name]) }
+    catch (e) { s.error = message(e, 'Couldn\'t list the tables.') }
     s.loading = false
   }
 
@@ -520,11 +529,11 @@ function setup() {
   }
 
   // ---- Activity (S41, F25) and Transfer (S43, F26)
-  function openSpecial(kind: 'activity' | 'transfer') {
+  function openSpecial(kind: 'activity' | 'transfer' | 'copy' | 'compare') {
     if (!special.value.includes(kind)) special.value.push(kind)
     activeTab.value = kind
   }
-  function closeSpecial(kind: 'activity' | 'transfer') {
+  function closeSpecial(kind: 'activity' | 'transfer' | 'copy' | 'compare') {
     special.value = special.value.filter(k => k !== kind)
     if (activeTab.value === kind) activeTab.value = queries.value[0]?.id ?? tabs.value[0]?.id ?? ''
   }
@@ -591,7 +600,10 @@ function setup() {
   let transferCount = 0
   const newTransferId = () => `t${++transferCount}-${Date.now()}`
   const stopTransfer = (id: string) => api.sqlTransferStop(id).catch(() => {})
-  const exportTable = (id: string, schema: string, table: string, filter: string, format: ExportFormat, header: boolean, onProgress: (p: TransferProgress) => void) => api.sqlExportTable(connId.value, id, schema, table, filter, format, header, onProgress)
+  /** A saved backup job, into its folder (D14). */
+  const backupJob = (jobId: string, id: string, onProgress: (p: TransferProgress) => void) => api.jobBackupRun(connId.value, jobId, id, onProgress).finally(() => { void useJobsStore().refresh() })
+  const saveBackupJob = (name: string, host: HostFolder | null = null) => api.jobSaveBackup(connId.value, name, host)
+  const exportTable = (id: string, schema: string, table: string, filter: string, format: ExportFormat, header: boolean, onProgress: (p: TransferProgress) => void, masks: MaskRule[] = []) => api.sqlExportTable(connId.value, id, schema, table, filter, format, header, masks, onProgress)
   const importPick = () => api.sqlImportPick(connId.value)
   const importPreview = (schema: string, table: string, path: string, delimiter: string, header: boolean): Promise<CsvPreview> => api.sqlImportPreview(connId.value, schema, table, path, delimiter, header)
   const importPrepare = (schema: string, table: string, path: string, delimiter: string, header: boolean, mapping: (string | null)[]) => api.sqlImportPrepare(connId.value, schema, table, path, delimiter, header, mapping)
@@ -599,9 +611,6 @@ function setup() {
   const importDiscard = (id: string) => api.sqlImportDiscard(connId.value, id).catch(() => {})
   const backupCheck = () => api.sqlBackupCheck(connId.value)
   const backupStart = (id: string, onProgress: (p: TransferProgress) => void) => api.sqlBackupStart(connId.value, id, onProgress)
-  const restorePrepare = () => api.sqlRestorePrepare(connId.value)
-  const restoreCommit = (pending: string, typed: string | null, id: string, onProgress: (p: TransferProgress) => void) => api.sqlRestoreCommit(connId.value, pending, typed, id, onProgress)
-  const restoreDiscard = (id: string) => api.sqlRestoreDiscard(connId.value, id).catch(() => {})
 
   // ---- Diagram (S40)
   async function openDiagram(schema?: string, table?: string) {
@@ -854,7 +863,7 @@ function setup() {
     q.title = row.name
   }
 
-  return { dbId, connId, status, steps, prompt, info, error, schemas, treeFilter, tabs, activeTab, current, engine, isMy, special, openSpecial, closeSpecial, activityState, refreshActivity, prepareSession, confirmSession, discardSession, newTransferId, stopTransfer, exportTable, importPick, importPreview, importPrepare, importCommit, importDiscard, backupCheck, backupStart, restorePrepare, restoreCommit, restoreDiscard, setView, loadStructure, addOp, removeOp, reviewStructure, applyStructure, cancelStructure, migrationText, explain, diagrams, openDiagram, loadDiagram, closeDiagram, saveExport, changeCount, setCell, toggleDelete, discardEdits, review, commitReview, cancelReview, queries, catalog, history, newQuery, closeQuery, requestCloseQuery, finishAndClose, openTransactions, confirmRun, discardRun, txn, setManual, loadCatalog, run, stop, format, loadHistory, clearHistory, save, open, retry, respond, close, toggleSchema, openTable, closeTable, loadPage, apply, refresh, nextPage, prevPage, sortBy, countExactly, select, keyOf, jump }
+  return { ensureObjects, dbId, connId, status, steps, prompt, info, error, schemas, treeFilter, tabs, activeTab, current, engine, isMy, special, openSpecial, closeSpecial, activityState, refreshActivity, prepareSession, confirmSession, discardSession, newTransferId, stopTransfer, backupJob, saveBackupJob, exportTable, importPick, importPreview, importPrepare, importCommit, importDiscard, backupCheck, backupStart, setView, loadStructure, addOp, removeOp, reviewStructure, applyStructure, cancelStructure, migrationText, explain, diagrams, openDiagram, loadDiagram, closeDiagram, saveExport, changeCount, setCell, toggleDelete, discardEdits, review, commitReview, cancelReview, queries, catalog, history, newQuery, closeQuery, requestCloseQuery, finishAndClose, openTransactions, confirmRun, discardRun, txn, setManual, loadCatalog, run, stop, format, loadHistory, clearHistory, save, open, retry, respond, close, toggleSchema, openTable, closeTable, loadPage, apply, refresh, nextPage, prevPage, sortBy, countExactly, select, keyOf, jump }
 }
 
 // One store per SQL tab, like the Redis tabs: each has its own connection, tree and open tables.

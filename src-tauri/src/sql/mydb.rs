@@ -2005,6 +2005,7 @@ create view d7_open as select * from d7_orders where status = 'open';
                                 filter,
                                 f,
                                 header,
+                                &[],
                                 &mut buf,
                                 &|_, _| {},
                                 &AtomicBool::new(false),
@@ -2067,6 +2068,7 @@ create view d7_open as select * from d7_orders where status = 'open';
                     "1 = 1; drop table d7_orders",
                     ExportFormat::Csv,
                     true,
+                    &[],
                     &mut buf,
                     &|_, _| {},
                     &AtomicBool::new(false)
@@ -2083,6 +2085,7 @@ create view d7_open as select * from d7_orders where status = 'open';
                     "",
                     ExportFormat::Csv,
                     true,
+                    &[],
                     &mut buf,
                     &|_, _| {},
                     &AtomicBool::new(true),

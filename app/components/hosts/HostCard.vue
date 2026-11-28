@@ -2,11 +2,12 @@
 // S02/S16. Spec: HostCard. Selection and focus are conveyed by ring + text, not colour alone.
 import { Ellipsis, LoaderCircle } from '@lucide/vue'
 import { cn } from '@/lib/utils'
+import { vDrag } from '~/utils/pointerDrag'
 import type { MenuItem } from '@/components/common/ItemMenuList.vue'
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 
-defineProps<{
+const props = defineProps<{
   label: string
   user: string
   address: string
@@ -31,17 +32,20 @@ defineProps<{
   draft?: boolean
   /** The actions, shown on right-click and in the "…" menu. */
   menu?: MenuItem[]
+  /** The host's id when it can be dragged onto a group (F04). */
+  dragId?: string
 }>()
-defineEmits<{ open: []; select: []; dragstart: [event: DragEvent]; dragend: [] }>()
+const emit = defineEmits<{ open: []; select: []; dragstart: []; dragend: [] }>()
+const dragSpec = computed(() => ({ kind: 'host', data: props.dragId, label: props.label, disabled: !props.dragId || props.draft, start: () => emit('dragstart'), end: () => emit('dragend') }))
 </script>
 
 <template>
   <ContextMenu>
     <ContextMenuTrigger as-child :disabled="draft">
   <div
+    v-drag="dragSpec"
     role="row"
     :data-testid="testId"
-    draggable="true"
     tabindex="0"
     :aria-selected="selected"
     :class="cn(
@@ -51,8 +55,6 @@ defineEmits<{ open: []; select: []; dragstart: [event: DragEvent]; dragend: [] }
       draft && 'border-dashed border-accent/60',
       dragging && 'opacity-50',
     )"
-    @dragstart="$emit('dragstart', $event)"
-    @dragend="$emit('dragend')"
     @click="$emit('select')"
     @dblclick="$emit('open')"
     @keydown.enter="$emit('open')"

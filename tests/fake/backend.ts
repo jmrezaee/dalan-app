@@ -4,6 +4,7 @@ import { handlers } from './commands'
 import { MASTER } from './commands/vault'
 import { keyspace } from './commands/redisKeys'
 import { deliver } from './commands/redisPubSub'
+import { scheduledRun } from './commands/jobs'
 import { createModel, type Seed } from './model'
 import { scenarios, type ScenarioName } from './scenarios'
 import { scripts } from './scripts'
@@ -187,8 +188,30 @@ export function install(opts: Options) {
       Object.assign(f, { state, error: message, connections: state === 'active' ? 1 : 0 })
       emitEvent('tunnel-changed', { id, state, connections: f.connections, error: message })
     },
+    /** D15: the scheduler ran a job (after `missed` slots that passed while locked), then tells the UI like Rust does. */
+    scheduledRun: (name: string, status: 'ok' | 'failed', missed: number) => {
+      const id = scheduledRun(name, status, missed)
+      emitEvent('jobs-changed', { job_id: id, running: false, failed: status === 'failed' })
+    },
+    /** D15: a file on a host's SFTP tree (folders made as needed), for the host picker. */
+    putRemoteFile: (hostId: string, path: string) => {
+      m.files[hostId] ??= [{ name: 'home', kind: 'dir', size: 0, mtime: m.now, mode: 0o755, children: [{ name: 'me', kind: 'dir', size: 0, mtime: m.now, mode: 0o755, children: [] }] }]
+      let list = m.files[hostId]!
+      const names = path.split('/').filter(Boolean)
+      names.forEach((n, i) => {
+        const last = i === names.length - 1
+        let node = list.find(x => x.name === n)
+        if (!node) {
+          node = { name: n, kind: last ? 'file' : 'dir', size: last ? 18 * 2 ** 20 : 0, mtime: m.now, mode: 0o644, ...(last ? {} : { children: [] }) }
+          list.push(node)
+        }
+        list = node.children ?? []
+      })
+    },
     /** The window was closed or ⌘Q pressed with live sessions: Rust sends this and holds the quit back. */
-    quitRequested: (liveSessions: number) => emitEvent('quit-requested', { live_sessions: liveSessions }),
+    /** A file dropped on the window from Finder: Rust keeps the path and sends its id and name. */
+    dropFile: (id: string, name: string) => emitEvent('file-dropped', { id, name }),
+    quitRequested: (liveSessions: number, runningJobs = 0) => emitEvent('quit-requested', { live_sessions: liveSessions, running_jobs: runningJobs }),
     /** A link from another app arrives: queued like Rust does, then the event tells the UI to look. */
     receiveLink: (target: { user: string | null, host: string, port: number } | null) => { m.links.push(target); emitEvent('link-received', {}) },
     /** Pretend to run on Windows with these Settings > System values. */
@@ -217,6 +240,7 @@ export function install(opts: Options) {
     redisSubNames: () => m.redisSubs.map(s => s.name),
     /** Bulk scans and runs take a moment per batch, so a test can press Stop. */
     redisBulkSlow: (on = true) => { m.redisBulkSlow = on },
+    restoreNext: (kind: string) => { m.restoreNext = kind },
     redisKeyCount: () => m.redisKeys.length,
     /** How many times the Server view asked for INFO (to check it refreshes, and stops when hidden). */
     redisInfoCalls: () => m.redisInfoCalls,

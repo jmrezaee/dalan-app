@@ -19,7 +19,7 @@ test.describe('snippets (S11, S12)', () => {
     await page.getByLabel('Vault', { exact: true }).getByText('Snippets', { exact: true }).click()
     await seen(page.getByText('Who is on', { exact: true }))
     const deploy = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Deploy' }) })
-    await page.locator('[draggable=true]').filter({ hasText: 'Who is on' }).dragTo(deploy)
+    await page.getByText('Who is on', { exact: true }).dragTo(deploy)
     await expect.poll(async () => (await fake.calls()).includes('snippets_move')).toBe(true)
     await expect(deploy.getByText('Who is on', { exact: true })).toBeVisible()
   })

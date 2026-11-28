@@ -102,7 +102,7 @@ pub fn args_mongo(cfg: &SqlConfig, tool: Tool) -> Vec<String> {
 
 /// The first line of the tool's input: a one-line YAML config with the password (read by the wrapper into a private
 /// temporary file, removed when the tool ends), so the password is never on a command line.
-fn config_mongo(cfg: &SqlConfig) -> AppResult<Vec<u8>> {
+pub fn config_mongo(cfg: &SqlConfig) -> AppResult<Vec<u8>> {
     let p = cfg.password.as_ref().map(|p| p.as_str()).unwrap_or("");
     // Control characters and the Unicode line separators are not valid inside a YAML string: refuse, don't alter.
     if p.chars()
@@ -172,7 +172,7 @@ pub fn args_my(cfg: &SqlConfig, tool: Tool) -> Vec<String> {
 
 /// The first two lines of the tool's input: a MySQL option file with the password (read by the wrapper into a
 /// private temporary file, removed when the tool ends). Quotes and backslashes are escaped as option files want.
-fn config_lines(cfg: &SqlConfig) -> AppResult<Vec<u8>> {
+pub fn config_lines(cfg: &SqlConfig) -> AppResult<Vec<u8>> {
     let p = cfg.password.as_ref().map(|p| p.as_str()).unwrap_or("");
     if p.contains('\n') || p.contains('\r') {
         return Err(AppError::validation("This password has a line break in it, so it can't be handed to the dump tool. Use a different one for backups."));
@@ -194,9 +194,9 @@ pub fn wrapper_my(tool: &str, args: &[String]) -> String {
 }
 
 /// A private option file on this computer for a local run; deleted when dropped.
-struct LocalConfig(std::path::PathBuf);
+pub struct LocalConfig(pub std::path::PathBuf);
 impl LocalConfig {
-    fn create(contents: &[u8]) -> AppResult<LocalConfig> {
+    pub fn create(contents: &[u8]) -> AppResult<LocalConfig> {
         use std::io::Write as _;
         let path = std::env::temp_dir().join(format!("dalan-{}.cnf", uuid::Uuid::now_v7()));
         let mut o = std::fs::OpenOptions::new();
@@ -259,7 +259,7 @@ pub fn wrapper(tool: &str, args: &[String]) -> String {
     )
 }
 
-fn password_line(cfg: &SqlConfig) -> AppResult<Vec<u8>> {
+pub fn password_line(cfg: &SqlConfig) -> AppResult<Vec<u8>> {
     let p = cfg.password.as_ref().map(|p| p.as_str()).unwrap_or("");
     if p.contains('\n') || p.contains('\r') {
         return Err(AppError::validation("This password has a line break in it, so it can't be handed to the dump tool. Use a different one for backups."));
@@ -268,7 +268,7 @@ fn password_line(cfg: &SqlConfig) -> AppResult<Vec<u8>> {
 }
 
 #[cfg(test)]
-fn local_tool(name: &str) -> std::path::PathBuf {
+pub fn local_tool(name: &str) -> std::path::PathBuf {
     match std::env::var("DALAN_TEST_TOOL_DIR") {
         Ok(d) => std::path::Path::new(&d).join(name),
         Err(_) => name.into(),
@@ -276,7 +276,7 @@ fn local_tool(name: &str) -> std::path::PathBuf {
 }
 /// The tool by name; a desktop app's PATH often misses where PostgreSQL's tools live, so the usual places are tried.
 #[cfg(not(test))]
-fn local_tool(name: &str) -> std::path::PathBuf {
+pub fn local_tool(name: &str) -> std::path::PathBuf {
     let on_path = std::env::var_os("PATH")
         .is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(name).is_file()));
     if on_path {
@@ -306,7 +306,7 @@ pub fn runs_on(ssh: Option<&Connected>) -> String {
     ssh.map_or_else(|| "this computer".to_string(), |s| s.label.clone())
 }
 
-fn missing(tool: &str, on: &str) -> AppError {
+pub fn missing(tool: &str, on: &str) -> AppError {
     let what = if tool.starts_with("mongo") {
         "the MongoDB Database Tools"
     } else if tool.starts_with("my") || tool.starts_with("maria") {
@@ -342,7 +342,7 @@ pub async fn tool_version(ssh: Option<&Connected>, tool: &str) -> AppResult<Stri
     }
 }
 
-async fn exec_collect(ssh: &Connected, cmd: &str) -> AppResult<(Option<u32>, String)> {
+pub async fn exec_collect(ssh: &Connected, cmd: &str) -> AppResult<(Option<u32>, String)> {
     let mut ch = ssh.handle.channel_open_session().await.map_err(|e| {
         AppError::new(
             ErrorCode::HostUnreachable,
@@ -374,6 +374,42 @@ pub struct Run<'a> {
     pub progress: &'a (dyn Fn(f64) + Sync),
     pub log: &'a (dyn Fn(String) + Sync),
     pub stop: &'a AtomicBool,
+    /// PostgreSQL: the server's major version, so a dump is made with a pg_dump that doesn't write settings the
+    /// server (or a pg_restore of its version) can't take. `None` when it isn't known.
+    pub server_major: Option<u32>,
+}
+
+/// Where a PostgreSQL tool of one major version usually lives (Debian, Homebrew on Apple and Intel Macs,
+/// Postgres.app).
+pub fn versioned_pg_tool(name: &str, major: u32) -> Vec<String> {
+    vec![
+        format!("/usr/lib/postgresql/{major}/bin/{name}"),
+        format!("/opt/homebrew/opt/postgresql@{major}/bin/{name}"),
+        format!("/usr/local/opt/postgresql@{major}/bin/{name}"),
+        format!("/Applications/Postgres.app/Contents/Versions/{major}/bin/{name}"),
+    ]
+}
+
+/// The PostgreSQL tool to run against a server of `server_major`: the usual one, unless it is 17 or later and the
+/// server is older (pg_dump and pg_restore 17 write `SET transaction_timeout`, which those servers refuse) and a
+/// client of the server's own version is installed.
+pub async fn pg_tool_for(ssh: Option<&Connected>, name: &str, server_major: Option<u32>) -> String {
+    let Some(server) = server_major.filter(|m| *m > 0 && *m < 17) else {
+        return name.to_string();
+    };
+    let usual = tool_version(ssh, name)
+        .await
+        .ok()
+        .and_then(|v| crate::dbs::dumpfile::major(v.rsplit(' ').next().unwrap_or("")));
+    if usual.is_some_and(|m| m < 17) {
+        return name.to_string();
+    }
+    for c in versioned_pg_tool(name, server) {
+        if tool_version(ssh, &c).await.is_ok() {
+            return c;
+        }
+    }
+    name.to_string()
 }
 
 fn finish(status: Option<i32>, stderr: &str, stopped: bool, tool: &str) -> AppResult<()> {
@@ -403,7 +439,7 @@ pub async fn run(mut r: Run<'_>) -> AppResult<()> {
     let tool: String = if my || mongo {
         resolve_tool(r.ssh, r.cfg.engine, r.tool).await?.0
     } else {
-        tool_name(r.cfg.engine, r.tool)?.to_string()
+        pg_tool_for(r.ssh, tool_name(r.cfg.engine, r.tool)?, r.server_major).await
     };
     let tool = tool.as_str();
     let a = if my {
@@ -667,6 +703,7 @@ mod docker_tests {
             progress: &|_| {},
             log: &|l| log.lock().unwrap().push(l),
             stop: &AtomicBool::new(false),
+            server_major: None,
         })
         .await;
         (r, out, log.into_inner().unwrap())
@@ -711,6 +748,7 @@ mod docker_tests {
             progress: &|_| {},
             log: &|_| {},
             stop: &AtomicBool::new(false),
+            server_major: None,
         })
         .await
         .unwrap();
@@ -838,6 +876,7 @@ mod docker_tests {
             progress: &|_| {},
             log: &|_| {},
             stop: &stop,
+            server_major: None,
         });
         let (res, _) = tokio::join!(fut, async {
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;

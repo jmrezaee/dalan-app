@@ -488,6 +488,14 @@ pub fn delete(conn: &mut Connection, s: &VaultSession, id: &str) -> AppResult<()
             ),
         ));
     }
+    // A saved job that backs up to a folder on this host (D15).
+    let jobs = crate::dbs::jobs::names_using_host(conn, id)?;
+    if let Some(name) = jobs.first() {
+        return Err(AppError::new(
+            crate::error::ErrorCode::InUse,
+            format!("The saved job “{name}” backs up to this host. Delete the job or change its folder first."),
+        ));
+    }
     // The same for Redis databases reached through this host (RESTRICT in migration 0006).
     let dbs = crate::redis::store::names_using_host(conn, id)?;
     if !dbs.is_empty() {

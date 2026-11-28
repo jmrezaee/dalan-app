@@ -1,7 +1,7 @@
 //! Session log commands (S15).
 
 use tauri::ipc::Channel;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::error::{AppError, AppResult};
 use crate::logs::{self, LogSummary};
@@ -9,11 +9,7 @@ use crate::ssh::RawBytes;
 use crate::state::AppState;
 
 pub fn logs_dir(app: &AppHandle) -> AppResult<std::path::PathBuf> {
-    Ok(app
-        .path()
-        .app_data_dir()
-        .map_err(|e| AppError::internal(e.to_string()))?
-        .join("logs"))
+    Ok(crate::datadir::data_dir(app)?.join("logs"))
 }
 
 #[tauri::command]

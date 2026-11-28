@@ -13,3 +13,11 @@
   75% { transform: translateX(6px); }
 }
 .animate-shake { animation: shake 160ms var(--motion-ease); }
+
+/* P31: while something is dragged on pointer events, nothing selects and the pointer says so. */
+html[data-dragging],
+html[data-dragging] * {
+  cursor: grabbing !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}

@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod ai;
 pub mod commands;
+pub mod datadir;
 pub mod db;
 pub mod dbs;
 pub mod diagnostics;
@@ -117,9 +118,56 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sql::sql_import_discard,
             commands::sql::sql_backup_check,
             commands::sql::sql_backup_start,
-            commands::sql::sql_restore_prepare,
-            commands::sql::sql_restore_commit,
-            commands::sql::sql_restore_discard,
+            commands::restore::restore_pick,
+            commands::restore::restore_prepare,
+            commands::restore::restore_commit,
+            commands::restore::restore_forget,
+            commands::restore::restore_save_database,
+            commands::copy::copy_prepare,
+            commands::copy::copy_commit,
+            commands::copy::copy_related,
+            commands::jobs::jobs_list,
+            commands::jobs::job_runs,
+            commands::jobs::job_rename,
+            commands::jobs::job_delete,
+            commands::jobs::job_save_copy,
+            commands::jobs::job_save_restore,
+            commands::jobs::job_save_backup,
+            commands::jobs::job_setup,
+            commands::jobs::restore_pick_job,
+            commands::jobs::job_backup_run,
+            commands::bulk::bulk_export,
+            commands::bulk::bulk_import_pick,
+            commands::bulk::bulk_infer,
+            commands::bulk::bulk_import_prepare,
+            commands::bulk::bulk_import_commit,
+            commands::bulk::bulk_import_discard,
+            commands::bulk::mg_import_pick,
+            commands::bulk::mg_import_preview,
+            commands::bulk::mg_import_prepare,
+            commands::bulk::mg_import_commit,
+            commands::bulk::mg_import_discard,
+            commands::checks::backup_check_pick,
+            commands::checks::backup_verify,
+            commands::compare::schema_compare,
+            commands::compare::schema_sync_script,
+            commands::compare::schema_sync_prepare,
+            commands::compare::schema_sync_commit,
+            commands::compare::schema_sync_discard,
+            commands::compare::schema_script_save,
+            commands::compare::schema_snapshot_save,
+            commands::compare::schema_snapshots,
+            commands::compare::schema_snapshot_delete,
+            commands::compare::data_columns,
+            commands::compare::data_compare,
+            commands::compare::data_match_prepare,
+            commands::compare::data_match_commit,
+            commands::compare::data_match_discard,
+            commands::compare::data_match_script,
+            commands::jobs::job_set_schedule,
+            commands::jobs::job_schedule_preview,
+            commands::restore::restore_pick_remote,
+            commands::restore::restore_pick_dropped,
             commands::sql::sql_cancel,
             commands::sql::sql_editor_close,
             commands::sql::sql_catalog,
@@ -258,7 +306,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::AutoLockWarning,
             events::TunnelChanged,
             events::QuitRequested,
-            events::LinkReceived
+            events::LinkReceived,
+            events::JobsChanged,
+            events::FileDropped
         ])
 }
 
@@ -303,11 +353,13 @@ pub fn run() {
     app.plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_log::Builder::default().build())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
-            let dir = app.path().app_data_dir()?;
+            // Debug builds keep their own folder: never the released app's vault (see datadir.rs).
+            let dir = datadir::data_dir(app.handle())?;
             perms::private_dir(&dir)?;
             // Edited-file copies from a previous run are stale: nothing is watching them any more.
             let _ = std::fs::remove_dir_all(dir.join("edit-tmp"));
@@ -354,17 +406,43 @@ pub fn run() {
                     event: WindowEvent::CloseRequested { api, .. },
                     ..
                 } => {
-                    if let Some(n) = ask(app) {
+                    if let Some((n, jobs)) = ask(app) {
                         api.prevent_close();
-                        let _ = events::QuitRequested { live_sessions: n }.emit(app);
+                        let _ = events::QuitRequested {
+                            live_sessions: n,
+                            running_jobs: jobs,
+                        }
+                        .emit(app);
+                    }
+                }
+                // A file dragged in from Finder: kept here, the window is told its name and id.
+                RunEvent::WindowEvent {
+                    event: WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }),
+                    ..
+                } => {
+                    let state = app.state::<AppState>();
+                    if let (true, Some(p)) = (state.is_unlocked(), paths.first()) {
+                        let id = uuid::Uuid::now_v7().to_string();
+                        let name = p
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        if let Ok(mut slot) = state.dropped.lock() {
+                            *slot = Some((id.clone(), p.clone()));
+                        }
+                        let _ = events::FileDropped { id, name }.emit(app);
                     }
                 }
                 RunEvent::ExitRequested {
                     api, code: None, ..
                 } => {
-                    if let Some(n) = ask(app) {
+                    if let Some((n, jobs)) = ask(app) {
                         api.prevent_exit();
-                        let _ = events::QuitRequested { live_sessions: n }.emit(app);
+                        let _ = events::QuitRequested {
+                            live_sessions: n,
+                            running_jobs: jobs,
+                        }
+                        .emit(app);
                     }
                 }
                 _ => {}
@@ -373,14 +451,17 @@ pub fn run() {
 }
 
 /// `Some(n)` when quitting now would end `n` live sessions and the UI must be asked first.
-fn quit_question(app: &tauri::AppHandle) -> Option<u32> {
+/// Sessions (and open transactions) and scheduled jobs running now, when quitting should ask first.
+fn quit_question(app: &tauri::AppHandle) -> Option<(u32, u32)> {
     let st = app.try_state::<AppState>()?;
-    match st
-        .quit
-        .decide(st.sessions.live_count() + st.sql.open_transactions())
-    {
+    let jobs = st.running_jobs.load(std::sync::atomic::Ordering::SeqCst);
+    let live = st.sessions.live_count() + st.sql.open_transactions();
+    match st.quit.decide(live + jobs) {
         quit::Decision::Allow => None,
-        quit::Decision::Ask(n) => Some(n),
+        quit::Decision::Ask(_) => Some((
+            u32::try_from(live).unwrap_or(u32::MAX),
+            u32::try_from(jobs).unwrap_or(u32::MAX),
+        )),
     }
 }
 
@@ -414,8 +495,12 @@ fn ask_before_quit_from_the_menu(app: &mut tauri::App) -> tauri::Result<()> {
     app.on_menu_event(|app, event| {
         if event.id() == "quit-dalan" {
             match quit_question(app) {
-                Some(n) => {
-                    let _ = events::QuitRequested { live_sessions: n }.emit(app);
+                Some((n, jobs)) => {
+                    let _ = events::QuitRequested {
+                        live_sessions: n,
+                        running_jobs: jobs,
+                    }
+                    .emit(app);
                 }
                 None => app.exit(0),
             }

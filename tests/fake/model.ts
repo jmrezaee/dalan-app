@@ -161,6 +161,8 @@ export interface Model {
   redisBulk: { id: string, connId: string, keys: string[] } | null
   redisBulkStop: boolean
   redisBulkSlow: boolean
+  /** D12: what the next restore pick returns (`clean`, `hostile`, `clash`, `slow`). */
+  restoreNext: string
   /** Writes waiting for their confirmation (see commands/redisWrite.ts). */
   redisPending: Map<string, { connId: string, op: import('../../app/types/bindings').RedisWriteOp_Deserialize, typed: boolean, at: number }>
 }
@@ -220,6 +222,7 @@ export function createModel(seed: Seed): Model {
     redisBulk: null,
     redisBulkStop: false,
     redisBulkSlow: false,
+    restoreNext: 'clean',
     system: { supported: false, ssh_links: false, autostart: false, other_handler: null, pinned: false, edition: null, install_dir: null },
   }
 }

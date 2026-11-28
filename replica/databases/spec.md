@@ -32,6 +32,8 @@ Decisions (Mehrdad, 2026-11-19 to 2026-11-22):
 | S45 | Aggregation builder: stages on/off, output after each stage, hint, export code, create view | MongoAggregate |
 | S46 | Schema sample, indexes with use, validation rules | MongoSchema |
 | S47 | MongoDB shell and its gate | MongoShell |
+| S48 | Restore a dump made anywhere (see `restore-copy.md`) | RestoreDump (new) |
+| S49 | Copy between databases (see `restore-copy.md`) | DbCopy (new) |
 
 | ID | flow |
 | --- | --- |
@@ -46,6 +48,8 @@ Decisions (Mehrdad, 2026-11-19 to 2026-11-22):
 | F28 | Build and run an aggregation pipeline |
 | F29 | Inspect schema, indexes and validation of a collection |
 | F30 | Use the MongoDB shell |
+| F31 | Restore a dump made elsewhere into an existing or a new database |
+| F32 | Copy tables or collections from one database to another |
 
 Shell changes:
 
@@ -242,7 +246,8 @@ Each is one `go`. Read this spec, `replica/redis/spec.md` and the boards named b
 - **D9 MongoDB aggregation, schema, indexes, validation (S45, S46; F28, F29).**
 - **D10 MongoDB shell and transfer (S47, S43 for Mongo; F30):** the parser, the shell, update/delete many through the gate, mongodump/mongorestore.
 - **D11 Hardening and hand checks:** performance, walk chapters, visual baselines, accessibility, Settings group, `features.csv`, README/onboarding part, hand-checks section J. Ends `[h]`.
+- **D12 Restore any dump (S48, F31)** and **D13 Copy between databases (S49, F32):** specified in `replica/databases/restore-copy.md` (added 2026-11-27).
 
 ## 7. Not in this version
 
-SQLite files and SQL Server (backlog; the picker hides them), visual query builder, schema compare and data sync between databases, scheduled jobs, model-first design (drawing tables to create them), stored procedure debugger, Mongo GridFS file browser (shown in the tree, opens read-only list only), Mongo change streams, sharing saved queries between teammates before sync exists.
+SQLite files and SQL Server (backlog; the picker hides them), visual query builder, schema compare, data compare and scheduled jobs (now planned in `restore-copy.md` §9, D14 to D18), model-first design (drawing tables to create them), stored procedure debugger, Mongo GridFS file browser (shown in the tree, opens read-only list only), Mongo change streams, sharing saved queries between teammates before sync exists.

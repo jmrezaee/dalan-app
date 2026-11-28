@@ -51,7 +51,7 @@ export const commands = {
 	 *  Writes a collection (or the documents matching `filter`) to a file the person picks, one extended JSON document per
 	 *  line. The file is written by Rust; `None` when the save dialog was cancelled.
 	 */
-	mgExport: (connId: string, transferId: string, db: string, coll: string, filter: string, progress: Channel<TransferProgress>) => typedError<TransferDone | null, AppError>(__TAURI_INVOKE("mg_export", { connId, transferId, db, coll, filter, progress })),
+	mgExport: (connId: string, transferId: string, db: string, coll: string, filter: string, masks: MaskRule_Deserialize[], progress: Channel<TransferProgress>) => typedError<TransferDone_Serialize | null, AppError>(__TAURI_INVOKE("mg_export", { connId, transferId, db, coll, filter, masks, progress })),
 	/**  One shell line. Reads run at once; a change is parsed, classified and held like every other change. */
 	mgShell: (connId: string, db: string, line: string) => typedError<MgShellResult_Serialize, AppError>(__TAURI_INVOKE("mg_shell", { connId, db, line })),
 	/**  Runs what `mg_shell` held, after the mode is asked again (and the database's name, for a dangerous command). */
@@ -149,7 +149,7 @@ export const commands = {
 	 *  Writes a table (or the rows matching `filter`) to a file the person picks. Rows stream to the file; progress
 	 *  arrives on `progress`. `None` when the save dialog was cancelled.
 	 */
-	sqlExportTable: (connId: string, transferId: string, schema: string, table: string, filter: string, format: ExportFormat, header: boolean, progress: Channel<TransferProgress>) => typedError<TransferDone | null, AppError>(__TAURI_INVOKE("sql_export_table", { connId, transferId, schema, table, filter, format, header, progress })),
+	sqlExportTable: (connId: string, transferId: string, schema: string, table: string, filter: string, format: ExportFormat, options: ExportOptions_Deserialize, progress: Channel<TransferProgress>) => typedError<TransferDone_Serialize | null, AppError>(__TAURI_INVOKE("sql_export_table", { connId, transferId, schema, table, filter, format, options, progress })),
 	/**  Stop for an export, a backup or a restore. */
 	sqlTransferStop: (transferId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_transfer_stop", { transferId })),
 	/**  The open-file dialog for an import. Rust keeps the path; the window only shows the name. */
@@ -164,15 +164,117 @@ export const commands = {
 	/**  Which dump tool would run, where, and its version (S43's "Tool on db-primary"). */
 	sqlBackupCheck: (connId: string) => typedError<BackupInfo_Serialize, AppError>(__TAURI_INVOKE("sql_backup_check", { connId })),
 	/**  Runs the dump tool and streams its output to a file the person picks. `None` when the dialog was cancelled. */
-	sqlBackupStart: (connId: string, transferId: string, progress: Channel<TransferProgress>) => typedError<TransferDone | null, AppError>(__TAURI_INVOKE("sql_backup_start", { connId, transferId, progress })),
+	sqlBackupStart: (connId: string, transferId: string, progress: Channel<TransferProgress>) => typedError<TransferDone_Serialize | null, AppError>(__TAURI_INVOKE("sql_backup_start", { connId, transferId, progress })),
 	/**
-	 *  Picks a dump file and holds the restore. Always typed; refused in Read-only, and on a production database unless it
-	 *  has been switched to Open (which needs the master password).
+	 *  The system dialog for a dump file (or a dump folder), then the dump is read: what it is and what is inside.
+	 *  `None` when the dialog was cancelled.
 	 */
-	sqlRestorePrepare: (connId: string) => typedError<RestorePending | null, AppError>(__TAURI_INVOKE("sql_restore_prepare", { connId })),
-	/**  Runs the restore tool on the held file after the database's exact name is typed and the mode asked again. */
-	sqlRestoreCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, progress: Channel<TransferProgress>) => typedError<null, AppError>(__TAURI_INVOKE("sql_restore_commit", { connId, pendingId, typedName, transferId, progress })),
-	sqlRestoreDiscard: (connId: string, pendingId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_restore_discard", { connId, pendingId })),
+	restorePick: (connId: string, folder: boolean) => typedError<DumpInfo_Serialize | null, AppError>(__TAURI_INVOKE("restore_pick", { connId, folder })),
+	/**  Plans the restore and, unless something blocks it, holds it for the confirmation. */
+	restorePrepare: (connId: string, dumpId: string, options: RestoreOptions_Deserialize) => typedError<RestorePlan_Serialize, AppError>(__TAURI_INVOKE("restore_prepare", { connId, dumpId, options })),
+	/**  Runs the held restore once the confirmation (typed when the review asked for it) arrives and the mode is asked again. */
+	restoreCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, progress: Channel<RestoreProgress_Deserialize>, jobId: string | null) => typedError<RestoreResult_Serialize, AppError>(__TAURI_INVOKE("restore_commit", { connId, pendingId, typedName, transferId, progress, jobId })),
+	/**  The dump isn't needed any more (the dialog closed): its unpacked folder, if any, goes with it. */
+	restoreForget: (connId: string, dumpId: string) => typedError<null, AppError>(__TAURI_INVOKE("restore_forget", { connId, dumpId })),
+	/**
+	 *  "Open the database" after a restore into a new database: a saved copy of this tab's database that opens the new
+	 *  one (same route, user, password and protection). The password is copied in Rust, from the vault to the vault.
+	 */
+	restoreSaveDatabase: (connId: string, database: string) => typedError<DatabaseRow_Serialize, AppError>(__TAURI_INVOKE("restore_save_database", { connId, database })),
+	/**  Plans the copy and, unless something blocks it, holds it for the confirmation. */
+	copyPrepare: (connId: string, request: CopyRequest_Deserialize, jobId: string | null) => typedError<CopyPlan_Serialize, AppError>(__TAURI_INVOKE("copy_prepare", { connId, request, jobId })),
+	/**  Runs the held copy once confirmed (typed when the review asked), with the target's mode asked again. */
+	copyCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, progress: Channel<CopyProgress_Deserialize>) => typedError<CopyReport_Serialize, AppError>(__TAURI_INVOKE("copy_commit", { connId, pendingId, typedName, transferId, progress })),
+	/**
+	 *  "Select related": the tables the chosen ones reference by foreign key, all the way down, so a copy doesn't break
+	 *  its keys. Returns them (the chosen ones not repeated).
+	 */
+	copyRelated: (connId: string, objects: CopyObject_Deserialize[]) => typedError<CopyObject_Serialize[], AppError>(__TAURI_INVOKE("copy_related", { connId, objects })),
+	jobsList: () => typedError<JobRow_Serialize[], AppError>(__TAURI_INVOKE("jobs_list")),
+	jobRuns: (jobId: string) => typedError<JobRun_Serialize[], AppError>(__TAURI_INVOKE("job_runs", { jobId })),
+	jobRename: (jobId: string, name: string) => typedError<null, AppError>(__TAURI_INVOKE("job_rename", { jobId, name })),
+	jobDelete: (jobId: string) => typedError<null, AppError>(__TAURI_INVOKE("job_delete", { jobId })),
+	/**  Saves the copy set up in this tab's Copy view (its target is the other tab's saved database). */
+	jobSaveCopy: (connId: string, name: string, request: CopyRequest_Deserialize) => typedError<JobRow_Serialize, AppError>(__TAURI_INVOKE("job_save_copy", { connId, name, request })),
+	/**  Saves the restore set up in this tab's restore dialog: the dump's path (it stays in Rust) and the options. */
+	jobSaveRestore: (connId: string, dumpId: string, name: string, options: RestoreOptions_Deserialize) => typedError<JobRow_Serialize, AppError>(__TAURI_INVOKE("job_save_restore", { connId, dumpId, name, options })),
+	/**
+	 *  Saves a backup of this tab's database into a folder: on a host when `host` is given, otherwise one chosen now in
+	 *  the system dialog (`None` when that was cancelled).
+	 */
+	jobSaveBackup: (connId: string, name: string, host: HostFolder | null) => typedError<JobRow_Serialize | null, AppError>(__TAURI_INVOKE("job_save_backup", { connId, name, host })),
+	jobSetup: (jobId: string) => typedError<JobSetup_Serialize, AppError>(__TAURI_INVOKE("job_setup", { jobId })),
+	/**  A saved restore's dump, read again from where it was (it may have changed since: the safety scan runs again). */
+	restorePickJob: (connId: string, jobId: string) => typedError<DumpInfo_Serialize, AppError>(__TAURI_INVOKE("restore_pick_job", { connId, jobId })),
+	/**
+	 *  Runs a saved backup into its folder (here or on a host): `<database>-<job>-<yyyy-mm-dd-hhmm>.<ext>`, then
+	 *  applies the job's retention. Recorded as a run.
+	 */
+	jobBackupRun: (connId: string, jobId: string, transferId: string, progress: Channel<TransferProgress>) => typedError<TransferDone_Serialize, AppError>(__TAURI_INVOKE("job_backup_run", { connId, jobId, transferId, progress })),
+	bulkExport: (connId: string, transferId: string, request: BulkExport_Deserialize, progress: Channel<BulkProgress>) => typedError<BulkDone | null, AppError>(__TAURI_INVOKE("bulk_export", { connId, transferId, request, progress })),
+	/**  The folder (or zip) dialog, then every CSV, TSV and JSON file in it, each matched to a table by its name. */
+	bulkImportPick: (connId: string, zip: boolean) => typedError<BulkFiles_Serialize | null, AppError>(__TAURI_INVOKE("bulk_import_pick", { connId, zip })),
+	/**
+	 *  A CREATE TABLE for a file whose table isn't there: the export's own types when its manifest has them (same
+	 *  engine), else types read from the values.
+	 */
+	bulkInfer: (connId: string, fileId: string, delimiterName: string, header: boolean, schema: string, table: string) => typedError<InferredTable, AppError>(__TAURI_INVOKE("bulk_infer", { connId, fileId, delimiterName, header, schema, table })),
+	/**  Checks every file (mappings against their tables, the CREATE TABLEs) and holds the run for the confirmation. */
+	bulkImportPrepare: (connId: string, items: BulkItem_Deserialize[]) => typedError<BulkImportPending, AppError>(__TAURI_INVOKE("bulk_import_prepare", { connId, items })),
+	/**
+	 *  Runs the held import: each CREATE TABLE, then each file in its own transaction (one failing doesn't stop the
+	 *  others; the report says which). Progress per file on `progress`.
+	 */
+	bulkImportCommit: (connId: string, pendingId: string, progress: Channel<BulkProgress>) => typedError<BulkFileReport_Serialize[], AppError>(__TAURI_INVOKE("bulk_import_commit", { connId, pendingId, progress })),
+	bulkImportDiscard: (connId: string, pendingId: string) => __TAURI_INVOKE<void>("bulk_import_discard", { connId, pendingId }),
+	/**  The open-file dialog for a MongoDB import (JSON lines, a JSON array, or CSV). */
+	mgImportPick: (connId: string) => typedError<CsvFile | null, AppError>(__TAURI_INVOKE("mg_import_pick", { connId })),
+	mgImportPreview: (connId: string, fileId: string) => typedError<MgImportPreview, AppError>(__TAURI_INVOKE("mg_import_preview", { connId, fileId })),
+	/**
+	 *  Reads the file (any error is said now) and holds the import: insert and upsert are writes, replace removes every
+	 *  document first, so it asks for the typed name.
+	 */
+	mgImportPrepare: (connId: string, db: string, coll: string, fileId: string, mode: MgImportMode) => typedError<MgImportPending, AppError>(__TAURI_INVOKE("mg_import_prepare", { connId, db, coll, fileId, mode })),
+	mgImportCommit: (connId: string, pendingId: string, typedName: string | null, progress: Channel<BulkProgress>) => typedError<MgImportReport, AppError>(__TAURI_INVOKE("mg_import_commit", { connId, pendingId, typedName, progress })),
+	mgImportDiscard: (connId: string, pendingId: string) => __TAURI_INVOKE<void>("mg_import_discard", { connId, pendingId }),
+	/**  The system dialog for a backup file to check. The window gets an id; the path stays here. */
+	backupCheckPick: (connId: string) => typedError<CsvFile | null, AppError>(__TAURI_INVOKE("backup_check_pick", { connId })),
+	backupVerify: (sourceConnId: string, checkConnId: string, file: CheckFile) => typedError<VerifyReport_Serialize, AppError>(__TAURI_INVOKE("backup_verify", { sourceConnId, checkConnId, file })),
+	schemaCompare: (source: Side_Deserialize, target: Side_Deserialize) => typedError<SchemaCompare_Serialize, AppError>(__TAURI_INVOKE("schema_compare", { source, target })),
+	/**  The script for the chosen differences, for the editor ("Open in a query tab"). */
+	schemaSyncScript: (source: Side_Deserialize, target: Side_Deserialize, chosen: string[]) => typedError<string, AppError>(__TAURI_INVOKE("schema_sync_script", { source, target, chosen })),
+	/**  Builds the script fresh and holds it for the target's confirmation. */
+	schemaSyncPrepare: (source: Side_Deserialize, target: Side_Deserialize, chosen: string[]) => typedError<SyncPlan, AppError>(__TAURI_INVOKE("schema_sync_prepare", { source, target, chosen })),
+	schemaSyncCommit: (connId: string, pendingId: string, typedName: string | null) => typedError<SyncReport_Serialize, AppError>(__TAURI_INVOKE("schema_sync_commit", { connId, pendingId, typedName })),
+	schemaSyncDiscard: (connId: string, pendingId: string) => __TAURI_INVOKE<void>("schema_sync_discard", { connId, pendingId }),
+	/**
+	 *  "Copy as migration…": the script into a file chosen in the system dialog. Returns the file's name, `None` when
+	 *  the dialog was cancelled.
+	 */
+	schemaScriptSave: (source: Side_Deserialize, target: Side_Deserialize, chosen: string[]) => typedError<string | null, AppError>(__TAURI_INVOKE("schema_script_save", { source, target, chosen })),
+	/**  Saves the schema of an open database as a snapshot to compare against later. */
+	schemaSnapshotSave: (connId: string, schema: string) => typedError<SnapshotRow, AppError>(__TAURI_INVOKE("schema_snapshot_save", { connId, schema })),
+	schemaSnapshots: () => typedError<SnapshotRow[], AppError>(__TAURI_INVOKE("schema_snapshots")),
+	schemaSnapshotDelete: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("schema_snapshot_delete", { id })),
+	/**  The source table's columns (and which the target has too), and its primary key: the default key. */
+	dataColumns: (source: DataSide, target: DataSide) => typedError<DataColumns, AppError>(__TAURI_INVOKE("data_columns", { source, target })),
+	dataCompare: (source: DataSide, target: DataSide, key: string[], quick: boolean, transferId: string, progress: Channel<DataProgress>) => typedError<DataCompareResult_Serialize, AppError>(__TAURI_INVOKE("data_compare", { source, target, key, quick, transferId, progress })),
+	/**  Holds "Make target match" for the target's confirmation: a write; on production always typed (it can delete). */
+	dataMatchPrepare: (source: DataSide, target: DataSide, key: string[], quick: boolean) => typedError<MatchPlan, AppError>(__TAURI_INVOKE("data_match_prepare", { source, target, key, quick })),
+	dataMatchCommit: (connId: string, pendingId: string, typedName: string | null, transferId: string, progress: Channel<DataProgress>) => typedError<MatchReport, AppError>(__TAURI_INVOKE("data_match_commit", { connId, pendingId, typedName, transferId, progress })),
+	dataMatchDiscard: (connId: string, pendingId: string) => __TAURI_INVOKE<void>("data_match_discard", { connId, pendingId }),
+	/**  "Save as a script…": the inserts, updates and deletes into a file chosen in the system dialog. */
+	dataMatchScript: (source: DataSide, target: DataSide, key: string[], quick: boolean) => typedError<string | null, AppError>(__TAURI_INVOKE("data_match_script", { source, target, key, quick })),
+	/**  D15: sets or clears a job's schedule (backups, and copies whose target isn't production) and its retention. */
+	jobSetSchedule: (jobId: string, schedule: Schedule | null, retention: Retention_Deserialize | null) => typedError<JobRow_Serialize, AppError>(__TAURI_INVOKE("job_set_schedule", { jobId, schedule, retention })),
+	jobSchedulePreview: (every: Every) => typedError<SchedulePreview, AppError>(__TAURI_INVOKE("job_schedule_preview", { every })),
+	/**
+	 *  D15 (E8): a dump file in a folder on a host, picked in the SFTP picker (`sftp_id` is the picker's session). It is
+	 *  fetched into a private folder here and read like a local one; a saved restore fetches it again from the host.
+	 */
+	restorePickRemote: (connId: string, sftpId: string, hostId: string, path: string) => typedError<DumpInfo_Serialize, AppError>(__TAURI_INVOKE("restore_pick_remote", { connId, sftpId, hostId, path })),
+	/**  The file dropped on the window (`FileDropped`'s id), read like a picked one. Taken once. */
+	restorePickDropped: (connId: string, dropId: string) => typedError<DumpInfo_Serialize, AppError>(__TAURI_INVOKE("restore_pick_dropped", { connId, dropId })),
 	/**  Stop: the running statement is cancelled by the server (a second connection), and no further statement starts. */
 	sqlCancel: (connId: string, editorId: string) => typedError<null, AppError>(__TAURI_INVOKE("sql_cancel", { connId, editorId })),
 	/**  The editor tab closed. */
@@ -438,6 +540,8 @@ export const commands = {
 /** Events */
 export const events = {
 	autoLockWarning: makeEvent<AutoLockWarning, AutoLockWarning>("auto-lock-warning"),
+	fileDropped: makeEvent<FileDropped, FileDropped>("file-dropped"),
+	jobsChanged: makeEvent<JobsChanged, JobsChanged>("jobs-changed"),
 	linkReceived: makeEvent<LinkReceived, LinkReceived>("link-received"),
 	quitRequested: makeEvent<QuitRequested, QuitRequested>("quit-requested"),
 	tunnelChanged: makeEvent<TunnelChanged_Serialize, TunnelChanged_Deserialize>("tunnel-changed"),
@@ -593,6 +697,139 @@ export type BlockingChain = {
 	waiting: ChainLink[],
 };
 
+export type BulkDone = {
+	/**  The folder or the zip (its name only is shown). */
+	name: string,
+	files: number | null,
+	rows: number | null,
+	warnings: string[],
+};
+
+export type BulkExport = BulkExport_Serialize | BulkExport_Deserialize;
+
+export type BulkExport_Deserialize = {
+	objects: BulkObject[],
+	/**  SQL tables only (collections are always JSON lines). */
+	format: ExportFormat,
+	header: boolean,
+	masks: MaskRule_Deserialize[],
+	/**  `schema.sql` with the tables' CREATE statements (SQL engines). */
+	ddl: boolean,
+	zip: boolean,
+};
+
+export type BulkExport_Serialize = {
+	objects: BulkObject[],
+	/**  SQL tables only (collections are always JSON lines). */
+	format: ExportFormat,
+	header: boolean,
+	masks: MaskRule_Serialize[],
+	/**  `schema.sql` with the tables' CREATE statements (SQL engines). */
+	ddl: boolean,
+	zip: boolean,
+};
+
+export type BulkFile = {
+	/**  For `sql_import_preview` and the import (the path stays in Rust). */
+	id: string,
+	name: string,
+	/**  `,` or `tab`. */
+	delimiter: string,
+	/**  JSON turned into CSV with a header. */
+	json: boolean,
+	/**  The table it goes into, matched by name (the window can change it). */
+	schema: string,
+	table: string,
+	exists: boolean,
+};
+
+export type BulkFileReport = BulkFileReport_Serialize | BulkFileReport_Deserialize;
+
+export type BulkFileReport_Deserialize = {
+	name: string,
+	table: string,
+	rows: number | null,
+	created: boolean,
+	error?: string | null,
+};
+
+export type BulkFileReport_Serialize = {
+	name: string,
+	table: string,
+	rows: number | null,
+	created: boolean,
+	error: string | null,
+};
+
+export type BulkFiles = BulkFiles_Serialize | BulkFiles_Deserialize;
+
+export type BulkFiles_Deserialize = {
+	source: string,
+	files: BulkFile[],
+	/**  Files that aren't CSV, TSV or JSON. */
+	skipped: string[],
+	/**  The folder or zip came from a Dalan export (its manifest names the source). */
+	from?: string | null,
+};
+
+export type BulkFiles_Serialize = {
+	source: string,
+	files: BulkFile[],
+	/**  Files that aren't CSV, TSV or JSON. */
+	skipped: string[],
+	/**  The folder or zip came from a Dalan export (its manifest names the source). */
+	from: string | null,
+};
+
+export type BulkImportPending = {
+	id: string,
+	db_name: string,
+	environment: string,
+	files: number | null,
+	creates: number | null,
+	rows: number | null,
+};
+
+export type BulkItem = BulkItem_Serialize | BulkItem_Deserialize;
+
+export type BulkItem_Deserialize = {
+	file_id: string,
+	name: string,
+	schema: string,
+	table: string,
+	delimiter_name: string,
+	header: boolean,
+	/**  For each file column, the table column it goes into (`None`: skipped). */
+	mapping: (string | null)[],
+	/**  The reviewed CREATE TABLE, for a table that isn't there yet. */
+	create?: string | null,
+};
+
+export type BulkItem_Serialize = {
+	file_id: string,
+	name: string,
+	schema: string,
+	table: string,
+	delimiter_name: string,
+	header: boolean,
+	/**  For each file column, the table column it goes into (`None`: skipped). */
+	mapping: (string | null)[],
+	/**  The reviewed CREATE TABLE, for a table that isn't there yet. */
+	create: string | null,
+};
+
+export type BulkObject = {
+	schema: string,
+	name: string,
+};
+
+export type BulkProgress = {
+	index: number | null,
+	total: number | null,
+	table: string,
+	rows: number | null,
+};
+
 export type CatalogTable = {
 	schema: string,
 	name: string,
@@ -625,12 +862,314 @@ export type ChainLink = {
 	query: string,
 };
 
+export type Change = "added" | "removed" | "changed";
+
+/**  Which backup to check. */
+export type CheckFile = 
+/**  A file id from the backup just made, or from `backup_check_pick` (both kept for the source's tab). */
+{ kind: "picked"; file_id: string } | 
+/**  A file in a folder on a host, through the host picker's SFTP session. */
+{ kind: "host"; sftp_id: string; path: string };
+
 export type Choice = "replace" | "keep_both" | "skip";
 
 /**  Ordered by how much care a statement needs: `Read < Write < Schema < Dangerous`. */
 export type Class = "read" | "write" | "schema" | "dangerous";
 
 export type CodeLanguage = "mongosh" | "node" | "python" | "json";
+
+export type Content = "all" | "schema" | "data";
+
+/**  One column of a table copied between PostgreSQL and MySQL/MariaDB, for the mapping step. */
+export type CopyColumn = CopyColumn_Serialize | CopyColumn_Deserialize;
+
+export type CopyColumnType = {
+	name: string,
+	target_type: string,
+};
+
+/**  One column of a table copied between PostgreSQL and MySQL/MariaDB, for the mapping step. */
+export type CopyColumn_Deserialize = {
+	name: string,
+	source_type: string,
+	target_type: string,
+	/**  What is lost, in words (`None`: nothing). */
+	lossy?: string | null,
+};
+
+/**  One column of a table copied between PostgreSQL and MySQL/MariaDB, for the mapping step. */
+export type CopyColumn_Serialize = {
+	name: string,
+	source_type: string,
+	target_type: string,
+	/**  What is lost, in words (`None`: nothing). */
+	lossy: string | null,
+};
+
+export type CopyContent = "all" | "schema" | "data";
+
+/**  What happens to a table that already exists at the target (§3 "Existing tables at the target"). */
+export type CopyMode = 
+/**  Stop if it exists (the plan says so before anything runs). */
+"create" | 
+/**  Drop it and create it again (typed). */
+"recreate" | 
+/**  Empty it, then load (typed). */
+"empty" | 
+/**  Add the rows. */
+"append" | 
+/**  Insert or replace by primary key (typed). */
+"upsert";
+
+/**
+ *  One table, view or collection to copy. `schema` is the PostgreSQL schema, the MySQL database or the MongoDB
+ *  database it is in at the source.
+ */
+export type CopyObject = CopyObject_Serialize | CopyObject_Deserialize;
+
+/**
+ *  One table, view or collection to copy. `schema` is the PostgreSQL schema, the MySQL database or the MongoDB
+ *  database it is in at the source.
+ */
+export type CopyObject_Deserialize = {
+	schema: string,
+	name: string,
+	/**  `table`, `view` or `collection`. */
+	kind: string,
+	/**  Only these rows (a condition, checked like the grid's; for MongoDB a JSON filter). */
+	filter?: string | null,
+	/**  At most this many rows (a sample). */
+	limit?: number | null,
+	/**  Another name at the target. */
+	rename?: string | null,
+	/**  Between PostgreSQL and MySQL/MariaDB: target types the person chose in place of the mapping's. */
+	types?: CopyColumnType[] | null,
+	/**  Between PostgreSQL and MySQL/MariaDB: the `create table` the person edited (checked again before it runs). */
+	ddl?: string | null,
+	/**  Masking rules for its columns (E5): applied in the stream, before anything reaches the target. */
+	masks?: MaskRule_Deserialize[] | null,
+};
+
+/**
+ *  One table, view or collection to copy. `schema` is the PostgreSQL schema, the MySQL database or the MongoDB
+ *  database it is in at the source.
+ */
+export type CopyObject_Serialize = {
+	schema: string,
+	name: string,
+	/**  `table`, `view` or `collection`. */
+	kind: string,
+	/**  Only these rows (a condition, checked like the grid's; for MongoDB a JSON filter). */
+	filter: string | null,
+	/**  At most this many rows (a sample). */
+	limit: number | null,
+	/**  Another name at the target. */
+	rename: string | null,
+	/**  Between PostgreSQL and MySQL/MariaDB: target types the person chose in place of the mapping's. */
+	types: CopyColumnType[] | null,
+	/**  Between PostgreSQL and MySQL/MariaDB: the `create table` the person edited (checked again before it runs). */
+	ddl: string | null,
+	/**  Masking rules for its columns (E5): applied in the stream, before anything reaches the target. */
+	masks: MaskRule_Serialize[] | null,
+};
+
+export type CopyPlan = CopyPlan_Serialize | CopyPlan_Deserialize;
+
+export type CopyPlan_Deserialize = {
+	pending_id?: string | null,
+	blocked?: string | null,
+	level: string,
+	typed_name: string,
+	source_name: string,
+	target_name: string,
+	environment: string,
+	target_db: string,
+	new_database: boolean,
+	tables: CopyTablePlan_Deserialize[],
+	warnings: string[],
+	/**  The source is read in one snapshot (a MongoDB copy isn't). */
+	snapshot: boolean,
+};
+
+export type CopyPlan_Serialize = {
+	pending_id: string | null,
+	blocked: string | null,
+	level: string,
+	typed_name: string,
+	source_name: string,
+	target_name: string,
+	environment: string,
+	target_db: string,
+	new_database: boolean,
+	tables: CopyTablePlan_Serialize[],
+	warnings: string[],
+	/**  The source is read in one snapshot (a MongoDB copy isn't). */
+	snapshot: boolean,
+};
+
+export type CopyProgress = CopyProgress_Serialize | CopyProgress_Deserialize;
+
+export type CopyProgress_Deserialize = {
+	table: string,
+	index: number | null,
+	tables: number | null,
+	rows: number | null,
+	estimate?: number | null,
+	/**  `schema`, `rows`, `keys` (keys, indexes, sequences, views after the data). */
+	phase: string,
+};
+
+export type CopyProgress_Serialize = {
+	table: string,
+	index: number | null,
+	tables: number | null,
+	rows: number | null,
+	estimate: number | null,
+	/**  `schema`, `rows`, `keys` (keys, indexes, sequences, views after the data). */
+	phase: string,
+};
+
+export type CopyReport = CopyReport_Serialize | CopyReport_Deserialize;
+
+export type CopyReport_Deserialize = {
+	/**  `done`, `stopped`, `failed` (a table failed and the copy stopped) or `partial` (some tables failed). */
+	outcome: string,
+	target_db: string,
+	tables: CopyTableReport_Deserialize[],
+	warnings: string[],
+	seconds: number | null,
+	/**  Views, functions and triggers a copy between engines leaves out, with their DDL. */
+	not_copied: NotCopied[],
+};
+
+export type CopyReport_Serialize = {
+	/**  `done`, `stopped`, `failed` (a table failed and the copy stopped) or `partial` (some tables failed). */
+	outcome: string,
+	target_db: string,
+	tables: CopyTableReport_Serialize[],
+	warnings: string[],
+	seconds: number | null,
+	/**  Views, functions and triggers a copy between engines leaves out, with their DDL. */
+	not_copied: NotCopied[],
+};
+
+export type CopyRequest = CopyRequest_Serialize | CopyRequest_Deserialize;
+
+export type CopyRequest_Deserialize = {
+	/**  The open tab to copy into. */
+	target_conn_id: string,
+	/**  Create this database on the target's server first; `None`: the target tab's database. */
+	new_database?: string | null,
+	objects: CopyObject_Deserialize[],
+	mode: CopyMode,
+	content: CopyContent,
+	/**  Stop at the first failing table (default); otherwise skip it and go on. */
+	stop_on_error: boolean,
+	/**
+	 *  Same engine: also copy the functions and procedures of the chosen tables' schemas (or database) and the
+	 *  triggers of the chosen tables.
+	 */
+	routines?: boolean,
+};
+
+export type CopyRequest_Serialize = {
+	/**  The open tab to copy into. */
+	target_conn_id: string,
+	/**  Create this database on the target's server first; `None`: the target tab's database. */
+	new_database: string | null,
+	objects: CopyObject_Serialize[],
+	mode: CopyMode,
+	content: CopyContent,
+	/**  Stop at the first failing table (default); otherwise skip it and go on. */
+	stop_on_error: boolean,
+	/**
+	 *  Same engine: also copy the functions and procedures of the chosen tables' schemas (or database) and the
+	 *  triggers of the chosen tables.
+	 */
+	routines: boolean,
+};
+
+export type CopyTablePlan = CopyTablePlan_Serialize | CopyTablePlan_Deserialize;
+
+export type CopyTablePlan_Deserialize = {
+	source: string,
+	target: string,
+	kind: string,
+	exists: boolean,
+	/**  What happens, in words: "create", "drop and create", "empty and load", "add rows", "insert or replace". */
+	action: string,
+	rows_estimate?: number | null,
+	/**  Between PostgreSQL and MySQL/MariaDB: each column's mapping, and the `create table` that will run. */
+	columns: CopyColumn_Deserialize[],
+	ddl?: string | null,
+	/**  Every column (or a document's top-level fields), for masking rules. */
+	column_names: string[],
+	/**  Columns that look personal and have no rule yet. */
+	suggested_masks: MaskSuggestion[],
+};
+
+export type CopyTablePlan_Serialize = {
+	source: string,
+	target: string,
+	kind: string,
+	exists: boolean,
+	/**  What happens, in words: "create", "drop and create", "empty and load", "add rows", "insert or replace". */
+	action: string,
+	rows_estimate: number | null,
+	/**  Between PostgreSQL and MySQL/MariaDB: each column's mapping, and the `create table` that will run. */
+	columns: CopyColumn_Serialize[],
+	ddl: string | null,
+	/**  Every column (or a document's top-level fields), for masking rules. */
+	column_names: string[],
+	/**  Columns that look personal and have no rule yet. */
+	suggested_masks: MaskSuggestion[],
+};
+
+export type CopyTableReport = CopyTableReport_Serialize | CopyTableReport_Deserialize;
+
+export type CopyTableReport_Deserialize = {
+	source: string,
+	target: string,
+	/**  `done`, `failed`, `stopped` or `skipped`. */
+	status: string,
+	rows: number | null,
+	/**  The row check: the source's count in the snapshot and the target's after the copy. */
+	source_rows?: number | null,
+	target_rows?: number | null,
+	error?: string | null,
+	seconds: number | null,
+};
+
+export type CopyTableReport_Serialize = {
+	source: string,
+	target: string,
+	/**  `done`, `failed`, `stopped` or `skipped`. */
+	status: string,
+	rows: number | null,
+	/**  The row check: the source's count in the snapshot and the target's after the copy. */
+	source_rows: number | null,
+	target_rows: number | null,
+	error: string | null,
+	seconds: number | null,
+};
+
+export type CountRow = CountRow_Serialize | CountRow_Deserialize;
+
+export type CountRow_Deserialize = {
+	name: string,
+	/**  `None`: not in the source (any more). */
+	source?: number | null,
+	restored: number | null,
+	same: boolean,
+};
+
+export type CountRow_Serialize = {
+	name: string,
+	/**  `None`: not in the source (any more). */
+	source: number | null,
+	restored: number | null,
+	same: boolean,
+};
 
 export type CsvColumn = {
 	name: string,
@@ -660,6 +1199,95 @@ export type CsvPreview = {
 	table_columns: CsvColumn[],
 	/**  For each file column, the table column with the same name (case aside), if any. */
 	suggested: (string | null)[],
+};
+
+export type DataChange = DataChange_Serialize | DataChange_Deserialize;
+
+export type DataChange_Deserialize = {
+	column: string,
+	source?: string | null,
+	target?: string | null,
+};
+
+export type DataChange_Serialize = {
+	column: string,
+	source: string | null,
+	target: string | null,
+};
+
+export type DataColumn = {
+	name: string,
+	kind: ValueKind,
+	in_target: boolean,
+};
+
+export type DataColumns = {
+	columns: DataColumn[],
+	primary_key: string[],
+};
+
+export type DataCompareResult = DataCompareResult_Serialize | DataCompareResult_Deserialize;
+
+export type DataCompareResult_Deserialize = {
+	only_source: number | null,
+	only_target: number | null,
+	different: number | null,
+	identical: number | null,
+	/**  Up to 100 of each, in key order. */
+	samples: DataSample_Deserialize[],
+	columns: string[],
+	key: string[],
+	/**  Columns left out (binary, or only on one side). */
+	skipped: string[],
+	ranges: number | null,
+	ranges_same: number | null,
+	warnings: string[],
+	seconds: number | null,
+};
+
+export type DataCompareResult_Serialize = {
+	only_source: number | null,
+	only_target: number | null,
+	different: number | null,
+	identical: number | null,
+	/**  Up to 100 of each, in key order. */
+	samples: DataSample_Serialize[],
+	columns: string[],
+	key: string[],
+	/**  Columns left out (binary, or only on one side). */
+	skipped: string[],
+	ranges: number | null,
+	ranges_same: number | null,
+	warnings: string[],
+	seconds: number | null,
+};
+
+export type DataProgress = {
+	rows: number | null,
+	ranges_done: number | null,
+	ranges: number | null,
+};
+
+export type DataSample = DataSample_Serialize | DataSample_Deserialize;
+
+export type DataSample_Deserialize = {
+	/**  `only_source`, `only_target` or `different`. */
+	kind: string,
+	key: string,
+	changes: DataChange_Deserialize[],
+};
+
+export type DataSample_Serialize = {
+	/**  `only_source`, `only_target` or `different`. */
+	kind: string,
+	key: string,
+	changes: DataChange_Serialize[],
+};
+
+export type DataSide = {
+	conn_id: string,
+	schema: string,
+	table: string,
 };
 
 /**
@@ -878,6 +1506,153 @@ export type DiagramTable = {
 	columns: DiagramColumn[],
 };
 
+/**  One difference. `table` is set for what belongs to a table (columns, keys, indexes). */
+export type DiffItem = DiffItem_Serialize | DiffItem_Deserialize;
+
+/**  One difference. `table` is set for what belongs to a table (columns, keys, indexes). */
+export type DiffItem_Deserialize = {
+	id: string,
+	/**
+	 *  table, column, primary_key, unique, check, foreign_key, exclusion, index, enum, sequence, view, function,
+	 *  trigger.
+	 */
+	kind: string,
+	table?: string | null,
+	name: string,
+	change: Change,
+	source_ddl?: string | null,
+	target_ddl?: string | null,
+	/**  What changed, in words ("type integer → bigint"). */
+	detail: string[],
+	/**  Applying it drops something or changes a column's type: the gate asks for the typed name. */
+	dangerous: boolean,
+};
+
+/**  One difference. `table` is set for what belongs to a table (columns, keys, indexes). */
+export type DiffItem_Serialize = {
+	id: string,
+	/**
+	 *  table, column, primary_key, unique, check, foreign_key, exclusion, index, enum, sequence, view, function,
+	 *  trigger.
+	 */
+	kind: string,
+	table: string | null,
+	name: string,
+	change: Change,
+	source_ddl: string | null,
+	target_ddl: string | null,
+	/**  What changed, in words ("type integer → bigint"). */
+	detail: string[],
+	/**  Applying it drops something or changes a column's type: the gate asks for the typed name. */
+	dangerous: boolean,
+};
+
+export type DumpFormat = 
+/**  `pg_dump -Fc` */
+"pg_custom" | 
+/**  `pg_dump -Ft` */
+"pg_tar" | 
+/**  `pg_dump -Fd` */
+"pg_directory" | 
+/**  `pg_dump -Fp`, `pg_dumpall`, or SQL that reads as PostgreSQL's */
+"pg_plain" | 
+/**  `mysqldump`, `mariadb-dump`, or SQL that reads as MySQL's */
+"my_sql" | 
+/**  `mongodump --archive` */
+"mongo_archive" | 
+/**  `mongodump --out` */
+"mongo_folder";
+
+/**  What the window shows about a dump (the path stays in Rust; the window holds the id). */
+export type DumpInfo = DumpInfo_Serialize | DumpInfo_Deserialize;
+
+/**  What the window shows about a dump (the path stays in Rust; the window holds the id). */
+export type DumpInfo_Deserialize = {
+	id: string,
+	file_name: string,
+	bytes: number | null,
+	format: DumpFormat,
+	format_label: string,
+	engine: Engine,
+	/**  A MariaDB dump (restorable into MySQL or MariaDB, with a note). */
+	mariadb: boolean,
+	/**  The format was guessed from the statements (no tool header). */
+	guessed: boolean,
+	compression?: string | null,
+	made_by?: string | null,
+	server_version?: string | null,
+	source_db?: string | null,
+	created?: string | null,
+	encoding?: string | null,
+	/**  Databases in the file (multi-database dumps; Mongo archives). */
+	databases: string[],
+	objects: DumpObject_Deserialize[],
+	objects_more: number | null,
+	notes: DumpNote[],
+	/**  Why the file will not be restored (the safety scan), in words. Nothing can be planned while this is set. */
+	refused?: string | null,
+	/**  Directory formats go to the host over SFTP first. */
+	needs_upload: boolean,
+};
+
+/**  What the window shows about a dump (the path stays in Rust; the window holds the id). */
+export type DumpInfo_Serialize = {
+	id: string,
+	file_name: string,
+	bytes: number | null,
+	format: DumpFormat,
+	format_label: string,
+	engine: Engine,
+	/**  A MariaDB dump (restorable into MySQL or MariaDB, with a note). */
+	mariadb: boolean,
+	/**  The format was guessed from the statements (no tool header). */
+	guessed: boolean,
+	compression: string | null,
+	made_by: string | null,
+	server_version: string | null,
+	source_db: string | null,
+	created: string | null,
+	encoding: string | null,
+	/**  Databases in the file (multi-database dumps; Mongo archives). */
+	databases: string[],
+	objects: DumpObject_Serialize[],
+	objects_more: number | null,
+	notes: DumpNote[],
+	/**  Why the file will not be restored (the safety scan), in words. Nothing can be planned while this is set. */
+	refused: string | null,
+	/**  Directory formats go to the host over SFTP first. */
+	needs_upload: boolean,
+};
+
+/**  "Things that will need attention", each saying what Dalan will do about it. */
+export type DumpNote = {
+	code: string,
+	text: string,
+};
+
+/**  One thing the dump makes, for the preview. */
+export type DumpObject = DumpObject_Serialize | DumpObject_Deserialize;
+
+/**  One thing the dump makes, for the preview. */
+export type DumpObject_Deserialize = {
+	kind: string,
+	database?: string | null,
+	name: string,
+	rows?: number | null,
+	/**  `rows` is an exact count (COPY lines, archive documents); otherwise it is counted from INSERT tuples. */
+	rows_exact: boolean,
+};
+
+/**  One thing the dump makes, for the preview. */
+export type DumpObject_Serialize = {
+	kind: string,
+	database: string | null,
+	name: string,
+	rows: number | null,
+	/**  `rows` is an exact count (COPY lines, archive documents); otherwise it is counted from INSERT tuples. */
+	rows_exact: boolean,
+};
+
 /**  Which app opens the downloaded copy. */
 export type EditApp = 
 /**  The system's default app for the file type. */
@@ -967,7 +1742,27 @@ export type ErrorCode = "locked" | "wrong_password" | "too_many_attempts" |
 /**  A manual transaction is open on this editor. */
 "sql_in_transaction" | 
 /**  The dump or restore tool isn't installed where it would run (the host, or this computer). */
-"db_tool_missing" | "internal";
+"db_tool_missing" | 
+/**  D12: the picked file isn't a dump Dalan can read (named by its first bytes). */
+"db_dump_unknown" | 
+/**  D12: the dump came from a newer tool than the one that would restore it. */
+"db_dump_too_new" | 
+/**  D12: the dump runs client commands or statements that reach outside the database (names the line). */
+"db_dump_unsafe" | 
+/**  D12: the host has less free space than the dump needs. */
+"db_host_no_space" | "internal";
+
+/**  How often a job runs. Weekdays count from Sunday = 0, like cron. */
+export type Every = { every: "hour"; minute: number } | { every: "day"; hour: number; minute: number } | { every: "week"; weekday: number; hour: number; minute: number } | { every: "cron"; expr: string };
+
+/**  What to do with objects that already exist at the target (§2 "Existing objects"). */
+export type Existing = 
+/**  Clashes are found before anything runs (the plan lists them); nothing is dropped. */
+"stop" | 
+/**  Drop and replace what the dump contains. */
+"replace" | 
+/**  Data only, into the tables that are there. */
+"append";
 
 export type ExplainPlan = ExplainPlan_Serialize | ExplainPlan_Deserialize;
 
@@ -991,7 +1786,30 @@ export type ExplainPlan_Serialize = {
 
 export type ExportFormat = "csv" | "tsv" | "json" | "sql";
 
+/**  An export's header row and masking rules (E5). */
+export type ExportOptions = ExportOptions_Serialize | ExportOptions_Deserialize;
+
+/**  An export's header row and masking rules (E5). */
+export type ExportOptions_Deserialize = {
+	header: boolean,
+	masks?: MaskRule_Deserialize[],
+};
+
+/**  An export's header row and masking rules (E5). */
+export type ExportOptions_Serialize = {
+	header: boolean,
+	masks: MaskRule_Serialize[],
+};
+
 export type FailKind = "error" | "timeout" | "cancelled";
+
+export type Family = "pg" | "my";
+
+/**  A file was dropped on the window. Only its name comes here; the path stays in Rust under `id`. */
+export type FileDropped = {
+	id: string,
+	name: string,
+};
 
 export type ForwardInput = ForwardInput_Serialize | ForwardInput_Deserialize;
 
@@ -1216,6 +2034,12 @@ export type HistoryEntry = {
 	id: string,
 	command: string,
 	ran_at: number | null,
+};
+
+/**  A folder on a saved host, picked in the SFTP picker (D15, E8). */
+export type HostFolder = {
+	host_id: string,
+	dir: string,
 };
 
 /**  Create and update share one shape. `id` is `None` to create. */
@@ -1472,6 +2296,18 @@ export type ImportRow_Serialize = {
 	warnings: string[],
 };
 
+export type InferredColumn = {
+	name: string,
+	type_name: string,
+};
+
+export type InferredTable = {
+	ddl: string,
+	columns: InferredColumn[],
+	/**  The types came from the export's manifest (same engine), not from the values. */
+	from_manifest: boolean,
+};
+
 /**  What this item would get if it set nothing itself. Drives the "from Production" hints. */
 export type Inherited = Inherited_Serialize | Inherited_Deserialize;
 
@@ -1532,6 +2368,112 @@ export type Inherited_Serialize = {
 	jump: InheritedJump | null,
 	/**  The inherited startup snippet: `value` is the snippet's id. */
 	startup_snippet: InheritedText | null,
+};
+
+export type JobKind = "backup" | "restore" | "copy";
+
+export type JobRow = JobRow_Serialize | JobRow_Deserialize;
+
+export type JobRow_Deserialize = {
+	id: string,
+	name: string,
+	kind: JobKind,
+	source_database_id?: string | null,
+	source_name?: string | null,
+	target_database_id?: string | null,
+	target_name?: string | null,
+	/**  What it does, in words ("3 tables from shop to staging, masked"), from the plan. */
+	summary: string,
+	created_at: number | null,
+	last_run?: JobRun_Deserialize | null,
+	/**  D15: the schedule (backup jobs, and copy jobs whose target isn't production), in words, and the next run. */
+	schedule?: Schedule | null,
+	schedule_text?: string | null,
+	next_run_at?: number | null,
+	retention?: Retention_Deserialize | null,
+	/**  Why this job can't have a schedule (`None` when it can). */
+	no_schedule?: string | null,
+	/**  Slots missed while Dalan was closed or locked, when the last run made up for them. */
+	missed_before_last?: number | null,
+};
+
+export type JobRow_Serialize = {
+	id: string,
+	name: string,
+	kind: JobKind,
+	source_database_id: string | null,
+	source_name: string | null,
+	target_database_id: string | null,
+	target_name: string | null,
+	/**  What it does, in words ("3 tables from shop to staging, masked"), from the plan. */
+	summary: string,
+	created_at: number | null,
+	last_run: JobRun_Serialize | null,
+	/**  D15: the schedule (backup jobs, and copy jobs whose target isn't production), in words, and the next run. */
+	schedule: Schedule | null,
+	schedule_text: string | null,
+	next_run_at: number | null,
+	retention: Retention_Serialize | null,
+	/**  Why this job can't have a schedule (`None` when it can). */
+	no_schedule: string | null,
+	/**  Slots missed while Dalan was closed or locked, when the last run made up for them. */
+	missed_before_last: number | null,
+};
+
+export type JobRun = JobRun_Serialize | JobRun_Deserialize;
+
+export type JobRun_Deserialize = {
+	id: string,
+	started_at: number | null,
+	ended_at?: number | null,
+	/**  `ok`, `failed`, `stopped` or `missed`. */
+	status: string,
+	rows?: number | null,
+	bytes?: number | null,
+	warnings: number | null,
+	log: string,
+};
+
+export type JobRun_Serialize = {
+	id: string,
+	started_at: number | null,
+	ended_at: number | null,
+	/**  `ok`, `failed`, `stopped` or `missed`. */
+	status: string,
+	rows: number | null,
+	bytes: number | null,
+	warnings: number | null,
+	log: string,
+};
+
+/**  What the window needs to set a saved job up for its review (never a path or the masking key). */
+export type JobSetup = JobSetup_Serialize | JobSetup_Deserialize;
+
+/**  What the window needs to set a saved job up for its review (never a path or the masking key). */
+export type JobSetup_Deserialize = {
+	kind: JobKind,
+	source_database_id?: string | null,
+	target_database_id?: string | null,
+	copy?: CopyRequest_Deserialize | null,
+	restore?: RestoreOptions_Deserialize | null,
+	file_name?: string | null,
+};
+
+/**  What the window needs to set a saved job up for its review (never a path or the masking key). */
+export type JobSetup_Serialize = {
+	kind: JobKind,
+	source_database_id: string | null,
+	target_database_id: string | null,
+	copy: CopyRequest_Serialize | null,
+	restore: RestoreOptions_Serialize | null,
+	file_name: string | null,
+};
+
+/**  D15: a scheduled job started or ended (the Jobs list refreshes; a failure puts a dot on Jobs). */
+export type JobsChanged = {
+	job_id: string,
+	running: boolean,
+	failed: boolean,
 };
 
 export type KeyKind = "ed25519" | "ecdsa_p256" | "ecdsa_p384" | "ecdsa_p521" | "rsa4096";
@@ -1662,6 +2604,53 @@ export type LogSummary_Serialize = {
 	comment: string | null,
 };
 
+export type MaskKind = "keep" | "null" | 
+/**  `value` in every row. */
+"fixed" | "fake_email" | "fake_name" | "fake_phone" | "fake_address" | "fake_iban" | 
+/**  Same shape (digits stay digits, letters letters), keyed: joins survive. */
+"hash" | 
+/**  The column's values, shuffled within each batch of rows. */
+"shuffle" | 
+/**  The first `value` characters. */
+"truncate" | 
+/**  Dates moved by up to ± `value` days (the same value moves the same way). */
+"date_shift";
+
+export type MaskRule = MaskRule_Serialize | MaskRule_Deserialize;
+
+export type MaskRule_Deserialize = {
+	column: string,
+	kind: MaskKind,
+	value?: string | null,
+};
+
+export type MaskRule_Serialize = {
+	column: string,
+	kind: MaskKind,
+	value: string | null,
+};
+
+/**  A column that looks personal, and the rule Dalan suggests for it. */
+export type MaskSuggestion = {
+	table: string,
+	column: string,
+	kind: MaskKind,
+};
+
+export type MatchPlan = {
+	pending_id: string,
+	level: string,
+	typed_name: string,
+	environment: string,
+};
+
+export type MatchReport = {
+	inserted: number | null,
+	updated: number | null,
+	deleted: number | null,
+	seconds: number | null,
+};
+
 export type MgAggRequest = MgAggRequest_Serialize | MgAggRequest_Deserialize;
 
 export type MgAggRequest_Deserialize = {
@@ -1745,6 +2734,42 @@ export type MgFindRequest = {
 	limit: number,
 	/**  A collation document, e.g. `{"locale":"en","strength":2}`; empty for none. */
 	collation: string,
+};
+
+export type MgFormat = "json_lines" | "json_array" | "csv";
+
+export type MgImportMode = { mode: "insert" } | 
+/**  Replace the document whose `field` has the same value, or insert it. */
+{ mode: "upsert"; field: string } | 
+/**  Remove every document of the collection first. */
+{ mode: "replace" };
+
+export type MgImportPending = {
+	id: string,
+	/**  `confirm`, or `typed` for a replace. */
+	level: string,
+	typed_name: string,
+	environment: string,
+	docs: number | null,
+};
+
+export type MgImportPreview = {
+	format: MgFormat,
+	docs: number | null,
+	/**  The first five documents as relaxed extended JSON. */
+	sample: string[],
+	/**  Top-level fields of those documents (for "upsert by"). */
+	fields: string[],
+};
+
+export type MgImportReport = {
+	inserted: number | null,
+	upserted: number | null,
+	updated: number | null,
+	removed: number | null,
+	/**  The server's words for documents it refused (the first 20). */
+	failed: string[],
+	failed_count: number | null,
 };
 
 export type MgIndex = MgIndex_Serialize | MgIndex_Deserialize;
@@ -1879,6 +2904,13 @@ export type MgValidationCheck = {
 	/**  How many documents the rules would reject. */
 	failing: number | null,
 	sample: MgDoc[],
+};
+
+/**  Something the copy leaves out, with its source DDL to copy by hand. */
+export type NotCopied = {
+	name: string,
+	kind: string,
+	ddl: string,
 };
 
 export type ObjectKind = "schema" | "table" | "view" | "matview" | "foreign";
@@ -2100,6 +3132,8 @@ export type ProxyConfig_Serialize = {
 /**  The window was closed or ⌘Q pressed while sessions are live: the UI asks before quitting. */
 export type QuitRequested = {
 	live_sessions: number,
+	/**  Scheduled jobs running right now: quitting stops them (they run again at the next unlock). */
+	running_jobs: number,
 };
 
 /**
@@ -2107,6 +3141,24 @@ export type QuitRequested = {
  *  not as a JSON array of numbers. The `Type` derive only exists for the generated bindings.
  */
 export type RawBytes = number[];
+
+export type ReadCheck = ReadCheck_Serialize | ReadCheck_Deserialize;
+
+export type ReadCheck_Deserialize = {
+	ok: boolean,
+	/**  What was read ("PostgreSQL custom archive, 42 objects"). */
+	summary: string,
+	/**  Why it failed. */
+	problem?: string | null,
+};
+
+export type ReadCheck_Serialize = {
+	ok: boolean,
+	/**  What was read ("PostgreSQL custom archive, 42 objects"). */
+	summary: string,
+	/**  Why it failed. */
+	problem: string | null,
+};
 
 /**  One entry of the New Tab "recent" list: the server and when you last connected to it. */
 export type RecentItem = {
@@ -2670,13 +3722,199 @@ export type RedisWriteOutcome_Serialize =
 /**  It ran. `reply` is the server's answer when it is worth showing (a new stream entry's id). */
 { status: "done"; reply: string | null } | { status: "pending"; pending: RedisPending_Serialize };
 
-export type RestorePending = {
-	id: string,
-	db_name: string,
+export type RenameSchema = {
+	from: string,
+	to: string,
+};
+
+/**  What the person chose in "Target and options". */
+export type RestoreOptions = RestoreOptions_Serialize | RestoreOptions_Deserialize;
+
+/**  What the person chose in "Target and options". */
+export type RestoreOptions_Deserialize = {
+	/**  `Some(name)`: create this database on the same server and restore into it. `None`: the tab's database. */
+	new_database?: string | null,
+	/**  Multi-database dumps: which one to restore. */
+	source_database?: string | null,
+	existing: Existing,
+	content: Content,
+	skip_owner_acl: boolean,
+	include_roles: boolean,
+	/**  PostgreSQL: one transaction that stops at the first error. Elsewhere: stop at the first error. */
+	single_transaction: boolean,
+	/**  Only these tables or collections (names as the preview shows them). `None`: everything. */
+	objects?: string[] | null,
+	/**  PostgreSQL: restore one schema of the dump under another name. */
+	rename_schema?: RenameSchema | null,
+	/**  PostgreSQL custom and directory archives: parallel jobs (not with one transaction). 0 or 1: one at a time. */
+	jobs?: number,
+	/**  PostgreSQL archives, data only: turn triggers off while loading (needs a superuser). */
+	disable_triggers?: boolean,
+};
+
+/**  What the person chose in "Target and options". */
+export type RestoreOptions_Serialize = {
+	/**  `Some(name)`: create this database on the same server and restore into it. `None`: the tab's database. */
+	new_database: string | null,
+	/**  Multi-database dumps: which one to restore. */
+	source_database: string | null,
+	existing: Existing,
+	content: Content,
+	skip_owner_acl: boolean,
+	include_roles: boolean,
+	/**  PostgreSQL: one transaction that stops at the first error. Elsewhere: stop at the first error. */
+	single_transaction: boolean,
+	/**  Only these tables or collections (names as the preview shows them). `None`: everything. */
+	objects: string[] | null,
+	/**  PostgreSQL: restore one schema of the dump under another name. */
+	rename_schema: RenameSchema | null,
+	/**  PostgreSQL custom and directory archives: parallel jobs (not with one transaction). 0 or 1: one at a time. */
+	jobs: number,
+	/**  PostgreSQL archives, data only: turn triggers off while loading (needs a superuser). */
+	disable_triggers: boolean,
+};
+
+/**  The review (S48 "Review"): everything the person confirms, in plain words. */
+export type RestorePlan = RestorePlan_Serialize | RestorePlan_Deserialize;
+
+/**  The review (S48 "Review"): everything the person confirms, in plain words. */
+export type RestorePlan_Deserialize = {
+	/**  The held restore, or `None` when something blocks it (`blocked` says what). */
+	pending_id?: string | null,
+	blocked?: string | null,
+	/**  `confirm` or `typed`. */
+	level: string,
+	/**  The name to type for a typed confirmation. */
+	typed_name: string,
+	saved_name: string,
 	environment: string,
-	file_name: string,
-	file_bytes: number | null,
+	/**  The database the dump goes into. */
+	target_db: string,
+	new_database: boolean,
+	engine: Engine,
+	tool: string,
+	tool_version: string,
 	runs_on: string,
+	/**  What exists at the target and will be dropped and replaced. */
+	replaces: string[],
+	/**  What exists at the target and stops a "stop if anything exists" restore. */
+	clashes: string[],
+	skipped: string[],
+	warnings: string[],
+	objects: number | null,
+	rows: number | null,
+	bytes: number | null,
+	/**  Uploaded to the host first (directory dumps over a host route). */
+	upload: boolean,
+	/**  The restore can be undone as a whole (one transaction). */
+	atomic: boolean,
+};
+
+/**  The review (S48 "Review"): everything the person confirms, in plain words. */
+export type RestorePlan_Serialize = {
+	/**  The held restore, or `None` when something blocks it (`blocked` says what). */
+	pending_id: string | null,
+	blocked: string | null,
+	/**  `confirm` or `typed`. */
+	level: string,
+	/**  The name to type for a typed confirmation. */
+	typed_name: string,
+	saved_name: string,
+	environment: string,
+	/**  The database the dump goes into. */
+	target_db: string,
+	new_database: boolean,
+	engine: Engine,
+	tool: string,
+	tool_version: string,
+	runs_on: string,
+	/**  What exists at the target and will be dropped and replaced. */
+	replaces: string[],
+	/**  What exists at the target and stops a "stop if anything exists" restore. */
+	clashes: string[],
+	skipped: string[],
+	warnings: string[],
+	objects: number | null,
+	rows: number | null,
+	bytes: number | null,
+	/**  Uploaded to the host first (directory dumps over a host route). */
+	upload: boolean,
+	/**  The restore can be undone as a whole (one transaction). */
+	atomic: boolean,
+};
+
+export type RestoreProgress = RestoreProgress_Serialize | RestoreProgress_Deserialize;
+
+export type RestoreProgress_Deserialize = {
+	/**  `upload` while a folder is copied to the host, then `restore`. */
+	phase: string,
+	bytes: number | null,
+	total: number | null,
+	current?: string | null,
+	objects: number | null,
+};
+
+export type RestoreProgress_Serialize = {
+	/**  `upload` while a folder is copied to the host, then `restore`. */
+	phase: string,
+	bytes: number | null,
+	total: number | null,
+	current: string | null,
+	objects: number | null,
+};
+
+export type RestoreResult = RestoreResult_Serialize | RestoreResult_Deserialize;
+
+export type RestoreResult_Deserialize = {
+	/**  `done`, `stopped` or `failed`. */
+	outcome: string,
+	message?: string | null,
+	target_db: string,
+	objects: number | null,
+	/**  Objects the tool reported as created, in order (at most 200). */
+	done: string[],
+	warnings: RestoreWarning[],
+	seconds: number | null,
+	/**  Stopped or failed inside one transaction: the database is as it was. */
+	nothing_changed: boolean,
+	/**  A new database made for this restore was removed again after a failure or a Stop. */
+	removed_new_database: boolean,
+};
+
+export type RestoreResult_Serialize = {
+	/**  `done`, `stopped` or `failed`. */
+	outcome: string,
+	message: string | null,
+	target_db: string,
+	objects: number | null,
+	/**  Objects the tool reported as created, in order (at most 200). */
+	done: string[],
+	warnings: RestoreWarning[],
+	seconds: number | null,
+	/**  Stopped or failed inside one transaction: the database is as it was. */
+	nothing_changed: boolean,
+	/**  A new database made for this restore was removed again after a failure or a Stop. */
+	removed_new_database: boolean,
+};
+
+export type RestoreWarning = {
+	text: string,
+	count: number | null,
+};
+
+/**  Keep the last N files, files younger than N days, or both (a file goes only when every rule set lets it go). */
+export type Retention = Retention_Serialize | Retention_Deserialize;
+
+/**  Keep the last N files, files younger than N days, or both (a file goes only when every rule set lets it go). */
+export type Retention_Deserialize = {
+	keep_last?: number | null,
+	keep_days?: number | null,
+};
+
+/**  Keep the last N files, files younger than N days, or both (a file goes only when every rule set lets it go). */
+export type Retention_Serialize = {
+	keep_last: number | null,
+	keep_days: number | null,
 };
 
 export type RowEdit = RowEdit_Serialize | RowEdit_Deserialize;
@@ -2757,6 +3995,40 @@ export type SavedQuery_Serialize = {
 	description: string | null,
 	body: string,
 	updated_at: number | null,
+};
+
+/**  A job's schedule as the window sets it. */
+export type Schedule = {
+	/**  A notification after a run that went well too (failures always notify). */
+	notify_ok: boolean,
+} & Every;
+
+/**  What a schedule means: in words, and its next three runs (epoch ms). An invalid cron says why. */
+export type SchedulePreview = {
+	text: string,
+	next: (number | null)[],
+};
+
+export type SchemaCompare = SchemaCompare_Serialize | SchemaCompare_Deserialize;
+
+export type SchemaCompare_Deserialize = {
+	family: Family,
+	source_label: string,
+	target_label: string,
+	items: DiffItem_Deserialize[],
+	tables: TableDdl_Deserialize[],
+	/**  The target is a live database (a snapshot can't be changed). */
+	can_sync: boolean,
+};
+
+export type SchemaCompare_Serialize = {
+	family: Family,
+	source_label: string,
+	target_label: string,
+	items: DiffItem_Serialize[],
+	tables: TableDdl_Serialize[],
+	/**  The target is a live database (a snapshot can't be changed). */
+	can_sync: boolean,
 };
 
 export type SerialConfig = {
@@ -2849,6 +4121,29 @@ export type ShellReply_Deserialize = {
 export type ShellReply_Serialize = {
 	blocks: string[],
 	note: string | null,
+};
+
+/**  One side of a compare. */
+export type Side = Side_Serialize | Side_Deserialize;
+
+/**  One side of a compare. */
+export type Side_Deserialize = { kind: "database"; conn_id: string; schema: string } | { kind: "snapshot"; id: string } | 
+/**  A dump picked in a tab (`restore_pick`), read through a scratch database on that tab's server. */
+{ kind: "dump"; conn_id: string; dump_id: string; schema?: string | null };
+
+/**  One side of a compare. */
+export type Side_Serialize = { kind: "database"; conn_id: string; schema: string } | { kind: "snapshot"; id: string } | 
+/**  A dump picked in a tab (`restore_pick`), read through a scratch database on that tab's server. */
+{ kind: "dump"; conn_id: string; dump_id: string; schema: string | null };
+
+export type SnapshotRow = {
+	id: string,
+	database_id: string,
+	database_name: string,
+	schema: string,
+	family: Family,
+	captured_at: number | null,
+	tables: number | null,
 };
 
 export type SnippetInput = SnippetInput_Serialize | SnippetInput_Deserialize;
@@ -3163,6 +4458,38 @@ export type Suggestion = {
 	is_question: boolean,
 };
 
+export type SyncPlan = {
+	pending_id: string,
+	/**  `confirm` or `typed`. */
+	level: string,
+	typed_name: string,
+	environment: string,
+	script: string,
+	statements: number | null,
+	dangerous: number | null,
+};
+
+/**  What a sync did: how many statements ran of how many, and the one that failed (with the server's words). */
+export type SyncReport = SyncReport_Serialize | SyncReport_Deserialize;
+
+/**  What a sync did: how many statements ran of how many, and the one that failed (with the server's words). */
+export type SyncReport_Deserialize = {
+	ran: number | null,
+	total: number | null,
+	failed?: string | null,
+	/**  PostgreSQL ran it in one transaction: a failure left the schema as it was. */
+	rolled_back: boolean,
+};
+
+/**  What a sync did: how many statements ran of how many, and the one that failed (with the server's words). */
+export type SyncReport_Serialize = {
+	ran: number | null,
+	total: number | null,
+	failed: string | null,
+	/**  PostgreSQL ran it in one transaction: a failure left the schema as it was. */
+	rolled_back: boolean,
+};
+
 /**  What Settings shows. On other systems `supported` is false and the rest is empty. */
 export type SystemIntegration = SystemIntegration_Serialize | SystemIntegration_Deserialize;
 
@@ -3196,6 +4523,23 @@ export type SystemIntegration_Serialize = {
 	/**  `"user"` (installed for this person) or `"allusers"`, from the installer's saved choices. */
 	edition: string | null,
 	install_dir: string | null,
+};
+
+/**  A table's whole CREATE on each side, for the tree's table rows. */
+export type TableDdl = TableDdl_Serialize | TableDdl_Deserialize;
+
+/**  A table's whole CREATE on each side, for the tree's table rows. */
+export type TableDdl_Deserialize = {
+	name: string,
+	source?: string | null,
+	target?: string | null,
+};
+
+/**  A table's whole CREATE on each side, for the tree's table rows. */
+export type TableDdl_Serialize = {
+	name: string,
+	source: string | null,
+	target: string | null,
 };
 
 export type TableRef = {
@@ -3271,10 +4615,24 @@ export type Themes_Serialize = {
 	groups: ProfileTheme_Serialize[],
 };
 
-export type TransferDone = {
+export type TransferDone = TransferDone_Serialize | TransferDone_Deserialize;
+
+export type TransferDone_Deserialize = {
 	path: string,
 	rows: number | null,
 	bytes: number | null,
+	/**  Backups (D17): the read check, and an id to run the restore check with (the path stays here). */
+	check?: ReadCheck_Deserialize | null,
+	file_id?: string | null,
+};
+
+export type TransferDone_Serialize = {
+	path: string,
+	rows: number | null,
+	bytes: number | null,
+	/**  Backups (D17): the read check, and an id to run the restore check with (the path stays here). */
+	check: ReadCheck_Serialize | null,
+	file_id: string | null,
 };
 
 export type TransferEvent = TransferEvent_Serialize | TransferEvent_Deserialize;
@@ -3351,6 +4709,10 @@ export type UpdateInfo_Serialize = {
 	notes: string | null,
 };
 
+export type ValueKind = "bool" | "num" | "time" | "json" | "text" | 
+/**  Not compared (binary text forms differ between servers). */
+"binary";
+
 export type VaultLocked = {
 	reason: LockReason,
 };
@@ -3373,6 +4735,26 @@ export type VaultStatus_Serialize = {
 	auto_lock_minutes: number,
 	/**  Set while wrong-password attempts are cooling down. */
 	cooldown_secs: number | null,
+};
+
+export type VerifyReport = VerifyReport_Serialize | VerifyReport_Deserialize;
+
+export type VerifyReport_Deserialize = {
+	read: ReadCheck_Deserialize,
+	/**  Empty when the read check failed (nothing was restored). */
+	rows: CountRow_Deserialize[],
+	same: boolean,
+	restored_on: string,
+	seconds: number | null,
+};
+
+export type VerifyReport_Serialize = {
+	read: ReadCheck_Serialize,
+	/**  Empty when the read check failed (nothing was restored). */
+	rows: CountRow_Serialize[],
+	same: boolean,
+	restored_on: string,
+	seconds: number | null,
 };
 
 /* Tauri Specta runtime */

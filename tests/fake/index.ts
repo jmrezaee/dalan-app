@@ -68,6 +68,8 @@ export class Fake {
   redisPublish = (channel: string, payload: string, times = 1) => this.run<number>('redisPublish', channel, payload, times)
   redisSubNames = () => this.run<string[]>('redisSubNames')
   redisBulkSlow = (on = true) => this.run<void>('redisBulkSlow', on)
+  /** D12: the next restore pick returns a `clean` dump, a `hostile` one, one whose tables `clash`, or a `slow` restore. */
+  restoreNext = (kind: 'clean' | 'hostile' | 'clash' | 'slow' | 'cut') => this.run<void>('restoreNext', kind)
   redisKeyCount = () => this.run<number>('redisKeyCount')
   settings = () => this.run<Record<string, string>>('settings')
   redisDb = (name: string) => this.run<Record<string, unknown> | null>('redisDb', name)
@@ -94,7 +96,10 @@ export class Fake {
     }
   }
 
-  quitRequested = (liveSessions: number) => this.run<void>('quitRequested', liveSessions)
+  dropFile = (id: string, name: string) => this.run<void>('dropFile', id, name)
+  quitRequested = (liveSessions: number, runningJobs = 0) => this.run<void>('quitRequested', liveSessions, runningJobs)
+  scheduledRun = (name: string, status: 'ok' | 'failed', missed = 0) => this.run<void>('scheduledRun', name, status, missed)
+  putRemoteFile = (hostId: string, path: string) => this.run<void>('putRemoteFile', hostId, path)
   receiveLink = (target: { user: string | null, host: string, port: number } | null) => this.run<void>('receiveLink', target)
   setSystem = (patch: Partial<SystemIntegration_Serialize>) => this.run<void>('setSystem', patch)
   tunnel = (id: string) => ({ state: (state: 'stopped' | 'starting' | 'active' | 'reconnecting' | 'error', message?: string) => this.run<void>('tunnel', id, state, message ?? null) })

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The tree of a MongoDB tab (S44): databases, opened lazily, and each one's collections and views.
-import { ArrowLeftRight, ChevronDown, ChevronRight, Eye, SquareTerminal, Table2 } from '@lucide/vue'
+import { ArrowLeftRight, ChevronDown, ChevronRight, Copy, Eye, SquareTerminal, Table2 } from '@lucide/vue'
 import { Input } from '@/components/ui/input'
 
 const props = defineProps<{ tabKey: string }>()
@@ -50,6 +50,7 @@ function onDbKey(e: KeyboardEvent, d: (typeof store.dbs)[number]) {
       </div>
       <p v-if="!store.dbs.length" class="px-3 py-2 text-xs text-muted" aria-busy="true">Reading the databases…</p>
     </div>
+    <button type="button" class="flex h-9 shrink-0 cursor-default items-center gap-2 border-t border-border px-3 text-sm text-muted outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" :data-testid="tid('mongo-open-copy')" @click="store.openCopy()"><Copy class="size-4" aria-hidden="true" />Copy to another database</button>
     <div class="flex shrink-0 border-t border-border">
       <button type="button" class="flex h-9 flex-1 cursor-default items-center gap-2 px-3 text-sm text-muted outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" :data-testid="tid('mongo-open-shell')" @click="store.openShell()"><SquareTerminal class="size-4" aria-hidden="true" />Shell</button>
       <button type="button" class="flex h-9 flex-1 cursor-default items-center gap-2 px-3 text-sm text-muted outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent" :data-testid="tid('mongo-open-transfer')" @click="store.openTransfer()"><ArrowLeftRight class="size-4" aria-hidden="true" />Transfer</button>

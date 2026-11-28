@@ -59,6 +59,14 @@ pub enum ErrorCode {
     SqlInTransaction,
     /// The dump or restore tool isn't installed where it would run (the host, or this computer).
     DbToolMissing,
+    /// D12: the picked file isn't a dump Dalan can read (named by its first bytes).
+    DbDumpUnknown,
+    /// D12: the dump came from a newer tool than the one that would restore it.
+    DbDumpTooNew,
+    /// D12: the dump runs client commands or statements that reach outside the database (names the line).
+    DbDumpUnsafe,
+    /// D12: the host has less free space than the dump needs.
+    DbHostNoSpace,
     Internal,
 }
 
@@ -160,6 +168,10 @@ mod tests {
             SqlNoKey,
             SqlInTransaction,
             DbToolMissing,
+            DbDumpUnknown,
+            DbDumpTooNew,
+            DbDumpUnsafe,
+            DbHostNoSpace,
             Internal,
         ];
         // An exhaustive match: adding a variant is a compile error here until the list above has it.
@@ -171,7 +183,8 @@ mod tests {
                 | RedisUnreachable | RedisTlsUntrusted | RedisRefused | RedisReadOnlyMode
                 | RedisConfirmNeeded | DbAuthFailed | DbUnreachable | DbTlsUntrusted
                 | DbRefused | DbReadOnlyMode | DbConfirmNeeded | SqlConflict | SqlNoKey
-                | SqlInTransaction | DbToolMissing | Internal => {}
+                | SqlInTransaction | DbToolMissing | DbDumpUnknown | DbDumpTooNew
+                | DbDumpUnsafe | DbHostNoSpace | Internal => {}
             }
             let json = serde_json::to_value(AppError::new(c, "m")).unwrap();
             let obj = json.as_object().unwrap();

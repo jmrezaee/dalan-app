@@ -15,7 +15,8 @@ const open = computed({
       <AlertDialogHeader>
         <AlertDialogTitle>Quit Dalan?</AlertDialogTitle>
         <AlertDialogDescription>
-          {{ quit.liveSessions === 1 ? '1 session is' : `${quit.liveSessions} sessions are` }} still open. Quitting ends {{ quit.liveSessions === 1 ? 'it' : 'them' }}, and anything running in {{ quit.liveSessions === 1 ? 'it' : 'them' }} stops.
+          <template v-if="quit.liveSessions">{{ quit.liveSessions === 1 ? '1 session is' : `${quit.liveSessions} sessions are` }} still open. Quitting ends {{ quit.liveSessions === 1 ? 'it' : 'them' }}, and anything running in {{ quit.liveSessions === 1 ? 'it' : 'them' }} stops.</template>
+          <template v-if="quit.runningJobs"> {{ quit.runningJobs === 1 ? 'A scheduled job is' : `${quit.runningJobs} scheduled jobs are` }} running: quitting stops {{ quit.runningJobs === 1 ? 'it' : 'them' }}, and {{ quit.runningJobs === 1 ? 'it runs' : 'they run' }} again the next time Dalan is unlocked.</template>
         </AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>

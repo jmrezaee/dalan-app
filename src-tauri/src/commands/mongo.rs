@@ -450,6 +450,7 @@ pub async fn mg_export(
     db: String,
     coll: String,
     filter: String,
+    masks: Vec<crate::dbs::masking::MaskRule>,
     progress: tauri::ipc::Channel<crate::sql::transfer::TransferProgress>,
 ) -> AppResult<Option<crate::commands::sql::TransferDone>> {
     state.require_unlocked()?;
@@ -470,6 +471,7 @@ pub async fn mg_export(
         &db,
         &coll,
         &filter,
+        &masks,
         &mut out,
         &stop,
         &|rows, bytes| {
@@ -489,6 +491,8 @@ pub async fn mg_export(
                 path: path.display().to_string(),
                 rows,
                 bytes,
+                check: None,
+                file_id: None,
             }))
         }
         (Err(e), _) => {

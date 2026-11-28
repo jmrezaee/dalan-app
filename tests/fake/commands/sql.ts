@@ -2,9 +2,11 @@
 // (`public`: customers, orders, order_items, a view and a keyless table) served to every PostgreSQL database.
 // Orders has 1,200 rows so paging, sorting and the estimate have something to do.
 import { fail, type Handlers } from '../types'
+import { stopCopy } from './copy'
+import { stopRestore } from './restore'
 import type { SqlCell_Serialize as Cell_Serialize, SqlColumn_Serialize, SqlTableInfo_Serialize } from '../../../app/types/bindings'
 
-type Keys = 'dbOpen' | 'dbRespond' | 'dbClose' | 'sqlObjects' | 'sqlTableInfo' | 'sqlTablePage' | 'sqlCount' | 'sqlCell' | 'sqlStructure' | 'sqlStructurePrepare' | 'sqlStructureCommit' | 'sqlStructureDiscard' | 'sqlExplain' | 'sqlDiagram' | 'sqlSaveExport' | 'sqlActivity' | 'sqlSessionPrepare' | 'sqlSessionCommit' | 'sqlSessionDiscard' | 'sqlExportTable' | 'sqlTransferStop' | 'sqlImportPick' | 'sqlImportPreview' | 'sqlImportPrepare' | 'sqlImportCommit' | 'sqlImportDiscard' | 'sqlBackupCheck' | 'sqlBackupStart' | 'sqlRestorePrepare' | 'sqlRestoreCommit' | 'sqlRestoreDiscard' | 'sqlRun' | 'sqlRunCommit' | 'sqlRunDiscard' | 'sqlTxn' | 'sqlGridPrepare' | 'sqlGridCommit' | 'sqlGridDiscard' | 'sqlCancel' | 'sqlEditorClose' | 'sqlCatalog' | 'sqlFormat' | 'sqlHistory' | 'sqlHistoryClear'
+type Keys = 'dbOpen' | 'dbRespond' | 'dbClose' | 'sqlObjects' | 'sqlTableInfo' | 'sqlTablePage' | 'sqlCount' | 'sqlCell' | 'sqlStructure' | 'sqlStructurePrepare' | 'sqlStructureCommit' | 'sqlStructureDiscard' | 'sqlExplain' | 'sqlDiagram' | 'sqlSaveExport' | 'sqlActivity' | 'sqlSessionPrepare' | 'sqlSessionCommit' | 'sqlSessionDiscard' | 'sqlExportTable' | 'sqlTransferStop' | 'sqlImportPick' | 'sqlImportPreview' | 'sqlImportPrepare' | 'sqlImportCommit' | 'sqlImportDiscard' | 'sqlBackupCheck' | 'sqlBackupStart' | 'sqlRun' | 'sqlRunCommit' | 'sqlRunDiscard' | 'sqlTxn' | 'sqlGridPrepare' | 'sqlGridCommit' | 'sqlGridDiscard' | 'sqlCancel' | 'sqlEditorClose' | 'sqlCatalog' | 'sqlFormat' | 'sqlHistory' | 'sqlHistoryClear'
 
 const col = (name: string, type_name: string, kind: SqlColumn_Serialize['kind'], pk: number | null = null, nullable = true): SqlColumn_Serialize =>
   ({ name, type_name, kind, nullable: pk === null && nullable, default: null, pk_position: pk })
@@ -95,7 +97,6 @@ let xacts = 1_000_000
 const sessionHeld = new Map<string, { pid: number, end: boolean, typed: boolean }>()
 const exportsDone: string[] = []
 const importHeld = new Map<string, number>()
-const restoreHeld = new Map<string, boolean>()
 
 const LABEL: Record<string, string> = { postgres: 'PostgreSQL', mysql: 'MySQL', mariadb: 'MariaDB', mongodb: 'MongoDB' }
 const VERSION: Record<string, string> = { postgres: 'PostgreSQL 16.4 on x86_64-pc-linux-gnu', mysql: 'MySQL 8.4.2', mariadb: 'MariaDB 11.4.2', mongodb: 'MongoDB 7.0.14' }
@@ -235,10 +236,15 @@ export const sql: Pick<Handlers, Keys> = {
     const rows = TABLES[a.table]?.rows().length ?? 0
     send(ch, { rows: Math.floor(rows / 2), bytes: 1024 })
     tag(`export:${a.table}.${a.format}`)
+    for (const mk of a.options?.masks ?? []) tag(`export-mask:${mk.column}=${mk.kind}`)
     exportsDone.push(a.table)
-    return { path: `/tmp/${a.table}.${a.format}`, rows, bytes: rows * 20 }
+    return { path: `/tmp/${a.table}.${a.format}`, rows, bytes: rows * 20, check: null, file_id: null }
   },
-  sqlTransferStop: () => null,
+  sqlTransferStop: (a) => {
+    stopRestore(a.transferId)
+    stopCopy(a.transferId)
+    return null
+  },
   sqlImportPick: () => ({ id: 'file-1', name: 'orders-nov.csv' }),
   sqlImportPreview: (a) => {
     const cols = TABLES[a.table]?.cols ?? []
@@ -269,30 +275,12 @@ export const sql: Pick<Handlers, Keys> = {
     const mongo = m.dbs.find(d => d.id === m.sqlConns.get(a.connId)?.db)?.engine === 'mongodb'
     return mongo ? { tool: 'mongodump', runs_on: 'db-primary', version: 'mongodump version: 100.9.4', problem: null } : { tool: 'pg_dump', runs_on: 'db-primary', version: 'pg_dump (PostgreSQL) 16.4', problem: null }
   },
-  sqlBackupStart: (a, { channel, send, tag }) => {
+  sqlBackupStart: (a, { m, channel, send, tag }) => {
     send(channel(a.progress), { rows: 0, bytes: 5 * 2 ** 20 })
     tag('backup:app.dump')
-    return { path: '/tmp/app-2026-11-24.dump', rows: 0, bytes: 5 * 2 ** 20 }
-  },
-  sqlRestorePrepare: (a, { m }) => {
-    const db = m.dbs.find(d => d.id === m.sqlConns.get(a.connId)!.db)!
-    if (db.write_mode === 'read_only') fail('db_read_only_mode', `${db.name} is read-only in Dalan. Nothing was sent.`)
-    if (db.environment === 'production' && db.write_mode !== 'open') fail('db_read_only_mode', `${db.name} is a production database. To restore into it, switch it to Open first (that needs the master password).`)
-    const id = `rest-${restoreHeld.size + 1}-${Date.now()}`
-    restoreHeld.set(id, true)
-    return { id, db_name: db.name, environment: db.environment, file_name: 'app-2026-11-22.dump', file_bytes: 5 * 2 ** 20, runs_on: 'db-primary' }
-  },
-  sqlRestoreCommit: (a, { m, tag }) => {
-    if (!restoreHeld.has(a.pendingId)) fail('db_confirm_needed', 'That confirmation was already used or isn\'t for this tab. Nothing was sent.')
-    const db = m.dbs.find(d => d.id === m.sqlConns.get(a.connId)!.db)!
-    if (a.typedName !== db.name) fail('db_confirm_needed', 'The name doesn\'t match the database\'s name. Nothing was sent.')
-    restoreHeld.delete(a.pendingId)
-    tag('restore:app-2026-11-22.dump')
-    return null
-  },
-  sqlRestoreDiscard: (a) => {
-    restoreHeld.delete(a.pendingId)
-    return null
+    // D17: the read check; `backupNext = 'cut'` makes it fail like a cut-off file.
+    const cut = m.restoreNext === 'cut'
+    return { path: '/tmp/app-2026-11-24.dump', rows: 0, bytes: 5 * 2 ** 20, check: cut ? { ok: false, summary: 'PostgreSQL custom archive', problem: 'It ends early or is damaged: unexpected end of file' } : { ok: true, summary: 'PostgreSQL custom archive (gzip), 14 objects', problem: null }, file_id: 'backup-file-1' }
   },
   sqlStructure: (a) => {
     const t = table(a.table)

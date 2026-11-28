@@ -1,10 +1,22 @@
 //! Shared pieces of every database engine (replica/databases/spec.md section 3). D1 moved the transport here out of
 //! `redis/`; the store, gate types and history follow as the SQL and MongoDB phases need them.
 
+pub mod backupcheck;
+pub mod bulkfiles;
+pub mod datadiff;
+pub mod dumpfile;
+pub mod dumpscan;
 pub mod gate;
 pub mod history;
+pub mod jobs;
+pub mod masking;
 pub mod route;
+pub mod runner;
 pub mod saved;
+pub mod schedule;
+pub mod scheduler;
+pub mod schemadiff;
+pub mod snapshots;
 pub mod store;
 pub mod transport;
 pub mod url;

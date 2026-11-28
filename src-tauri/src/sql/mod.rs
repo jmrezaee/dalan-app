@@ -5,6 +5,9 @@
 pub mod activity;
 pub mod backup;
 pub mod classify;
+pub mod copy;
+pub mod copycross;
+pub mod datacmp;
 pub mod diagram;
 pub mod explain;
 pub mod grid;
@@ -13,12 +16,16 @@ pub mod myextra;
 pub mod mysql;
 pub mod mytransfer;
 pub mod pg;
+pub mod restore;
 pub mod run;
+pub mod schemacat;
 pub mod structure;
 #[cfg(test)]
 mod tests;
 pub mod transfer;
+pub mod typemap;
 pub mod values;
+pub mod verify;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -311,6 +318,23 @@ pub async fn connect(
             }
         };
     step(&emit, reach + 1, RedisStepState::Done, None);
+    let connector: Connector = {
+        let (reopen, login) = (Arc::clone(&reopen), login.clone());
+        Arc::new(move |db: Option<String>| {
+            let (reopen, mut login) = (Arc::clone(&reopen), login.clone());
+            if db.is_some() {
+                login.database = db;
+            }
+            Box::pin(async move {
+                let stream = (reopen)().await?;
+                Ok(RawConn::Pg(Box::new(
+                    PgConn::connect(stream, login, Arc::clone(&reopen), |_| {})
+                        .await?
+                        .0,
+                )))
+            })
+        })
+    };
     let opener: Opener = Arc::new(move || {
         let (reopen, login) = (Arc::clone(&reopen), login.clone());
         Box::pin(async move {
@@ -324,6 +348,7 @@ pub async fn connect(
         info,
         ssh,
         opener,
+        connector,
     })
 }
 
@@ -362,6 +387,23 @@ async fn connect_my(
             }
         };
     step(emit, reach + 1, RedisStepState::Done, None);
+    let connector: Connector = {
+        let (reopen, login) = (Arc::clone(&reopen), login.clone());
+        Arc::new(move |db: Option<String>| {
+            let (reopen, mut login) = (Arc::clone(&reopen), login.clone());
+            if db.is_some() {
+                login.database = db;
+            }
+            Box::pin(async move {
+                let stream = (reopen)().await?;
+                Ok(RawConn::My(
+                    mysql::MyConn::connect(stream, login, Arc::clone(&reopen))
+                        .await?
+                        .0,
+                ))
+            })
+        })
+    };
     let opener: Opener = Arc::new(move || {
         let (reopen, login) = (Arc::clone(&reopen), login.clone());
         Box::pin(async move {
@@ -375,6 +417,7 @@ async fn connect_my(
         info,
         ssh,
         opener,
+        connector,
     })
 }
 
@@ -418,6 +461,8 @@ async fn connect_mongo(
                 return Err(e);
             }
         };
+    // Where more connections go: the member signed in to (the primary, after the hop below).
+    let mut used: Reopen = Arc::clone(&reopen);
     // A secondary names the primary: go there, so writes work (one hop only; the name must be one of the seeds).
     if !info.is_primary && info.replica_set.is_some() {
         if let Some(primary) = info.primary.clone().and_then(|p| {
@@ -444,6 +489,7 @@ async fn connect_mongo(
                 .await
                 {
                     (conn, info) = (c, i);
+                    used = Arc::clone(&to_primary);
                 }
             }
         }
@@ -471,11 +517,27 @@ async fn connect_mongo(
         user: info.user,
         latency_ms: info.latency_ms,
     };
+    let connector: Connector = {
+        let login = login.clone();
+        Arc::new(move |_db: Option<String>| {
+            // A MongoDB connection serves every database: the name goes with each command.
+            let (reopen, login) = (Arc::clone(&used), login.clone());
+            Box::pin(async move {
+                let stream = (reopen)().await?;
+                Ok(RawConn::Mongo(
+                    crate::mongo::conn::MongoConn::connect(stream, login, Arc::clone(&reopen))
+                        .await?
+                        .0,
+                ))
+            })
+        })
+    };
     Ok(Opened {
         db: Db::Mongo(Arc::new(conn)),
         info,
         ssh,
         opener,
+        connector,
     })
 }
 
@@ -523,16 +585,19 @@ async fn run(
             info,
             ssh,
             opener,
+            connector,
         }) => {
             *live.opener.lock().await = Some(opener);
+            *live.connector.lock().await = Some(connector);
             match db {
                 Db::Pg(c) => *live.conn.lock().await = Some(c),
                 Db::My(c) => *live.my.lock().await = Some(c),
                 Db::Mongo(c) => *live.mongo.lock().await = Some(c),
             }
-            emit(DbEvent::Ready { info });
-            // Hold the SSH connection until the tab closes (backups use it too).
+            // Hold the SSH connection until the tab closes (backups use it too). Set before Ready: a scheduled
+            // backup uses it as soon as the connection is ready.
             *live.ssh.lock().await = ssh.clone();
+            emit(DbEvent::Ready { info });
             let _ssh = ssh;
             let _ = cancel.changed().await;
             closed.store(true, Ordering::SeqCst);
@@ -551,6 +616,24 @@ type Opener = Arc<
         + Sync,
 >;
 
+/// A connection of the tab's own engine, by the tab's route, to any database on that server (D13 copies read and write
+/// on connections of their own, so a long copy never holds the tab's).
+pub enum RawConn {
+    Pg(Box<PgConn>),
+    My(mysql::MyConn),
+    Mongo(crate::mongo::conn::MongoConn),
+}
+
+/// Opens a [`RawConn`]; `None` keeps the saved database.
+pub type Connector = Arc<
+    dyn Fn(
+            Option<String>,
+        )
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = AppResult<RawConn>> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// What a successful sign-in gives the tab: the engine's connection for browsing, the server's answer, the host's
 /// SSH connection (if the route has one) and the way to open an editor connection.
 pub struct Opened {
@@ -558,6 +641,7 @@ pub struct Opened {
     info: SqlServerInfo,
     ssh: Option<Arc<Connected>>,
     opener: Opener,
+    connector: Connector,
 }
 
 enum Db {
@@ -600,6 +684,7 @@ struct Live {
     /// MongoDB tabs hold this.
     mongo: tokio::sync::Mutex<Option<Arc<crate::mongo::conn::MongoConn>>>,
     opener: tokio::sync::Mutex<Option<Opener>>,
+    connector: tokio::sync::Mutex<Option<Connector>>,
     /// The SSH connection to the route's last host, for tools that run there (backup, restore).
     ssh: tokio::sync::Mutex<Option<Arc<Connected>>>,
     /// One connection per editor tab, so a transaction in one never touches another (spec section 3).
@@ -700,7 +785,22 @@ pub struct SqlManager {
     /// Files chosen for import, by id: the window only ever holds the id and the name, never the path.
     pub import_files: Mutex<HashMap<String, (String, std::path::PathBuf)>>,
     pub import_pending: crate::dbs::gate::PendingStore<transfer::ImportPlan>,
-    pub restore_pending: crate::dbs::gate::PendingStore<std::path::PathBuf>,
+    /// Bulk import (D17): the files picked per connection (a private folder for unzipped and converted files, and
+    /// the export's manifest when there is one), and the runs held for their confirmation.
+    pub bulk_picked: Mutex<HashMap<String, crate::commands::bulk::BulkPicked>>,
+    pub bulk_pending: crate::dbs::gate::PendingStore<Vec<crate::commands::bulk::BulkHeld>>,
+    /// MongoDB imports held for their confirmation (D17).
+    pub mg_import_pending: crate::dbs::gate::PendingStore<crate::commands::bulk::MgImportJob>,
+    /// Dumps picked for a restore (D12), by id, bound to their connection: the window holds the id, never the path.
+    dumps: Mutex<HashMap<String, (String, Arc<crate::dbs::dumpfile::Dump>)>>,
+    /// Restores held for their confirmation.
+    pub restore_jobs: crate::dbs::gate::PendingStore<restore::Job>,
+    /// Copies held for their confirmation (D13).
+    pub copy_jobs: crate::dbs::gate::PendingStore<copy::CopyJob>,
+    /// Schema syncs held for their confirmation (D16).
+    pub compare_pending: crate::dbs::gate::PendingStore<crate::commands::compare::SyncJob>,
+    /// "Make target match" held for its confirmation (D16).
+    pub data_pending: crate::dbs::gate::PendingStore<crate::commands::compare::DataJob>,
     /// Running exports, backups and restores by id, so Stop can reach them.
     pub transfers: Mutex<HashMap<String, Arc<AtomicBool>>>,
     pub grid_pending: crate::dbs::gate::PendingStore<Vec<grid::GridStatement>>,
@@ -721,14 +821,69 @@ impl SqlManager {
 
     /// Starts connecting and returns the connection's id at once. Everything else arrives through `emit`.
     pub fn open(&self, store: Store, db_id: String, emit: Emit) -> AppResult<String> {
+        self.open_with(store, db_id, emit, Arc::new(Prompts::default()))
+    }
+
+    /// Opens a database with no window to answer questions (a scheduled job, D15): an unknown or changed host key,
+    /// or a password that isn't saved, fails it instead of asking. Returns the connection's id once it is ready.
+    pub async fn open_headless(&self, store: Store, db_id: String) -> AppResult<String> {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let emit: Emit = Arc::new(move |e| {
+            let _ = tx.send(e);
+        });
+        let id = self.open_with(store, db_id, emit, Arc::new(Prompts::non_interactive()))?;
+        let wait = async {
+            let mut said: Option<String> = None;
+            while let Some(e) = rx.recv().await {
+                match e {
+                    DbEvent::Ready { .. } => return Ok(()),
+                    DbEvent::Failed { code, message } => {
+                        return Err(AppError::new(code, said.unwrap_or(message)))
+                    }
+                    DbEvent::Host {
+                        event: SessionEvent::Error { message, .. },
+                    } => said = Some(message),
+                    DbEvent::Closed => break,
+                    _ => {}
+                }
+            }
+            Err(AppError::new(
+                ErrorCode::DbUnreachable,
+                "The connection closed before it was ready.",
+            ))
+        };
+        match tokio::time::timeout(std::time::Duration::from_secs(90), wait).await {
+            Ok(Ok(())) => Ok(id),
+            Ok(Err(e)) => {
+                self.close(&id);
+                Err(e)
+            }
+            Err(_) => {
+                self.close(&id);
+                Err(AppError::new(
+                    ErrorCode::DbUnreachable,
+                    "The database didn't answer within 90 seconds.",
+                ))
+            }
+        }
+    }
+
+    fn open_with(
+        &self,
+        store: Store,
+        db_id: String,
+        emit: Emit,
+        prompts: Arc<Prompts>,
+    ) -> AppResult<String> {
         let conn_id = uuid::Uuid::now_v7().to_string();
         let (cancel, cancel_rx) = watch::channel(false);
         let live = Arc::new(Live {
             db_id: db_id.clone(),
             opener: tokio::sync::Mutex::new(None),
+            connector: tokio::sync::Mutex::new(None),
             ssh: tokio::sync::Mutex::new(None),
             editors: tokio::sync::Mutex::new(HashMap::new()),
-            prompts: Arc::new(Prompts::default()),
+            prompts,
             cancel,
             conn: tokio::sync::Mutex::new(None),
             my: tokio::sync::Mutex::new(None),
@@ -740,6 +895,18 @@ impl SqlManager {
             .insert(conn_id.clone(), Arc::clone(&live));
         tokio::spawn(run(store, db_id, live, emit, cancel_rx));
         Ok(conn_id)
+    }
+
+    /// PostgreSQL: the server's major version (`None` for other engines or when it can't be read).
+    pub async fn server_major(&self, conn_id: &str) -> Option<u32> {
+        let c = self.pg(conn_id).await.ok()?;
+        let v: String = c
+            .client
+            .query_one("show server_version_num", &[])
+            .await
+            .ok()?
+            .get(0);
+        v.parse::<u32>().ok().map(|n| n / 10_000)
     }
 
     pub fn respond(&self, conn_id: &str, prompt_id: &str, answer: PromptAnswer) -> AppResult<()> {
@@ -810,7 +977,7 @@ impl SqlManager {
     pub fn put_file(&self, conn_id: &str, path: std::path::PathBuf) -> String {
         let id = uuid::Uuid::now_v7().to_string();
         if let Ok(mut f) = self.import_files.lock() {
-            if f.len() >= 8 {
+            if f.len() >= 256 {
                 f.clear();
             }
             f.insert(id.clone(), (conn_id.to_string(), path));
@@ -829,6 +996,56 @@ impl SqlManager {
                     .map(|(_, p)| p.clone())
             })
             .ok_or_else(|| AppError::validation("Choose the file again."))
+    }
+
+    /// Keeps a picked dump for this connection (at most four; the oldest goes, with its unpacked folder).
+    pub fn put_dump(&self, conn_id: &str, id: String, dump: crate::dbs::dumpfile::Dump) {
+        if let Ok(mut d) = self.dumps.lock() {
+            while d.len() >= 4 {
+                let oldest = d.keys().min().cloned();
+                if let Some(k) = oldest {
+                    d.remove(&k);
+                }
+            }
+            d.insert(id, (conn_id.to_string(), Arc::new(dump)));
+        }
+    }
+
+    pub fn dump(&self, conn_id: &str, id: &str) -> AppResult<Arc<crate::dbs::dumpfile::Dump>> {
+        self.dumps
+            .lock()
+            .ok()
+            .and_then(|d| {
+                d.get(id)
+                    .filter(|(c, _)| c == conn_id)
+                    .map(|(_, x)| Arc::clone(x))
+            })
+            .ok_or_else(|| AppError::validation("Choose the dump again."))
+    }
+
+    pub fn forget_dump(&self, conn_id: &str, id: &str) {
+        if let Ok(mut d) = self.dumps.lock() {
+            if d.get(id).is_some_and(|(c, _)| c == conn_id) {
+                d.remove(id);
+            }
+        }
+    }
+
+    /// A new connection by this tab's route, to `database` (or the saved one).
+    pub async fn connect_to(&self, conn_id: &str, database: Option<String>) -> AppResult<RawConn> {
+        let c = self
+            .get(conn_id)?
+            .connector
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| {
+                AppError::new(
+                    ErrorCode::DbUnreachable,
+                    "This database isn't connected right now.",
+                )
+            })?;
+        c(database).await
     }
 
     /// The SSH connection of a host route (`None` on a direct route).
@@ -913,10 +1130,21 @@ impl SqlManager {
         self.mongo_pending.drop_conn(conn_id);
         self.session_pending.drop_conn(conn_id);
         self.import_pending.drop_conn(conn_id);
+        self.bulk_pending.drop_conn(conn_id);
+        self.mg_import_pending.drop_conn(conn_id);
+        self.compare_pending.drop_conn(conn_id);
+        self.data_pending.drop_conn(conn_id);
+        if let Ok(mut b) = self.bulk_picked.lock() {
+            b.remove(conn_id);
+        }
         if let Ok(mut f) = self.import_files.lock() {
             f.retain(|_, (c, _)| c != conn_id);
         }
-        self.restore_pending.drop_conn(conn_id);
+        self.restore_jobs.drop_conn(conn_id);
+        self.copy_jobs.drop_conn(conn_id);
+        if let Ok(mut d) = self.dumps.lock() {
+            d.retain(|_, (c, _)| c != conn_id);
+        }
         self.structure_pending.drop_conn(conn_id);
         let live = self.conns.lock().ok().and_then(|mut m| m.remove(conn_id));
         if let Some(live) = live {

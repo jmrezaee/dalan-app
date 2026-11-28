@@ -33,10 +33,27 @@ pub struct TunnelChanged {
     pub error: Option<String>,
 }
 
+/// D15: a scheduled job started or ended (the Jobs list refreshes; a failure puts a dot on Jobs).
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct JobsChanged {
+    pub job_id: String,
+    pub running: bool,
+    pub failed: bool,
+}
+
+/// A file was dropped on the window. Only its name comes here; the path stays in Rust under `id`.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct FileDropped {
+    pub id: String,
+    pub name: String,
+}
+
 /// The window was closed or ⌘Q pressed while sessions are live: the UI asks before quitting.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct QuitRequested {
     pub live_sessions: u32,
+    /// Scheduled jobs running right now: quitting stops them (they run again at the next unlock).
+    pub running_jobs: u32,
 }
 
 /// A link (`dalan-app.exe --open-url ssh://...`) arrived, on a cold start or from a second launch. The UI asks

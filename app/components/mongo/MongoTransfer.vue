@@ -2,9 +2,9 @@
 // S43 for MongoDB: export a collection (one extended JSON document per line), and back up or restore the database
 // with mongodump and mongorestore on the host. Rust writes and reads the files; the window shows progress. A restore
 // is always typed.
-import { Button, buttonVariants } from '@/components/ui/button'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import type { BackupInfo_Serialize as BackupInfo, RestorePending, TransferProgress } from '~/types/bindings'
+import type { MaskKind, BackupInfo_Serialize as BackupInfo, TransferProgress, HostFolder } from '~/types/bindings'
 
 const props = defineProps<{ tabKey: string }>()
 const store = useMongoStore(props.tabKey)
@@ -22,12 +22,14 @@ const pick = ref('')
 watch(colls, (c) => { if (!c.some(x => x.id === pick.value)) pick.value = c.length ? (store.current && c.some(x => x.id === `${store.current!.db}.${store.current!.coll}`) ? `${store.current.db}.${store.current.coll}` : c[0]!.id) : '' }, { immediate: true })
 const target = computed(() => colls.value.find(c => c.id === pick.value) ?? null)
 const exp = reactive({ filter: '', running: false, id: '', rows: 0, done: '', error: '' })
+// Masking (E5): rules for top-level fields, applied in Rust before anything is written.
+const masks = reactive<{ column: string, kind: MaskKind, value: string }[]>([])
 async function doExport() {
   const t = target.value
   if (!t || exp.running) return
   Object.assign(exp, { running: true, id: store.newTransferId(), rows: 0, done: '', error: '' })
   try {
-    const r = await store.exportColl(exp.id, t.db, t.coll, exp.filter, (p: TransferProgress) => { exp.rows = p.rows ?? 0 })
+    const r = await store.exportColl(exp.id, t.db, t.coll, exp.filter, (p: TransferProgress) => { exp.rows = p.rows ?? 0 }, masks.filter(m => m.column.trim()).map(m => ({ column: m.column.trim(), kind: m.kind, value: m.value.trim() || null })))
     exp.done = r ? `Saved ${r.path} · ${fmt(r.rows)} documents · ${mb(r.bytes)}` : ''
   }
   catch (e) { exp.error = message(e, 'The export failed.') }
@@ -35,45 +37,57 @@ async function doExport() {
 }
 
 // ---- Backup and restore
-const bk = reactive({ info: null as BackupInfo | null, running: false, id: '', bytes: 0, done: '', error: '', restoring: null as RestorePending | null, typed: '', kind: '' as '' | 'backup' | 'restore' })
+const bk = reactive({ info: null as BackupInfo | null, running: false, id: '', bytes: 0, done: '', error: '', checked: '', checkOk: true, fileId: '' })
+// D17 (E7): the backup check (restore into a scratch database and count rows).
+const checkOpen = ref(false)
+const restore = useRestoreStore(props.tabKey)
 // Closing the tab ends what it started: nothing keeps running unseen.
 onBeforeUnmount(() => { if (exp.running) void store.stopTransfer(exp.id); if (bk.running) void store.stopTransfer(bk.id) })
-/** What a restore replaces: this database, or (when the saved database names none) everything in the archive. */
-const scope = computed(() => (db.value?.default_database ? `the collections of ${db.value.default_database} (other databases in the archive are skipped)` : 'every database in the archive'))
 onMounted(async () => {
   try { bk.info = await store.backupCheck() }
   catch (e) { bk.error = message(e, 'Couldn\'t check the tool.') }
 })
+// A saved backup job (D14): run into its folder when Jobs asks, or save this backup as one.
+const job = reactive({ naming: false, name: '', saved: '' })
+const hostPick = ref(false)
+watch(() => backupRequests.value.get(props.tabKey), async (id) => {
+  if (!id || bk.running) return
+  backupRequests.value.delete(props.tabKey)
+  Object.assign(bk, { running: true, id: store.newTransferId(), bytes: 0, done: '', error: '' })
+  try {
+    const r = await store.backupJob(id, bk.id, (p: TransferProgress) => { bk.bytes = p.bytes ?? 0 })
+    bk.done = `Saved ${r.path} · ${mb(r.bytes ?? 0)}`
+  }
+  catch (e) { bk.error = message(e, 'The backup failed.') }
+  bk.running = false
+}, { immediate: true })
+/** Saves the backup as a job: into a folder chosen here, or (D15) a folder on a host picked over SFTP. */
+async function saveBackupJob(host: HostFolder | null = null) {
+  bk.error = ''
+  try {
+    const row = await store.saveBackupJob(job.name, host)
+    if (row) {
+      job.saved = `Saved as the job “${row.name}”. Run it from Jobs.`
+      job.naming = false
+      void useJobsStore().refresh()
+    }
+  }
+  catch (e) { bk.error = message(e, 'Couldn\'t save the job.') }
+}
 async function backup() {
   if (bk.running) return
-  Object.assign(bk, { running: true, kind: 'backup', id: store.newTransferId(), bytes: 0, done: '', error: '' })
+  Object.assign(bk, { running: true, id: store.newTransferId(), bytes: 0, done: '', error: '' })
   try {
     const r = await store.backupStart(bk.id, (p: TransferProgress) => { bk.bytes = p.bytes ?? 0 })
     bk.done = r ? `Saved ${r.path} · ${mb(r.bytes ?? 0)}` : ''
+    // D17: every backup is read back at once.
+    bk.checked = r?.check ? (r.check.ok ? `Read back: ${r.check.summary}.` : `It doesn't read back: ${r.check.problem ?? r.check.summary}`) : ''
+    bk.checkOk = r?.check?.ok ?? true
+    bk.fileId = r?.file_id ?? ''
   }
   catch (e) { bk.error = message(e, 'The backup failed.') }
   bk.running = false
 }
-async function startRestore() {
-  bk.error = ''
-  bk.done = ''
-  try { bk.restoring = await store.restorePrepare(); bk.typed = '' }
-  catch (e) { bk.error = message(e, 'Couldn\'t prepare the restore.') }
-}
-async function doRestore() {
-  const r = bk.restoring
-  if (!r) return
-  const typed = bk.typed
-  bk.restoring = null
-  Object.assign(bk, { running: true, kind: 'restore', id: store.newTransferId(), bytes: 0, done: '', error: '' })
-  try {
-    await store.restoreCommit(r.id, typed, bk.id, (p: TransferProgress) => { bk.bytes = p.bytes ?? 0 })
-    bk.done = `Restored ${r.file_name} into ${r.db_name}.`
-  }
-  catch (e) { bk.error = message(e, 'The restore failed.') }
-  bk.running = false
-}
-const restoreOpen = computed({ get: () => bk.restoring !== null, set: (v: boolean) => { if (!v && bk.restoring) { void store.restoreDiscard(bk.restoring.id); bk.restoring = null } } })
 </script>
 
 <template>
@@ -89,6 +103,16 @@ const restoreOpen = computed({ get: () => bk.restoring !== null, set: (v: boolea
         <label class="flex flex-col gap-1 text-xs text-muted">Filter (optional)
           <Input v-model="exp.filter" class="h-8 font-mono text-xs text-text" placeholder="{ &quot;status&quot;: &quot;open&quot; }" autocomplete="off" spellcheck="false" aria-label="Export filter" />
         </label>
+        <details class="text-xs" :data-testid="tid('export-masks')"><summary class="cursor-default text-muted">Mask fields{{ masks.length ? ` · ${masks.length}` : '' }}</summary>
+          <div v-for="(m, i) in masks" :key="i" class="mt-1 flex items-center gap-1">
+            <Input v-model="m.column" class="h-7 w-28 font-mono text-xs" placeholder="field" :aria-label="`Masked field ${i + 1}`" />
+            <MaskKindSelect v-model="m.kind" :label="`Masking for field ${i + 1}`" />
+            <Input v-if="['fixed', 'truncate', 'date_shift'].includes(m.kind)" v-model="m.value" class="h-7 w-20 text-xs" :placeholder="m.kind === 'fixed' ? 'value' : m.kind === 'truncate' ? 'chars' : '± days'" :aria-label="`Value for field ${i + 1}`" />
+            <Button size="sm" variant="ghost" :aria-label="`Remove rule ${i + 1}`" @click="masks.splice(i, 1)">×</Button>
+          </div>
+          <Button size="sm" variant="ghost" class="mt-1" @click="masks.push({ column: '', kind: 'hash', value: '' })">Add a rule</Button>
+          <p class="mt-1 text-muted">Top-level fields. Shuffle isn't available for MongoDB; it leaves the field as it is.</p>
+        </details>
         <p v-if="exp.running" role="status" class="text-xs text-muted" data-part="progress">Writing… {{ fmt(exp.rows) }} documents</p>
         <p v-if="exp.done" role="status" class="text-xs text-success" data-part="done">{{ exp.done }}</p>
         <p v-if="exp.error" role="alert" class="text-xs text-danger" data-part="error">{{ exp.error }}</p>
@@ -103,23 +127,24 @@ const restoreOpen = computed({ get: () => bk.restoring !== null, set: (v: boolea
           <dt class="text-muted">Format</dt><dd>Archive, compressed (restorable with mongorestore)</dd>
         </dl>
         <p v-if="bk.info?.problem" role="alert" class="text-xs text-danger" data-part="problem">{{ bk.info.problem }}</p>
-        <p v-if="bk.running" role="status" class="text-xs text-muted" data-part="progress">{{ bk.kind === 'restore' ? 'Restoring' : 'Dumping' }}… {{ mb(bk.bytes) }} {{ bk.kind === 'restore' ? 'sent' : 'copied to this computer as it goes' }}</p>
+        <p v-if="bk.running" role="status" class="text-xs text-muted" data-part="progress">Dumping… {{ mb(bk.bytes) }} copied to this computer as it goes</p>
         <p v-if="bk.done" role="status" class="text-xs text-success" data-part="done">{{ bk.done }}</p>
+        <p v-if="bk.checked" :role="bk.checkOk ? 'status' : 'alert'" :class="['text-xs', bk.checkOk ? 'text-muted' : 'text-danger']" data-part="read-check">{{ bk.checked }}</p>
+        <BackupCheckDialog v-model:open="checkOpen" :tab-key="tabKey" :file-id="bk.fileId" />
         <p v-if="bk.error" role="alert" class="text-xs text-danger" data-part="error">{{ bk.error }}</p>
-        <p class="text-xs text-muted">Restore works the other way (mongorestore) and always asks for the database's name first. It replaces the collections the archive holds.</p>
-        <div class="mt-auto flex justify-end gap-2"><Button v-if="bk.running" variant="secondary" @click="store.stopTransfer(bk.id)">Stop</Button><Button variant="secondary" :disabled="bk.running || !!bk.info?.problem" :data-testid="tid('mongo-restore')" @click="startRestore">Restore from file…</Button><Button :disabled="bk.running || !!bk.info?.problem" :data-testid="tid('mongo-backup')" @click="backup">Back up…</Button></div>
+        <p class="text-xs text-muted">Restore takes any mongodump archive or folder, from Dalan or made elsewhere, into this database or a new one. You see what is inside before anything runs.</p>
+                <div v-if="job.naming" class="flex items-center gap-2"><Input v-model="job.name" class="h-7 text-xs" placeholder="Nightly backup" aria-label="Job name" /><Button size="sm" :disabled="!job.name.trim()" :data-testid="tid('backup-save-job')" @click="saveBackupJob()">Choose folder and save</Button><Button size="sm" variant="secondary" :disabled="!job.name.trim()" :data-testid="tid('backup-save-job-host')" @click="hostPick = true">On a host…</Button></div>
+        <HostFolderPicker v-model:open="hostPick" mode="folder" title="Folder for the backups" :on-pick="(p) => saveBackupJob({ host_id: p.hostId, dir: p.path })" />
+        <p v-if="job.saved" role="status" class="text-xs text-success">{{ job.saved }}</p>
+<div class="mt-auto flex flex-wrap justify-end gap-2"><Button v-if="bk.running" variant="secondary" @click="store.stopTransfer(bk.id)">Stop</Button><Button variant="ghost" :disabled="bk.running || !!bk.info?.problem" @click="job.naming = !job.naming">Save as a job…</Button><Button variant="ghost" :disabled="bk.running" :data-testid="tid('backup-check')" @click="checkOpen = true">Check a backup…</Button><Button variant="secondary" :disabled="bk.running" :data-testid="tid('mongo-restore')" @click="restore.start(store.connId, db?.environment === 'production')">Restore…</Button><Button :disabled="bk.running || !!bk.info?.problem" :data-testid="tid('mongo-backup')" @click="backup">Back up…</Button></div>
       </section>
     </div>
+    <!-- D17 (E6): many collections at once, and MongoDB import. -->
+    <div class="mt-4 grid max-w-[980px] grid-cols-1 gap-4 lg:grid-cols-2">
+      <BulkExportPanel :tab-key="tabKey" :conn-id="store.connId" :objects="colls.map(c => ({ schema: c.db, name: c.coll }))" :mongo="true" />
+      <MongoImportPanel :tab-key="tabKey" :conn-id="store.connId" :dbs="store.dbs.map(d => d.name)" />
+    </div>
 
-    <AlertDialog v-model:open="restoreOpen">
-      <AlertDialogContent v-if="bk.restoring" class="gap-3 border-danger sm:max-w-[520px]" :data-testid="tid('restore-confirm')">
-        <AlertDialogHeader>
-          <AlertDialogTitle>Restore {{ bk.restoring.file_name }} into {{ bk.restoring.db_name }}?</AlertDialogTitle>
-          <AlertDialogDescription>This replaces {{ scope }} on <b>{{ bk.restoring.db_name }}</b> ({{ bk.restoring.environment === 'none' ? 'no environment set' : bk.restoring.environment }}) with the archive's. {{ mb(bk.restoring.file_bytes) }} are sent to {{ bk.restoring.runs_on }}.</AlertDialogDescription>
-        </AlertDialogHeader>
-        <label class="flex flex-col gap-1 text-xs text-muted">Type {{ bk.restoring.db_name }} to confirm<Input v-model="bk.typed" class="font-mono text-xs text-text" autocomplete="off" spellcheck="false" :data-testid="tid('mongo-restore-typed')" /></label>
-        <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><Button :class="buttonVariants({ variant: 'destructive' })" :disabled="bk.typed !== bk.restoring.db_name" :data-testid="tid('mongo-restore-confirm')" @click="doRestore">Restore</Button></AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <RestoreDialog v-if="db" :tab-key="tabKey" :db-name="db.name" :database="db.default_database" :environment="db.environment" :engine="db.engine" />
   </div>
 </template>

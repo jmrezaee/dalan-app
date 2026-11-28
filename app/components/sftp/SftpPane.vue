@@ -8,6 +8,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/component
 import { formatBytes } from '~/utils/format'
 import { isRemote, parentPath } from '~/stores/sftp'
 import { toast } from 'vue-sonner'
+import { vDrop } from '~/utils/pointerDrag'
 
 const { fixed: shortcutFixed } = useShortcutLabel()
 
@@ -144,10 +145,8 @@ const fileMenu = computed<MenuItem[]>(() => {
     <ContextMenu v-else>
       <ContextMenuTrigger as-child>
         <div
+          v-drop="{ kind: 'sftp-files', accepts: () => !!sftp.dragging && sftp.dragging.pane !== index, over: () => { overDrop = true }, leave: () => { overDrop = false }, drop: () => { overDrop = false; sftp.dropOn(index) } }"
           class="relative flex min-h-0 flex-1 flex-col"
-          @dragover="sftp.dragging && sftp.dragging.pane !== index && ($event.preventDefault(), overDrop = true)"
-          @dragleave="overDrop = false"
-          @drop.prevent="overDrop = false; sftp.dropOn(index)"
         >
           <p v-if="pane.loading" class="absolute right-3 top-2 z-10 text-xs text-muted">Loading…</p>
           <FileTable

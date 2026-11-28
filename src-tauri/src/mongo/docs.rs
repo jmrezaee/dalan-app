@@ -116,11 +116,14 @@ pub fn mg_doc(d: &Document) -> MgDoc {
 
 /// Streams the documents of a collection that match `filter` to `out`, one compact canonical extended JSON document
 /// per line (what `mongoimport` reads), and returns how many were written. Stops (with `Ok`) when `stop` is set.
+/// `masks` (E5) are applied to the named top-level fields before anything is written, with a new key per export.
+#[allow(clippy::too_many_arguments)]
 pub async fn export(
     c: &MongoConn,
     db: &str,
     coll: &str,
     filter: &str,
+    masks: &[crate::dbs::masking::MaskRule],
     out: &mut (dyn std::io::Write + Send),
     stop: &std::sync::atomic::AtomicBool,
     progress: &(dyn Fn(f64, f64) + Sync),
@@ -132,6 +135,8 @@ pub async fn export(
         .command(db, doc! { "find": coll, "filter": f, "batchSize": 1000 })
         .await?;
     let (mut rows, mut bytes) = (0f64, 0f64);
+    let fields: Vec<String> = masks.iter().map(|m| m.column.clone()).collect();
+    let mask = crate::dbs::masking::Masker::new(crate::dbs::masking::new_key(), masks, &fields);
     loop {
         let cur = r.get_document("cursor").map_err(|_| {
             AppError::new(
@@ -144,7 +149,11 @@ pub async fn export(
         } else {
             "nextBatch"
         };
-        for d in names(cur, batch) {
+        let mut docs = names(cur, batch);
+        if let Some(m) = &mask {
+            m.documents(&mut docs);
+        }
+        for d in docs {
             let line = Bson::Document(d).into_canonical_extjson().to_string();
             out.write_all(line.as_bytes()).map_err(io)?;
             out.write_all(b"\n").map_err(io)?;
@@ -888,6 +897,7 @@ mod export_tests {
             "d10x",
             "e",
             "",
+            &[],
             &mut out,
             &AtomicBool::new(false),
             &|_, _| {},
@@ -907,6 +917,7 @@ mod export_tests {
                 "d10x",
                 "e",
                 r#"{"_id":{"$lt":10}}"#,
+                &[],
                 &mut out,
                 &AtomicBool::new(false),
                 &|_, _| {}
@@ -920,12 +931,38 @@ mod export_tests {
             "d10x",
             "e",
             "{bad",
+            &[],
             &mut vec![],
             &AtomicBool::new(false),
             &|_, _| {}
         )
         .await
         .is_err());
+        // Masked (E5): the names are made up and the ids untouched.
+        let mut out: Vec<u8> = vec![];
+        let rule = crate::dbs::masking::MaskRule {
+            column: "name".into(),
+            kind: crate::dbs::masking::MaskKind::FakeName,
+            value: None,
+        };
+        export(
+            &c,
+            "d10x",
+            "e",
+            r#"{"_id":{"$lt":50}}"#,
+            &[rule],
+            &mut out,
+            &AtomicBool::new(false),
+            &|_, _| {},
+        )
+        .await
+        .unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(text.lines().count(), 50);
+        assert!(!text.contains("né "), "{text}");
+        let first = parse_doc(text.lines().next().unwrap(), "t").unwrap();
+        assert_eq!(first.get_i32("_id").unwrap(), 0);
+        assert!(first.get_str("name").unwrap().contains(' '));
         let _ = c.command("d10x", doc! { "drop": "e" }).await;
     }
 }

@@ -20,7 +20,7 @@ Xvfb :99 -screen 0 1280x800x24 -nolisten tcp &
 sleep 2
 ffmpeg -loglevel error -y -f x11grab -video_size 1280x800 -framerate 10 -i :99 -pix_fmt yuv420p "$OUT/run.mp4" &
 FFMPEG=$!
-export XDG_DATA_HOME=/tmp/dalan-xdg WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 DALAN_BIN=/work/src-tauri/target/debug/dalan-app
+export DALAN_TEST_PICKS=/tmp/dalan-picks XDG_DATA_HOME=/tmp/dalan-xdg WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 DALAN_BIN=/work/src-tauri/target/debug/dalan-app
 
 echo "== running the tests"
 set +e
